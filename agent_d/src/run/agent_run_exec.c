@@ -47,7 +47,10 @@ typedef struct {
     const char *session_id;
     const agent_run_event_sink_t *sink;
     int rounds;                 /* 请求轮次预算（<=0 由策略缺省） */
-    const char *resume_token;   /* 续跑令牌（可 NULL） */
+    const char *resume_token;   /* 入参续跑令牌（借用，可 NULL） */
+    char *resume_out;           /* 本轮生成的续跑令牌（自持有，可 NULL） */
+    int rounds_used;
+    int rounds_limit;
 
     char sess[AGENT_RUN_SESSION_ID_LEN];
     agent_run_session_t *active;
@@ -81,6 +84,7 @@ static void run_free(run_ctx_t *c)
         cJSON_Delete(c->spec_owned);
     AIRY_FREE(c->text);
     AIRY_FREE(c->reason);
+    AIRY_FREE(c->resume_out);
     AIRY_MEMSET(c, 0, sizeof(*c));
 }
 
@@ -303,6 +307,9 @@ static void run_loop(run_ctx_t *c, const cJSON *history)
     c->trace = lr.trace;
     c->text = lr.text;
     c->reason = lr.reason;
+    c->resume_out = lr.resume_token;
+    c->rounds_used = lr.rounds_used;
+    c->rounds_limit = lr.rounds_limit;
     c->tokens = lr.tokens;
     c->cost = lr.cost;
 }
@@ -463,7 +470,9 @@ static void run_think(run_ctx_t *c)
     const cJSON *plan = cJSON_GetObjectItem(c->think, "plan");
     if (plan)
         run_plan(c, plan);
-    if (c->rc < 0)
+    /* 预算耗尽已是终态（trace/正文完整移交），不得当作「计划段未执行」
+     * 再降级重跑一遍——那会把已消耗的轮次与产物整体作废。 */
+    if (c->rc < 0 && c->rc != AIRY_EBUDGET)
         run_loop(c, c->history);
 }
 
@@ -534,6 +543,19 @@ static cJSON *run_fill(run_ctx_t *c)
     }
     cJSON_AddStringToObject(result, "session_id", c->sess);
     cJSON_AddStringToObject(result, "response", c->text ? c->text : "");
+    /* 一等终态（C-14）：status 是客户端渲染「继续/放弃」的唯一判据，
+     * error_code 保留原始码供排障；Paused 时 resume_token 随结果下发，
+     * 客户端凭它续跑而不必重发全量历史。 */
+    cJSON_AddStringToObject(result, "status", run_state_name(c->rc, c->cancelled));
+    if (c->rc != 0)
+        cJSON_AddNumberToObject(result, "error_code", c->rc);
+    cJSON_AddNumberToObject(result, AIRY_RS_K_ROUNDS_USED, c->rounds_used);
+    cJSON_AddNumberToObject(result, AIRY_RS_K_ROUNDS_LIMIT, c->rounds_limit);
+    if (c->resume_out) {
+        cJSON_AddStringToObject(result, AIRY_RS_K_RESUME_TOKEN, c->resume_out);
+        AIRY_FREE(c->resume_out);
+        c->resume_out = NULL;
+    }
     cJSON_AddNumberToObject(result, "tokens_used", (double)c->tokens);
     cJSON_AddNumberToObject(result, "cost_usd", c->cost);
     /* 思考链不再随 result 直出：仅经 message 帧 reasoning 字段按需（Alt+E）下发。 */
@@ -568,6 +590,11 @@ static void run_tail(run_ctx_t *c, const cJSON *res)
     if (!c->sink || !c->sink->emit)
         return;
 
+    /* 续跑令牌已在 run_fill 移交 result，终态帧从那里取同一份文本：
+     * run_end 与 error 都必须带，客户端才知道暂停后凭何继续。 */
+    const cJSON *rt = res ? cJSON_GetObjectItem(res, AIRY_RS_K_RESUME_TOKEN) : NULL;
+    const bool resumable = cJSON_IsString(rt) && rt->valuestring && rt->valuestring[0];
+
     if (c->rc == 0 && !c->gccp_round && c->text) {
         cJSON *msg = cJSON_CreateObject();
         if (msg) {
@@ -590,6 +617,10 @@ static void run_tail(run_ctx_t *c, const cJSON *res)
         cJSON_AddNumberToObject(end, AIRY_RS_K_LLM_MS, (double)c->llm_ms);
         cJSON_AddNumberToObject(end, AIRY_RS_K_TOOL_MS, (double)c->tool_ms);
         cJSON_AddNumberToObject(end, AIRY_RS_K_USE_TICKS, (double)c->tokens);
+        cJSON_AddNumberToObject(end, AIRY_RS_K_ROUNDS_USED, c->rounds_used);
+        cJSON_AddNumberToObject(end, AIRY_RS_K_ROUNDS_LIMIT, c->rounds_limit);
+        if (resumable)
+            cJSON_AddStringToObject(end, AIRY_RS_K_RESUME_TOKEN, rt->valuestring);
         const cJSON *tr = res ? cJSON_GetObjectItem(res, AIRY_RS_K_TOOL_TRACE) : NULL;
         if (cJSON_IsArray(tr) && cJSON_GetArraySize(tr) > 0)
             cJSON_AddItemToObject(end, AIRY_RS_K_TOOL_TRACE, cJSON_Duplicate(tr, 1));
@@ -600,9 +631,14 @@ static void run_tail(run_ctx_t *c, const cJSON *res)
         cJSON *err = cJSON_CreateObject();
         if (err) {
             cJSON_AddNumberToObject(err, AIRY_RS_K_CODE, -32603);
+            cJSON_AddNumberToObject(err, AIRY_RS_K_ERROR_CODE, c->rc);
             cJSON_AddStringToObject(err, AIRY_RS_K_MSG,
                                     (c->text && c->text[0]) ? c->text : run_rc_msg(c->rc));
             cJSON_AddBoolToObject(err, AIRY_RS_K_RECOVER, 1);
+            cJSON_AddNumberToObject(err, AIRY_RS_K_ROUNDS_USED, c->rounds_used);
+            cJSON_AddNumberToObject(err, AIRY_RS_K_ROUNDS_LIMIT, c->rounds_limit);
+            if (resumable)
+                cJSON_AddStringToObject(err, AIRY_RS_K_RESUME_TOKEN, rt->valuestring);
             agent_run_emit_event(c->sink, &c->seq, c->run_id, c->sess, AIRY_RS_TYPE_ERROR, err);
         }
     }
