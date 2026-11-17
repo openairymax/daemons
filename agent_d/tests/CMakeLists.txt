@@ -48,6 +48,7 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_engine.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_ledger.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_stream.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_exec.c
         )
     endif()
 
