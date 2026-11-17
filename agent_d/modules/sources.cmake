@@ -16,5 +16,6 @@ set(AGENT_D_SOURCES
     src/run/agent_run_ledger.c
     src/run/agent_run_loop.c
     src/run/agent_run_stream.c
+    src/run/agent_task_ledger.c
     src/run/agent_task_orchestrate.c
 )
