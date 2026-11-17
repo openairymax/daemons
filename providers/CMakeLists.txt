@@ -51,6 +51,8 @@ set(AIRY_TRANSPORT_SOURCES
     src/core/prov_stat.c
     # 调用侧熔断记账与快速失败闸（B-4 / C-3）
     src/core/prov_breaker.c
+    # 部署位阶判定（B-4：GPU → CPU → 远端降级阶梯）
+    src/core/prov_degrade.c
     # 线格式适配（chat / messages / local + 装配表 SSoT）
     src/adapters/chat.c
     src/adapters/messages.c

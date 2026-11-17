@@ -32,6 +32,7 @@
 
 #include "airy_prov/ep_health.h"
 #include "airy_prov/provider_http.h"
+#include "airy_prov/prov_degrade.h"
 
 #include <cjson/cJSON.h>
 #include <string.h>
@@ -59,6 +60,8 @@ typedef struct {
     int cold;
     char cold_model[64];
     double cold_ms;
+    /* B-4 部署位阶快照：gpu 或 degraded:<原因>，创建期一次算定，运行期不变。 */
+    char deg[32];
 } ep_rec_t;
 
 /* 探测快照：只携带出网所需字段，逐端点拷出后在锁外使用。 */
@@ -83,29 +86,15 @@ struct ep_health {
 /* filter 是探测范围策略键（svc.c 注入）："local" = 端点 api_base 指向本机
  * loopback。位置是客观网络事实，不耦合 provider 用户命名（如
  * "local-llamacpp"）——对命名规律做前缀猜测属策略混入机制。空 = 全部；
- * 未知键 fail-safe 判不命中（宁可不探，不意外出网）。 */
-static int ep_host_is_local(const char *host)
-{
-    static const char *const kLocal[] = {"127.0.0.1", "localhost", "[::1]"};
-    for (size_t i = 0; i < sizeof(kLocal) / sizeof(kLocal[0]); ++i) {
-        size_t n = strlen(kLocal[i]);
-        if (strncmp(host, kLocal[i], n) != 0)
-            continue;
-        char c = host[n];
-        if (c == '\0' || c == ':' || c == '/' || c == '?')
-            return 1;
-    }
-    return 0;
-}
-
+ * 未知键 fail-safe 判不命中（宁可不探，不意外出网）。本机判据与降级阶梯
+ * 共用 prov_host_local（单一 SSoT）。 */
 static int ep_probe_wanted(const char *filter, const char *api_base)
 {
     if (filter[0] == '\0')
         return 1;
-    if (strcmp(filter, "local") != 0 || !api_base)
+    if (strcmp(filter, "local") != 0)
         return 0;
-    const char *host = strstr(api_base, "://");
-    return ep_host_is_local(host ? host + 3 : api_base);
+    return prov_host_local(api_base);
 }
 
 static int ep_snap_cb(const provider_t *prov, void *ud)
@@ -125,6 +114,7 @@ static int ep_snap_cb(const provider_t *prov, void *ud)
 
     ep_rec_t *rec = &h->recs[h->count];
     AIRY_STRNCPY_TERM(rec->provider, prov->name, sizeof(rec->provider));
+    AIRY_STRNCPY_TERM(rec->deg, prov_deg_text(prov_deg_rank(prov)), sizeof(rec->deg));
 
     if (base)
         rec->ctx = *base;
@@ -447,6 +437,8 @@ char *ep_health_json(ep_health_t *h)
         cJSON_AddNumberToObject(obj, "http_code", (double)rec->http_code);
         cJSON_AddNumberToObject(obj, "latency_ms", rec->latency_ms);
         cJSON_AddNumberToObject(obj, "deep", (double)rec->deep);
+        /* 部署位阶与存活判据分离：可达 (status=ok) 不等于未降级。 */
+        cJSON_AddStringToObject(obj, "deploy", rec->deg);
         cJSON_AddNumberToObject(obj, "cold", rec->cold ? 1 : 0);
         if (rec->cold) {
             cJSON_AddStringToObject(obj, "cold_model", rec->cold_model);
