@@ -78,6 +78,7 @@ static void env_clear(void)
     unsetenv("AIRYRT_SUP_LIVENESS_TICKS");
     unsetenv("AIRYRT_SUP_ADMIT_RETRY_MS");
     unsetenv("AIRYRT_ADMIT_CMD");
+    unsetenv("AIRY_SUPERVISOR_NO_RESPAWN");
 }
 
 /* 控制口客户端子进程：连接 g_ep，发单行请求，按断言词判定退出码 */
@@ -640,6 +641,132 @@ static int t_health_kill(void)
     TEST_OK();
 }
 
+/* A-9：TERM 单个 CORE 守护 → 退避到期即重建（sup_next_wake_ms 提前唤醒，
+ * 不等整拍）。判据：新 PID 出现且与旧 PID 不同，耗时 < 2s（远小于 10s 门限）。 */
+static int t_respawn(void)
+{
+    env_clear();
+    if (mk_tmpdir() != 0)
+        TEST_FAIL("mkdir tmp");
+    char logs[192];
+    snprintf(logs, sizeof(logs), "%s/logs", g_dir);
+    if (mkdir(logs, 0755) != 0 && errno != EEXIST)
+        TEST_FAIL("mkdir logs");
+    setenv("AIRYRT_ADMIT_CMD", "/nonexistent/airy-rt-cap", 1);
+
+    sup_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.count = 1;
+    ctx.tick_ms = 3000;
+    ctx.backoff_base_ms = 100;
+    ctx.backoff_max_ms = 1000;
+    ctx.max_attempts = 5;
+    snprintf(ctx.log_dir, sizeof(ctx.log_dir), "%s", logs);
+    sup_proc_t *p = &ctx.procs[0];
+    p->pid = SUP_PID_INVALID;
+    snprintf(p->name, sizeof(p->name), "%s", "think_d");
+    snprintf(p->bin, sizeof(p->bin), "%s", "/bin/sleep");
+    snprintf(p->args, sizeof(p->args), "%s", "30");
+    p->role = SUP_ROLE_CORE;
+
+    TEST_ASSERT(sup_activate(&ctx, "think_d") == 0, "activate");
+    pid_t first = p->pid;
+    TEST_ASSERT(first != SUP_PID_INVALID, "not spawned");
+    TEST_ASSERT(sup_next_wake_ms(&ctx) == ctx.tick_ms, "idle wake != tick");
+
+    kill(first, SIGTERM);
+    long long t0 = sup_now_ms();
+    pid_t second = SUP_PID_INVALID;
+    for (int i = 0; i < 300; i++) {
+        sup_reconcile(&ctx);
+        if (p->pid != SUP_PID_INVALID && p->pid != first) {
+            second = p->pid;
+            break;
+        }
+        usleep(20000);
+    }
+    long long dt = sup_now_ms() - t0;
+    TEST_ASSERT(second != SUP_PID_INVALID, "respawn timeout");
+    TEST_ASSERT(second != first, "pid must change");
+    TEST_ASSERT(dt < 2000, "respawn slower than 2s");
+    TEST_ASSERT(strstr(p->last_death, "signal=15") != NULL, "death cause kept");
+
+    kill(second, SIGKILL);
+    for (int i = 0; i < 300 && p->pid != SUP_PID_INVALID; i++) {
+        sup_proc_reap(&ctx);
+        usleep(10000);
+    }
+    rmdir(logs);
+    env_clear();
+    rm_tmpdir();
+    TEST_OK();
+}
+
+/* A-9 回退开关：AIRY_SUPERVISOR_NO_RESPAWN=1 时 CORE 死亡转 FAILED、
+ * 不自动重建；死因保留，显式 activate 仍可人工复活。 */
+static int t_no_respawn(void)
+{
+    env_clear();
+    if (mk_tmpdir() != 0)
+        TEST_FAIL("mkdir tmp");
+    char cfg[192], pf[224], logs[192];
+    snprintf(cfg, sizeof(cfg), "%s/config", g_dir);
+    if (mkdir(cfg, 0755) != 0 && errno != EEXIST)
+        TEST_FAIL("mkdir config");
+    snprintf(pf, sizeof(pf), "%s/profile.env", cfg);
+    FILE *f = fopen(pf, "w");
+    if (!f)
+        TEST_FAIL("open profile.env");
+    fputs("AIRYRT_LAUNCH_CORE=think_d\n", f);
+    fclose(f);
+    snprintf(logs, sizeof(logs), "%s/logs", g_dir);
+    if (mkdir(logs, 0755) != 0 && errno != EEXIST)
+        TEST_FAIL("mkdir logs");
+
+    setenv("AIRY_HOME", g_dir, 1);
+    setenv("AIRY_SUPERVISOR_NO_RESPAWN", "1", 1);
+    setenv("AIRYRT_ADMIT_CMD", "/nonexistent/airy-rt-cap", 1);
+
+    sup_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    TEST_ASSERT(sup_decl_load(&ctx) == 0, "load");
+    TEST_ASSERT(ctx.no_respawn == 1, "env not parsed");
+    ctx.tick_ms = 100;
+    ctx.backoff_base_ms = 100;
+    ctx.log_dir[0] = '\0';
+    snprintf(ctx.log_dir, sizeof(ctx.log_dir), "%s", logs);
+    sup_proc_t *p = &ctx.procs[0];
+    p->pid = SUP_PID_INVALID;
+    snprintf(p->bin, sizeof(p->bin), "%s", "/bin/sleep");
+    snprintf(p->args, sizeof(p->args), "%s", "30");
+
+    TEST_ASSERT(sup_activate(&ctx, "think_d") == 0, "activate");
+    pid_t first = p->pid;
+    TEST_ASSERT(first != SUP_PID_INVALID, "not spawned");
+    kill(first, SIGTERM);
+    for (int i = 0; i < 50; i++) {
+        sup_reconcile(&ctx);
+        usleep(20000);
+    }
+    TEST_ASSERT(p->pid == SUP_PID_INVALID, "must not respawn");
+    TEST_ASSERT(p->state == SUP_ST_FAILED, "state must be FAILED");
+    TEST_ASSERT(strstr(p->last_death, "signal=15") != NULL, "death cause kept");
+
+    unsetenv("AIRY_SUPERVISOR_NO_RESPAWN");
+    TEST_ASSERT(sup_activate(&ctx, "think_d") == 0, "manual revive");
+    pid_t again = p->pid;
+    TEST_ASSERT(again != SUP_PID_INVALID && again != first, "revive pid");
+    kill(again, SIGKILL);
+    for (int i = 0; i < 300 && p->pid != SUP_PID_INVALID; i++) {
+        sup_proc_reap(&ctx);
+        usleep(10000);
+    }
+    rmdir(logs);
+    env_clear();
+    rm_tmpdir();
+    TEST_OK();
+}
+
 static int t_ctrl_stale(void)
 {
     if (mk_tmpdir() != 0)
@@ -868,6 +995,10 @@ int main(void)
     pass += t_health_probe_ok() == 0;
     run++;
     pass += t_health_kill() == 0;
+    run++;
+    pass += t_respawn() == 0;
+    run++;
+    pass += t_no_respawn() == 0;
     run++;
     pass += t_ctrl_stale() == 0;
     run++;
