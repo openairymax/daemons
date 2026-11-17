@@ -170,7 +170,9 @@ static int deg_rank_of(const deg_tbl_t *t, const char *name)
     return (int)PROV_DEG_NONE;
 }
 
-/* 端点登记闭包：注册表遍历期持锁，回调只拷名字，不持有 provider 指针。 */
+/* 端点登记闭包：注册表遍历期持锁，回调只拷名字与能力位，不持有 provider
+ * 指针。C-1：context_window 取 provider 能力位（由模型 context_window /
+ * max_context 声明派生）而非 8192 硬编码，使声明容量真正进入选路。 */
 typedef struct {
     const pricing_rule_t *rules;
     int rule_count;
@@ -178,9 +180,9 @@ typedef struct {
     const deg_tbl_t *deg;
 } router_reg_t;
 
-static int register_endpoint_cb(const char *provider_name, const char *model_name, void *user_data)
+static void register_one_endpoint(router_reg_t *reg, const char *provider_name,
+                                  const char *model_name, uint32_t context_window)
 {
-    router_reg_t *reg = (router_reg_t *)user_data;
     llm_endpoint_t ep;
     __builtin_memset(&ep, 0, sizeof(ep));
     snprintf(ep.provider_name, sizeof(ep.provider_name), "%s", provider_name);
@@ -189,7 +191,7 @@ static int register_endpoint_cb(const char *provider_name, const char *model_nam
     /* 位阶即优先级：GPU(0) > CPU(-1) > 远端(-2) > 未知(-3)。策略层未显式
      * 指定顺序时的默认阶梯，配置显式优先级可在 router 侧覆盖。 */
     ep.priority = -deg_rank_of(reg->deg, provider_name);
-    ep.context_window = 8192;
+    ep.context_window = (context_window > 0) ? (int)context_window : 8192;
     ep.avg_latency_ms = 1000;
     ep.capabilities = LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING;
     cost_tracker_price(reg->rules, reg->rule_count, model_name, &ep.cost_per_1k_input,
@@ -200,6 +202,19 @@ static int register_endpoint_cb(const char *provider_name, const char *model_nam
     } else {
         SVC_LOG_WARN("C-L02: SVC: router endpoint register FAILED for %s/%s (rc=%d)", provider_name,
                      model_name, rc);
+    }
+}
+
+static int register_endpoint_cb(const provider_t *prov, void *user_data)
+{
+    router_reg_t *reg = (router_reg_t *)user_data;
+    if (!prov || !prov->name || !prov->models)
+        return 0;
+    uint32_t cap = (prov->hw.declared && prov->hw.max_context > 0) ? prov->hw.max_context : 0u;
+    for (char **m = prov->models; *m; ++m) {
+        if (!**m)
+            continue;
+        register_one_endpoint(reg, prov->name, *m, cap);
     }
     return 0;
 }
@@ -213,7 +228,7 @@ void register_router_endpoints(llm_service_t *svc)
     __builtin_memset(&deg, 0, sizeof(deg));
     provider_reg_walk(s->registry, deg_snap_cb, &deg);
     router_reg_t reg = {(const pricing_rule_t *)s->rules, (int)s->rule_count, 0, &deg};
-    provider_registry_enumerate(s->registry, register_endpoint_cb, &reg);
+    provider_reg_walk(s->registry, register_endpoint_cb, &reg);
     SVC_LOG_INFO("C-L02: SVC: registered %d endpoints into llm_router", reg.registered);
 }
 
