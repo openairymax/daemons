@@ -110,14 +110,40 @@ static void shell_spawn(void *ctx)
  * @param sandbox       When non-NULL, apply the OS-level sandbox before exec in
  *                      the child (Landlock/seccomp/rlimit, affecting only the
  *                      command process and its descendants, not tool_d itself)
+ * @param strict        C-24 POSIX strict semantics: prepend `set -e` and
+ *                      `set -o pipefail` so a failing command aborts the
+ *                      script and any failing pipeline stage surfaces in the
+ *                      exit code. Pass 0 to restore plain `sh -c` semantics
+ *                      (per-tool `shell_strict=0`). Ignored on Windows,
+ *                      whose cmd.exe has no equivalent (exit code is still
+ *                      propagated unchanged).
  * @return 0 on success, non-zero on failure (fork/pipe/OOM)
  */
 int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_code,
-                      uint32_t timeout_ms, int *out_truncated, const os_sandbox_cfg_t *sandbox)
+                      uint32_t timeout_ms, int *out_truncated, const os_sandbox_cfg_t *sandbox,
+                      int strict)
 {
-    shell_ctx_t c = {cmd, cwd, sandbox};
-    return builtin_proc_capture(shell_spawn, &c, NULL, 0, timeout_ms, out, exit_code,
-                                out_truncated);
+    /* 注入前缀用独立行，避免与用户命令的分号/换行语义纠缠：
+     * - set -e：首个失败命令即终止，sh 不再继续执行后续命令并把最后一条
+     *   的 0 当成功；
+     * - pipefail：管道中任一环失败都反映到退出码，否则 `false | true` 为 0。
+     * 两者都是 POSIX sh 的标准语义，不依赖 bash。 */
+    char *wrapped = NULL;
+    const char *cmd_use = cmd;
+    if (strict) {
+        static const char k_strict[] = "set -e\nset -o pipefail\n";
+        size_t need = sizeof(k_strict) - 1 + strlen(cmd) + 1;
+        wrapped = (char *)AIRY_MALLOC(need);
+        if (!wrapped)
+            return -1;
+        snprintf(wrapped, need, "%s%s", k_strict, cmd);
+        cmd_use = wrapped;
+    }
+    shell_ctx_t c = {cmd_use, cwd, sandbox};
+    int rc = builtin_proc_capture(shell_spawn, &c, NULL, 0, timeout_ms, out, exit_code,
+                                  out_truncated);
+    AIRY_FREE(wrapped);
+    return rc;
 }
 
 #else /* _WIN32 */
@@ -226,9 +252,12 @@ static void sh_out(sh_win_t *w, int timed_out, int proc_exit, char **out, int *e
  * os_sandbox_cfg_t is ignored (mode is always OFF).
  */
 int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_code,
-                      uint32_t timeout_ms, int *out_truncated, const os_sandbox_cfg_t *sandbox)
+                      uint32_t timeout_ms, int *out_truncated, const os_sandbox_cfg_t *sandbox,
+                      int strict)
 {
     (void)sandbox; /* Windows has no OS-level sandbox (mode is always OFF) */
+    (void)strict;  /* cmd.exe has no set -e / pipefail equivalent; exit code is propagated
+                    * unchanged, and per-tool shell_strict=0 is a no-op here. */
     *out = NULL;
     *exit_code = -1;
     if (out_truncated)
@@ -299,6 +328,25 @@ int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_co
 }
 #endif /* _WIN32 */
 
+/* C-24 严格语义开关：接受 bool / number / 字符串 "0"/"false"/"off"/"no"，
+ * 缺省为 1（默认严格）。未知取值一律按严格处理，避免拼错参数时静默放宽
+ * 失败传播语义。 */
+static int strict_opt(cJSON *root)
+{
+    cJSON *v = cJSON_GetObjectItem(root, "shell_strict");
+    if (cJSON_IsBool(v))
+        return cJSON_IsTrue(v) ? 1 : 0;
+    if (cJSON_IsNumber(v))
+        return v->valueint != 0;
+    if (cJSON_IsString(v) && v->valuestring) {
+        const char *s = v->valuestring;
+        if (strcmp(s, "0") == 0 || strcmp(s, "false") == 0 || strcmp(s, "off") == 0 ||
+            strcmp(s, "no") == 0)
+            return 0;
+    }
+    return 1;
+}
+
 int shell_run_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
@@ -311,6 +359,9 @@ int shell_run_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
      * it before executing so relative paths in the command resolve against
      * the task workspace (base.py injects the runner workspace_dir). */
     const char *cwd = builtin_str_opt(root, "cwd", NULL);
+    /* C-24 默认严格；per-tool shell_strict=0 回退旧语义（主要供确实要用
+     * 「最后一条命令决定退出码」的脚本场景）。 */
+    int strict = strict_opt(root);
     /* P2 OS-level sandbox: shell_run is enabled by default per environment
      * config (Landlock/seccomp/rlimit on Linux; Windows/macOS resolve to
      * OS_SANDBOX_MODE_OFF, keeping the identical call path). */
@@ -320,7 +371,7 @@ int shell_run_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
     int exit_code = -1;
     int rc = builtin_shell_run(cmd->valuestring, cwd, &out, &exit_code,
                                timeout_ms ? timeout_ms : BUILTIN_SHELL_TIMEOUT_MS, NULL,
-                               &sandbox_cfg);
+                               &sandbox_cfg, strict);
     if (rc != 0)
         return btool_fail(res, AIRY_ERR_EXEC_FAIL,
                           "Failed to execute command (pipe/process creation failed)");

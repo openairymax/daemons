@@ -20,7 +20,8 @@ extern "C" {
 #endif
 
 int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_code,
-                      uint32_t timeout_ms, int *out_truncated, const os_sandbox_cfg_t *sandbox);
+                      uint32_t timeout_ms, int *out_truncated, const os_sandbox_cfg_t *sandbox,
+                      int strict);
 
 #ifndef _WIN32
 /* Child-side setup callback for builtin_proc_capture: runs in the forked
