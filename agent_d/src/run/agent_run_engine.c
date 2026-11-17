@@ -125,9 +125,13 @@ bool agent_run_is_cancelled(const agent_run_session_t *s)
 
 const char *run_state_name(int rc, int cancelled)
 {
+    /* 任务级未收敛一律 Paused：产物已移交，客户端可继续/放弃；只有用户
+     * 取消或被判定失败才进 Failed，禁止再以 Executing 静默停留。 */
     if (cancelled)
-        return "cancelled";
-    return rc == 0 ? "completed" : "failed";
+        return "failed";
+    if (rc == 0)
+        return "completed";
+    return "paused";
 }
 
 const char *run_rc_msg(int rc)
@@ -139,8 +143,6 @@ const char *run_rc_msg(int rc)
         return "agent.run stopped: repeated tool failures (fuse tripped)";
     case AGENT_RUN_RC_SUBAGENT_FAIL:
         return "agent.run failed in the orchestration branch (sub-agent)";
-    case AGENT_RUN_RC_TOOL_ROUNDS:
-        return "agent.run exhausted the tool-loop round budget";
     case AIRY_EBUDGET:
         return "agent.run paused: round budget exhausted, resume_token issued";
     case AGENT_RUN_RC_EMPTY:
