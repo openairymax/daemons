@@ -21,6 +21,10 @@ extern "C" {
 char *response_to_json(const llm_response_t *resp);
 llm_response_t *response_from_json(const char *json);
 
+/* 响应是否对下游可用：至少一个 choice，且首条含非空白 content 或非空
+ * tool_calls。仅 reasoning_content 不算可用——那正是无正文的推理空响应。 */
+int llm_resp_usable(const llm_response_t *resp);
+
 /* 流式终帧 'U' 的帧体（flat usage + 可选 finish_reason / timings /
  * capacity）。与非流式共用同一序列化实现，新增字段不会只有一条通道被补。 */
 char *resp_usage_json(const llm_response_t *resp);

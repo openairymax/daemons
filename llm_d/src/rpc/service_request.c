@@ -445,15 +445,27 @@ static int req_guard(llm_service_t *svc, const llm_request_config_t *manager,
     return AIRY_OK;
 }
 
-/* complete 真实调用闭包：适配器直调，机制层不感知传输。 */
+/* complete 真实调用闭包：适配器直调，机制层不感知传输。
+ *
+ * 200 但无正文（choices 为空、content 全空白、只有 reasoning_content）
+ * 对下游等于没拿到答案，必须按失败上报：否则空串被当成功，既遮蔽上游
+ * 故障，也让熔断与端云切换永远看不到这类退化。失败返回统一错误码，
+ * 由 attempt_run 释放半成品响应并按换端规则记账。 */
 static int complete_attempt(void *ctx, const svc_step_t *step, llm_response_t **out)
 {
     (void)ctx;
     int ret = step->prov->adapter->complete(step->prov->ctx, &step->eff, out);
-    if (ret != 0)
+    if (ret != 0) {
         SVC_LOG_ERROR("C-L02: SVC: COMPLETE-ATTEMPT-FAIL provider=%s model=%s error=%d",
                       step->prov->name ? step->prov->name : "?", step->eff.model, ret);
-    return ret;
+        return ret;
+    }
+    if (!llm_resp_usable(*out)) {
+        SVC_LOG_ERROR("C-L02: SVC: COMPLETE-EMPTY provider=%s model=%s",
+                      step->prov->name ? step->prov->name : "?", step->eff.model);
+        return AIRY_ERR_LLM_EMPTY_RESP;
+    }
+    return 0;
 }
 
 /* 流式首字节哨兵：任一带内容的块下发即视为已提交，此后禁止切换
@@ -503,6 +515,12 @@ static int stream_attempt(void *ctx, const svc_step_t *step, llm_response_t **ou
     else if (ret != 0)
         SVC_LOG_ERROR("C-L02: SVC: STREAM-ATTEMPT-FAIL provider=%s model=%s error=%d",
                       step->prov->name ? step->prov->name : "?", step->eff.model, ret);
+    else if (!sc->sent && !sc->cancelled) {
+        /* 零内容块即收尾：下游没收到任何正文，等同于空响应。 */
+        SVC_LOG_ERROR("C-L02: SVC: STREAM-EMPTY provider=%s model=%s",
+                      step->prov->name ? step->prov->name : "?", step->eff.model);
+        return AIRY_ERR_LLM_EMPTY_RESP;
+    }
     return ret;
 }
 
