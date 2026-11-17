@@ -143,12 +143,31 @@ static void test_orch_contract(void)
     CHECK(AGENT_RUN_RC_SUBAGENT_FAIL != AGENT_RUN_RC_TOOL_FUSE, "orch: terminal rcs distinct");
 }
 
+/* L-9：终态名与文案是 run_end / 决策链 / 持久化三处的唯一映射点，任何分支
+ * 都不得各自拼字符串；空输出（rc=6）必须落 failed 而非 completed。 */
+static void test_run_state(void)
+{
+    CHECK(strcmp(run_state_name(0, 0), "completed") == 0, "state: rc=0 completed");
+    CHECK(strcmp(run_state_name(0, 1), "cancelled") == 0, "state: cancel wins over rc=0");
+    CHECK(strcmp(run_state_name(AGENT_RUN_RC_EMPTY, 0), "failed") == 0, "state: empty is failed");
+    CHECK(strcmp(run_state_name(AGENT_RUN_RC_TOOL_FUSE, 0), "failed") == 0, "state: fuse failed");
+
+    CHECK(run_rc_msg(0)[0] == '\0', "msg: success silent");
+    CHECK(strstr(run_rc_msg(AGENT_RUN_RC_EMPTY), "without output") != NULL, "msg: empty named");
+    CHECK(strstr(run_rc_msg(AGENT_RUN_RC_TOOL_FUSE), "fuse") != NULL, "msg: fuse named");
+    CHECK(run_rc_msg(AGENT_RUN_RC_EMPTY) != run_rc_msg(AGENT_RUN_RC_TOOL_FUSE),
+          "msg: terminal rcs distinct");
+
+    CHECK(AGENT_RUN_RC_EMPTY == 6, "rc: empty code is 6");
+}
+
 int main(void)
 {
     test_fail_streak();
     test_emit_delta();
     test_stream_result_free();
     test_orch_contract();
+    test_run_state();
     if (g_fail)
         printf("FAILURES: %d\n", g_fail);
     else
