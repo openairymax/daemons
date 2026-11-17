@@ -250,6 +250,11 @@ static void think_svc_drop(think_service_t *svc)
         airy_cognition_destroy(svc->engine);
         svc->engine = NULL;
     }
+    /* engine 只借用 tool_adapter，故在 engine 之后销毁。 */
+    if (svc->tool_adapter) {
+        tool_svc_adapter_destroy(svc->tool_adapter);
+        svc->tool_adapter = NULL;
+    }
     if (svc->llm_adapter) {
         llm_svc_adapter_destroy(svc->llm_adapter);
         svc->llm_adapter = NULL;
@@ -281,6 +286,24 @@ static void think_eng_bind(think_service_t *svc, const think_service_config_t *c
                                   svc->think1_prof_model[0] ? svc->think1_prof_model : NULL);
     airy_cognition_set_gccp_interact(svc->engine, think_gccp_interact_cb, svc);
     SVC_LOG_INFO("ThinkDual: GCCP interact callback registered (two-pass protocol)");
+
+    /* C-12：执行通道注入。GRAD 计划里的 exec 节点必须真的能到 tool_d；
+     * 缺席不阻断服务创建（只规划/汇报的请求仍可完成），但执行节点会在
+     * dispatch 处以 EINVAL 判红，不再静默成功。 */
+    tool_svc_adapter_config_t tcfg;
+    __builtin_memset(&tcfg, 0, sizeof(tcfg));
+    tcfg.tool_d_service_name = "tool_d";
+    tcfg.channel_name = "think-tool";
+    tcfg.request_timeout_ms =
+        svc->process_timeout_ms > 0 ? svc->process_timeout_ms : 60000;
+    svc->tool_adapter = tool_svc_adapter_create(&tcfg);
+    if (svc->tool_adapter) {
+        airy_cognition_set_tool_adapter(svc->engine, svc->tool_adapter);
+        SVC_LOG_INFO("C-12: tool IPC adapter wired to cognition engine");
+    } else {
+        SVC_LOG_WARN("C-12: tool IPC adapter unavailable, exec nodes will fail "
+                     "closed (planning-only requests still succeed)");
+    }
     if (config && config->enabled == 0) {
         airy_cognition_set_grad_enabled(svc->engine, 0);
         SVC_LOG_WARN("ThinkDual: dual-thinking disabled (enabled=0), GRAD off");
