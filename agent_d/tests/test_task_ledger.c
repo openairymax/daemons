@@ -14,12 +14,14 @@
 
 #include "run/agent_task_contract.h"
 #include "run/agent_task_ledger.h"
+#include "hall_event.h"
 
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static int g_failures;
@@ -69,14 +71,9 @@ static int count_events(const char *dir)
     return n;
 }
 
-/* 读取事件全文；调用方负责 free。 */
-static char *read_event(const char *dir)
+/* 读取任意事件文件全文；调用方负责 free。 */
+static char *read_file(const char *path)
 {
-    char name[256];
-    if (latest_event(dir, name, sizeof(name)) != 0)
-        return NULL;
-    char path[512];
-    snprintf(path, sizeof(path), "%s/%s", dir, name);
     FILE *f = fopen(path, "rb");
     if (!f)
         return NULL;
@@ -87,8 +84,147 @@ static char *read_event(const char *dir)
     return buf;
 }
 
-int main(void)
+/* 读取目录内最新事件全文；调用方负责 free。 */
+static char *read_event(const char *dir)
 {
+    char name[256];
+    if (latest_event(dir, name, sizeof(name)) != 0)
+        return NULL;
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s", dir, name);
+    return read_file(path);
+}
+
+/* ── 重启回放（C-18-07 实现段 6/6）─────────────────────────────────
+ * 账本是 append-only 磁盘事件：进程重启后内存态全部丢弃，回放只靠
+ * 目录遍历 + (ts_utc, gseq) 排序。子进程经 exec 重建（不是 fork 后
+ * 复用内存），因此这里证明的是真实跨进程续接，而非同进程重读。
+ */
+
+#define REPLAY_MAX_ROWS 64
+
+typedef struct {
+    char ts[HALL_EVT_TS_LEN];
+    unsigned long long gseq;
+    char token[96]; /* "category" 或 "category:state" */
+} replay_row_t;
+
+static int replay_row_cmp(const void *a, const void *b)
+{
+    const replay_row_t *ra = (const replay_row_t *)a;
+    const replay_row_t *rb = (const replay_row_t *)b;
+    int c = strcmp(ra->ts, rb->ts);
+    if (c != 0)
+        return c;
+    return (ra->gseq > rb->gseq) - (ra->gseq < rb->gseq);
+}
+
+/* 把事件归一为可比较的类别记号：progress/result 附带 content.state。 */
+static void replay_token(const char *category, const char *body, char *out, size_t sz)
+{
+    const char *tag = "\"state\":\"";
+    const char *p = body ? strstr(body, tag) : NULL;
+    if (!p) {
+        snprintf(out, sz, "%s", category);
+        return;
+    }
+    p += strlen(tag);
+    size_t i = 0;
+    while (p[i] && p[i] != '"' && i + 2 < sz)
+        i++;
+    snprintf(out, sz, "%s:%.*s", category, (int)i, p);
+}
+
+static int scan_events(const char *base, replay_row_t *rows, int cap)
+{
+    static const char *cats[] = {"blueprint", "progress", "issue", "result"};
+    int n = 0;
+    for (size_t c = 0; c < sizeof(cats) / sizeof(cats[0]); c++) {
+        char dir[512];
+        snprintf(dir, sizeof(dir), "%s/%s", base, cats[c]);
+        DIR *d = opendir(dir);
+        if (!d)
+            continue;
+        struct dirent *e;
+        while ((e = readdir(d)) != NULL && n < cap) {
+            size_t len = strlen(e->d_name);
+            if (len < 6 || strcmp(e->d_name + len - 5, ".json") != 0)
+                continue;
+            hall_evt_parts_t parts;
+            if (hall_evt_parse(e->d_name, &parts) != 0)
+                continue;
+            char path[700];
+            snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
+            char *body = read_file(path);
+            if (!body)
+                continue;
+            replay_row_t *r = &rows[n++];
+            snprintf(r->ts, sizeof(r->ts), "%.*s", (int)parts.ts_utc_len, parts.ts_utc);
+            r->gseq = hall_evt_gseq_of(body);
+            replay_token(cats[c], body, r->token, sizeof(r->token));
+            free(body);
+        }
+        closedir(d);
+    }
+    return n;
+}
+
+/* 子进程：不持有父进程任何内存态，只凭 $AIRY_HOME 的磁盘账本回放。 */
+static void replay_check(const char *home)
+{
+    char base[320];
+    snprintf(base, sizeof(base), "%s/data/agentrt/hall/default/task-ledger-1", home);
+
+    replay_row_t rows[REPLAY_MAX_ROWS];
+    int n = scan_events(base, rows, REPLAY_MAX_ROWS);
+    CHECK(n == 6, "restart replay saw %d events, want 6 (blueprint+3 progress+issue+result)", n);
+    qsort(rows, (size_t)n, sizeof(rows[0]), replay_row_cmp);
+
+    static const char *want[] = {"blueprint", "progress:submitted", "progress:planned",
+                                 "progress:executing", "issue", "result:completed"};
+    for (int i = 0; i < n && i < 6; i++)
+        CHECK(strcmp(rows[i].token, want[i]) == 0, "replay[%d]=%s want=%s", i, rows[i].token,
+              want[i]);
+
+    unsigned long long max_g = 0;
+    for (int i = 0; i < n; i++) {
+        CHECK(rows[i].gseq > max_g, "gseq must strictly increase across the replayed timeline");
+        max_g = rows[i].gseq;
+    }
+
+    /* 重启后续写：seq/gseq 必须从磁盘水位线继续，不能从 1 重新计数。 */
+    CHECK(agent_task_ledger_progress("task-ledger-1", "plan-ledger-1", "resumed", NULL) == 0,
+          "post-restart progress write failed");
+    char dir[400];
+    snprintf(dir, sizeof(dir), "%s/progress", base);
+    CHECK(count_events(dir) == 4, "post-restart progress count=%d want=4", count_events(dir));
+    char name[256];
+    CHECK(latest_event(dir, name, sizeof(name)) == 0 && hall_evt_seq(name) == 4,
+          "post-restart seq must continue at 4");
+
+    replay_row_t again[REPLAY_MAX_ROWS];
+    int m = scan_events(base, again, REPLAY_MAX_ROWS);
+    CHECK(m == 7, "post-restart replay saw %d events, want 7", m);
+    qsort(again, (size_t)m, sizeof(again[0]), replay_row_cmp);
+    CHECK(m > 0 && strcmp(again[m - 1].token, "progress:resumed") == 0,
+          "replayed tail must be the post-restart event");
+    CHECK(m > 0 && again[m - 1].gseq > max_g,
+          "post-restart gseq must resume above the persisted watermark");
+}
+
+
+int main(int argc, char **argv)
+{
+    if (argc > 1 && strcmp(argv[1], "--replay-check") == 0) {
+        const char *home = getenv("AIRY_HOME");
+        if (!home || !*home) {
+            printf("FAIL replay-check: AIRY_HOME missing\n");
+            return 1;
+        }
+        replay_check(home);
+        return g_failures ? 1 : 0;
+    }
+
     char home[256];
     snprintf(home, sizeof(home), "/tmp/agent_d_task_ledger_%ld", (long)getpid());
     char cmd[320];
@@ -162,6 +298,28 @@ int main(void)
     CHECK(agent_task_ledger_result(NULL, NULL, "failed") != 0, "empty key must be rejected");
     CHECK(agent_task_ledger_progress("", NULL, "executing", NULL) != 0,
           "empty key must be rejected");
+
+    /* 7. 重启回放：exec 自身为新进程（内存态清零），只凭磁盘账本还原
+     *    blueprint→progress×3→issue→result 全链，并续写第 7 条事件。 */
+    pid_t pid = fork();
+    if (pid == 0) {
+        char exe[512];
+        ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+        if (n <= 0)
+            _exit(127);
+        exe[n] = '\0';
+        execl(exe, exe, "--replay-check", (char *)NULL);
+        _exit(127);
+    }
+    CHECK(pid > 0, "fork for restart replay failed");
+    if (pid > 0) {
+        int st = 0;
+        if (waitpid(pid, &st, 0) != pid)
+            g_failures++;
+        else
+            CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0,
+                  "restart replay child failed (status=%d)", st);
+    }
 
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", home);
     if (system(cmd) != 0)
