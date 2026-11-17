@@ -750,6 +750,208 @@ static void test_reload_after_rewrite(void)
     printf("    PASSED\n");
 }
 
+static char *write_text(mem_service_t *svc, const char *text)
+{
+    mem_write_request_t req = {
+        .data = (void *)text,
+        .len = strlen(text),
+        .metadata = NULL,
+    };
+    char *id = NULL;
+    assert(mem_service_write(svc, &req, &id) == AIRY_SUCCESS);
+    assert(id != NULL);
+    return id;
+}
+
+static size_t recent_ids(mem_service_t *svc, char *out[], size_t cap)
+{
+    mem_recent_item_t *items = NULL;
+    size_t n = 0;
+    assert(mem_service_recent(svc, 0, &items, &n) == AIRY_SUCCESS);
+    assert(n <= cap);
+    for (size_t i = 0; i < n; i++)
+        out[i] = items[i].record_id ? AIRY_STRDUP(items[i].record_id) : NULL;
+    mem_recent_items_free(items, n);
+    return n;
+}
+
+static void ids_free(char *ids[], size_t n)
+{
+    for (size_t i = 0; i < n; i++)
+        AIRY_FREE(ids[i]);
+}
+
+/* C-28 回归①：同秒三条写入，recent 必须是写入序倒序（不依赖秒级时间戳）。 */
+static void test_recent_order_same_second(void)
+{
+    printf("  test_recent_order_same_second...\n");
+    mem_test_clean_persist();
+    mem_service_t *svc = mem_service_create(16);
+    assert(svc != NULL);
+
+    char *ids[3];
+    ids[0] = write_text(svc, "first record");
+    ids[1] = write_text(svc, "second record");
+    ids[2] = write_text(svc, "third record");
+
+    char *got[4] = {NULL};
+    size_t n = recent_ids(svc, got, 4);
+    assert(n == 3);
+    assert(strcmp(got[0], ids[2]) == 0);
+    assert(strcmp(got[1], ids[1]) == 0);
+    assert(strcmp(got[2], ids[0]) == 0);
+
+    ids_free(got, n);
+    ids_free(ids, 3);
+    mem_service_destroy(svc);
+    mem_test_clean_persist();
+    printf("    PASSED\n");
+}
+
+/* C-28 回归②：删除首条（最旧）后，尾部记录不得被搬入 0 号位并排到队首。
+ * 这是交换删除的原始反例：写 A/B/C 删 A，错误实现返回 B/C。 */
+static void test_recent_order_delete_head(void)
+{
+    printf("  test_recent_order_delete_head...\n");
+    mem_test_clean_persist();
+    mem_service_t *svc = mem_service_create(16);
+    assert(svc != NULL);
+
+    char *ids[3];
+    ids[0] = write_text(svc, "alpha record");
+    ids[1] = write_text(svc, "beta record");
+    ids[2] = write_text(svc, "gamma record");
+    assert(mem_service_delete(svc, ids[0]) == AIRY_SUCCESS);
+
+    char *got[4] = {NULL};
+    size_t n = recent_ids(svc, got, 4);
+    assert(n == 2);
+    assert(strcmp(got[0], ids[2]) == 0);
+    assert(strcmp(got[1], ids[1]) == 0);
+
+    ids_free(got, n);
+    ids_free(ids, 3);
+    mem_service_destroy(svc);
+    mem_test_clean_persist();
+    printf("    PASSED\n");
+}
+
+/* C-28 回归③：四条中删第二条，剩余顺序须为写入序（交换删除会得到 D/C/A）。 */
+static void test_recent_order_delete_middle(void)
+{
+    printf("  test_recent_order_delete_middle...\n");
+    mem_test_clean_persist();
+    mem_service_t *svc = mem_service_create(16);
+    assert(svc != NULL);
+
+    char *ids[4];
+    ids[0] = write_text(svc, "one record");
+    ids[1] = write_text(svc, "two record");
+    ids[2] = write_text(svc, "three record");
+    ids[3] = write_text(svc, "four record");
+    assert(mem_service_delete(svc, ids[1]) == AIRY_SUCCESS);
+
+    char *got[5] = {NULL};
+    size_t n = recent_ids(svc, got, 5);
+    assert(n == 3);
+    assert(strcmp(got[0], ids[3]) == 0);
+    assert(strcmp(got[1], ids[2]) == 0);
+    assert(strcmp(got[2], ids[0]) == 0);
+
+    ids_free(got, n);
+    ids_free(ids, 4);
+    mem_service_destroy(svc);
+    mem_test_clean_persist();
+    printf("    PASSED\n");
+}
+
+/* C-28 回归④：删除末尾一条不触发搬移，顺序同样成立。 */
+static void test_recent_order_delete_tail(void)
+{
+    printf("  test_recent_order_delete_tail...\n");
+    mem_test_clean_persist();
+    mem_service_t *svc = mem_service_create(16);
+    assert(svc != NULL);
+
+    char *ids[3];
+    ids[0] = write_text(svc, "one record");
+    ids[1] = write_text(svc, "two record");
+    ids[2] = write_text(svc, "three record");
+    assert(mem_service_delete(svc, ids[2]) == AIRY_SUCCESS);
+
+    char *got[4] = {NULL};
+    size_t n = recent_ids(svc, got, 4);
+    assert(n == 2);
+    assert(strcmp(got[0], ids[1]) == 0);
+    assert(strcmp(got[1], ids[0]) == 0);
+
+    ids_free(got, n);
+    ids_free(ids, 3);
+    mem_service_destroy(svc);
+    mem_test_clean_persist();
+    printf("    PASSED\n");
+}
+
+/* C-28 回归⑤：删空后重新写入，recent 只含新记录且下标从 0 重新起算。 */
+static void test_recent_order_delete_all(void)
+{
+    printf("  test_recent_order_delete_all...\n");
+    mem_test_clean_persist();
+    mem_service_t *svc = mem_service_create(16);
+    assert(svc != NULL);
+
+    char *ids[3];
+    ids[0] = write_text(svc, "old a record");
+    ids[1] = write_text(svc, "old b record");
+    ids[2] = write_text(svc, "old c record");
+    for (int i = 0; i < 3; i++)
+        assert(mem_service_delete(svc, ids[i]) == AIRY_SUCCESS);
+    assert(mem_service_count(svc) == 0);
+
+    char *fresh = write_text(svc, "fresh record");
+    char *got[4] = {NULL};
+    size_t n = recent_ids(svc, got, 4);
+    assert(n == 1);
+    assert(strcmp(got[0], fresh) == 0);
+
+    ids_free(got, n);
+    AIRY_FREE(fresh);
+    ids_free(ids, 3);
+    mem_service_destroy(svc);
+    mem_test_clean_persist();
+    printf("    PASSED\n");
+}
+
+/* C-28 回归⑥：重写落盘后重载，写入序不变量随磁盘顺序一起还原。 */
+static void test_recent_order_after_reload(void)
+{
+    printf("  test_recent_order_after_reload...\n");
+    mem_test_clean_persist();
+
+    char *ids[3];
+    mem_service_t *svc = mem_service_create(16);
+    assert(svc != NULL);
+    ids[0] = write_text(svc, "disk a record");
+    ids[1] = write_text(svc, "disk b record");
+    ids[2] = write_text(svc, "disk c record");
+    assert(mem_service_delete(svc, ids[1]) == AIRY_SUCCESS);
+    mem_service_destroy(svc);
+
+    svc = mem_service_create(16);
+    assert(svc != NULL);
+    char *got[4] = {NULL};
+    size_t n = recent_ids(svc, got, 4);
+    assert(n == 2);
+    assert(strcmp(got[0], ids[2]) == 0);
+    assert(strcmp(got[1], ids[0]) == 0);
+
+    ids_free(got, n);
+    ids_free(ids, 3);
+    mem_service_destroy(svc);
+    mem_test_clean_persist();
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
 
@@ -783,6 +985,12 @@ int main(void)
     test_kb_utf8_chunking();
     test_persist_utf8_repair();
     test_reload_after_rewrite();
+    test_recent_order_same_second();
+    test_recent_order_delete_head();
+    test_recent_order_delete_middle();
+    test_recent_order_delete_tail();
+    test_recent_order_delete_all();
+    test_recent_order_after_reload();
     printf("=== All tests PASSED ===\n");
     return 0;
 }
