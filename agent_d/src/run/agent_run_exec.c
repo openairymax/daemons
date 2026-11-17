@@ -17,6 +17,7 @@
 
 #include "agent_run_engine.h"
 #include "agent_run_internal.h"
+#include "agent_task_ledger.h"
 
 #include "airy_memory.h"
 #include "airy_run_stream.h"
@@ -90,23 +91,39 @@ static void run_free(run_ctx_t *c)
 }
 
 /* task_state 帧：C-15 任务时间线的唯一状态出口（仅 task.submit 携带 task
- * 元数据时发帧）。run_id 取 task_id，unregister 之后仍用本地副本。 */
+ * 元数据时发帧）。run_id 取 task_id，unregister 之后仍用本地副本。
+ * C-18：同一状态同时落账（progress/result），同步 task.submit 没有流式
+ * 客户端也必留事件，replay(task_id) 才能还原完整时间线。 */
 static void run_task_state(run_ctx_t *c, const char *state, const char *reason)
 {
-    if (!c->task || !c->sink || !c->sink->emit || !state || !state[0])
+    if (!c->task || !state || !state[0])
         return;
-    cJSON *d = cJSON_CreateObject();
-    if (!d)
-        return;
-    cJSON_AddStringToObject(d, AIRY_RS_K_TASK_ID, c->task->task_id);
-    if (c->task->plan_id[0])
-        cJSON_AddStringToObject(d, AIRY_RS_K_PLAN_ID, c->task->plan_id);
-    cJSON_AddStringToObject(d, AIRY_RS_K_STATE, state);
-    if (reason && reason[0])
-        cJSON_AddStringToObject(d, AIRY_RS_K_REASON, reason);
-    const char *rid = c->run_id[0] ? c->run_id
-                                   : (c->active ? c->active->run_id : c->task->task_id);
-    agent_run_emit_event(c->sink, &c->seq, rid, c->sess, AIRY_RS_TYPE_TASK_STATE, d);
+    const char *key = agent_task_ledger_key(c->task, c->sess);
+
+    /* 终态落 result，过程态落 progress；paused 可续跑，不算终态。
+     * 先落账再发帧：流式帧可能因断连丢失，账本不能。 */
+    bool terminal = strcmp(state, AGENT_TASK_STATE_COMPLETED) == 0 ||
+                    strcmp(state, AGENT_TASK_STATE_FAILED) == 0 ||
+                    strcmp(state, AGENT_TASK_STATE_CANCELLED) == 0;
+    if (terminal)
+        (void)agent_task_ledger_result(key, c->task->plan_id, state);
+    else
+        (void)agent_task_ledger_progress(key, c->task->plan_id, state, reason);
+
+    if (c->sink && c->sink->emit) {
+        cJSON *d = cJSON_CreateObject();
+        if (!d)
+            return;
+        cJSON_AddStringToObject(d, AIRY_RS_K_TASK_ID, c->task->task_id);
+        if (c->task->plan_id[0])
+            cJSON_AddStringToObject(d, AIRY_RS_K_PLAN_ID, c->task->plan_id);
+        cJSON_AddStringToObject(d, AIRY_RS_K_STATE, state);
+        if (reason && reason[0])
+            cJSON_AddStringToObject(d, AIRY_RS_K_REASON, reason);
+        const char *rid = c->run_id[0] ? c->run_id
+                                       : (c->active ? c->active->run_id : c->task->task_id);
+        agent_run_emit_event(c->sink, &c->seq, rid, c->sess, AIRY_RS_TYPE_TASK_STATE, d);
+    }
 }
 
 /* ---- 依赖 daemon 的会话域辅助（本文件独占） ---- */
@@ -383,7 +400,7 @@ static void run_announce(run_ctx_t *c)
     if (evt) {
         cJSON_AddStringToObject(evt, "event", "run_start");
         cJSON_AddStringToObject(evt, "prompt", pbuf);
-        agent_record_event(c->sess, "chain", evt);
+        agent_record_event(agent_task_ledger_key(c->task, c->sess), "chain", evt);
         cJSON_Delete(evt);
     }
 
@@ -407,6 +424,11 @@ static void run_announce(run_ctx_t *c)
     }
     agent_run_emit_event(c->sink, &c->seq, c->active->run_id, c->sess, AIRY_RS_TYPE_RUN_START, rs);
     run_task_state(c, AGENT_TASK_STATE_SUBMITTED, NULL);
+    /* 蓝图是回放的起点：goal 与成功判据在提交时冻结，后续只看事件不改写。 */
+    if (c->task)
+        (void)agent_task_ledger_blueprint(agent_task_ledger_key(c->task, c->sess),
+                                          c->task->plan_id, c->prompt,
+                                          c->task->success_criteria);
 }
 
 /* 编排分支失败必须上抛为节点失败（rc=SUBAGENT_FAIL），原因走 response
@@ -483,7 +505,7 @@ static void run_plan(run_ctx_t *c, const cJSON *plan)
         AIRY_STRNCPY_TERM(pbuf, plan_str, sizeof(pbuf));
         cJSON_AddStringToObject(evt, "event", "plan");
         cJSON_AddStringToObject(evt, "plan", pbuf);
-        agent_record_event(c->sess, "chain", evt);
+        agent_record_event(agent_task_ledger_key(c->task, c->sess), "chain", evt);
         cJSON_Delete(evt);
     }
 
@@ -630,7 +652,7 @@ static void run_tools_evt(run_ctx_t *c)
     }
     if (arr)
         cJSON_AddItemToObject(evt, "tools", arr);
-    agent_record_event(c->sess, "chain", evt);
+    agent_record_event(agent_task_ledger_key(c->task, c->sess), "chain", evt);
     cJSON_Delete(evt);
 }
 
@@ -653,8 +675,18 @@ static void run_chain(run_ctx_t *c)
     char buf[520];
     AIRY_STRNCPY_TERM(buf, c->text ? c->text : "", sizeof(buf));
     cJSON_AddStringToObject(evt, "text", buf);
-    agent_record_event(c->sess, "result", evt);
+    const char *key = agent_task_ledger_key(c->task, c->sess);
+    agent_record_event(key, "result", evt);
     cJSON_Delete(evt);
+
+    /* 失败与取消必留 issue（C-18）：看板/回放不能只看到文本结果，
+     * 还要能判读字段级原因（rc + 引擎给出的可读说明）。 */
+    if (c->task) {
+        if (c->cancelled)
+            (void)agent_task_ledger_issue(key, c->rc, "cancelled");
+        else if (c->rc != 0)
+            (void)agent_task_ledger_issue(key, c->rc, c->text);
+    }
 }
 
 /* 组装 result：字段契约与旧 gateway 一致（CLI/TUI/SDK 兼容）。 */
