@@ -20,6 +20,7 @@
 #include "airy_run_stream.h"
 #include "daemon_platform_ext.h"
 #include "daemon_rpc_client.h"
+#include "error.h"
 #include "jsonrpc_helpers.h"
 #include "svc_logger.h"
 
@@ -69,6 +70,8 @@ typedef struct {
     cJSON *agent_spec; /* 借用 params.agent 节点（可 NULL） */
     const char *agent_file;
     const char *session_id;
+    int rounds;               /* params.rounds（缺省 0，交由引擎按策略解析） */
+    const char *resume_token; /* params.resume_token（可 NULL） */
 } run_args_t;
 
 /* 取对象字符串字段；非字符串或空串视同缺省，返回 NULL。 */
@@ -88,17 +91,22 @@ static int parse_run_args(cJSON *params, int id, airy_sock_t fd, run_args_t *out
 
     cJSON *p = cJSON_GetObjectItem(params, "prompt");
     const char *prompt = cJSON_IsString(p) ? p->valuestring : NULL;
+    const char *resume = json_str(params, "resume_token");
     cJSON *messages = cJSON_GetObjectItem(params, "messages");
     cJSON *m0 = (cJSON_IsArray(messages) && cJSON_GetArraySize(messages) > 0) ?
                     cJSON_GetArrayItem(messages, 0) :
                     NULL;
     if (!prompt && m0)
         prompt = json_str(m0, "content");
-    if (!prompt || !*prompt) {
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "Invalid params: missing prompt", id);
+    /* 续跑请求可以只带令牌：原始诉求与已完成步骤都在令牌里，客户端无需
+     * 重发 messages（C-14 的「不得整轮重放」）。 */
+    if ((!prompt || !*prompt) && !resume) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS,
+                           "Invalid params: missing prompt or resume_token", id);
         return -1;
     }
 
+    cJSON *rounds = cJSON_GetObjectItem(params, "rounds");
     out->prompt = prompt;
     out->model = json_str(params, "model");
     out->history = (cJSON_IsArray(messages) && cJSON_GetArraySize(messages) > 0) ? messages : NULL;
@@ -106,6 +114,8 @@ static int parse_run_args(cJSON *params, int id, airy_sock_t fd, run_args_t *out
     out->agent_spec = cJSON_GetObjectItem(params, "agent");
     out->agent_file = json_str(params, "agent_file");
     out->session_id = json_str(params, "session_id");
+    out->rounds = cJSON_IsNumber(rounds) ? rounds->valueint : 0;
+    out->resume_token = resume;
     return 0;
 }
 
@@ -121,7 +131,8 @@ static void handle_run_stream(cJSON *params, int id, airy_sock_t client_fd)
 
     cJSON *result = NULL;
     int rc = agent_run_execute(a.prompt, a.model, a.history, a.gccp_answers, a.agent_spec,
-                               a.agent_file, a.session_id, &sink, &result);
+                               a.agent_file, a.session_id, a.rounds, a.resume_token, &sink,
+                               &result);
     if (result)
         cJSON_Delete(result);
     (void)rc;
@@ -139,13 +150,16 @@ static void handle_run(cJSON *params, int id, airy_sock_t client_fd)
 
     cJSON *result = NULL;
     int rc = agent_run_execute(a.prompt, a.model, a.history, a.gccp_answers, a.agent_spec,
-                               a.agent_file, a.session_id, NULL, &result);
+                               a.agent_file, a.session_id, a.rounds, a.resume_token, NULL,
+                               &result);
     if (rc == 1) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Request cancelled by user", id);
         cJSON_Delete(result);
         return;
     }
-    if (rc != 0 || !result) {
+    /* 预算耗尽不是失败：result 携带 status=paused、error_code 与 resume_token，
+     * 客户端据此三选（继续/放弃/看失败步骤），因此按成功帧下发。 */
+    if ((rc != 0 && rc != AIRY_EBUDGET) || !result) {
         /* 失败原因可判读：引擎把原因写入 response（如工具连败熔断说明）。 */
         const char *detail = NULL;
         if (result) {

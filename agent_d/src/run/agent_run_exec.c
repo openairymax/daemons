@@ -46,6 +46,8 @@ typedef struct {
     const char *agent_file;
     const char *session_id;
     const agent_run_event_sink_t *sink;
+    int rounds;                 /* 请求轮次预算（<=0 由策略缺省） */
+    const char *resume_token;   /* 续跑令牌（可 NULL） */
 
     char sess[AGENT_RUN_SESSION_ID_LEN];
     agent_run_session_t *active;
@@ -286,7 +288,13 @@ static cJSON *agent_spec_from_file(const char *path)
 /* 工具循环：产物所有权移交给上下文。 */
 static void run_loop(run_ctx_t *c, const cJSON *history)
 {
-    agent_run_loop_args_t args = {c->prompt, history, c->mname, c->active, c->sink};
+    agent_run_loop_args_t args = {.prompt = c->prompt,
+                                  .history = history,
+                                  .model = c->mname,
+                                  .session = c->active,
+                                  .sink = c->sink,
+                                  .rounds = c->rounds,
+                                  .resume_token = c->resume_token};
     agent_run_loop_result_t lr = {0};
 
     c->rc = agent_run_tool_loop(&args, &lr);
@@ -602,11 +610,13 @@ static void run_tail(run_ctx_t *c, const cJSON *res)
 
 int agent_run_execute(const char *prompt, const char *model, const cJSON *history,
                       const char *gccp_answers, const cJSON *agent_spec,
-                      const char *agent_file, const char *session_id,
-                      const agent_run_event_sink_t *sink, cJSON **out_result)
+                      const char *agent_file, const char *session_id, int rounds,
+                      const char *resume_token, const agent_run_event_sink_t *sink,
+                      cJSON **out_result)
 {
     *out_result = NULL;
-    if (!prompt || !prompt[0])
+    /* 续跑请求只带令牌不带原 prompt 也合法：历史由令牌摘要重建。 */
+    if ((!prompt || !prompt[0]) && (!resume_token || !resume_token[0]))
         return -1;
 
     run_ctx_t c = {0};
@@ -617,6 +627,8 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
     c.agent_spec = agent_spec;
     c.agent_file = agent_file;
     c.session_id = session_id;
+    c.rounds = rounds;
+    c.resume_token = resume_token;
     c.sink = sink;
     c.rc = -1;
 

@@ -34,6 +34,23 @@
 /* 增量上屏的栈缓冲上限：常见逐字/逐片增量远小于此值，超限走堆。 */
 #define RUN_DELTA_STACK 1024
 
+/* 轮次预算解析：请求值优先；未给则读策略面环境变量；再缺省 8；
+ * 最后夹取到机制硬上限 32。策略只能收紧或放宽到上限，不能突破。 */
+int agent_run_rounds_resolve(int requested)
+{
+    int n = requested;
+    if (n <= 0) {
+        const char *env = getenv("AIRY_AGENT_TOOL_ROUNDS");
+        if (env && *env)
+            n = atoi(env);
+    }
+    if (n <= 0)
+        n = AGENT_RUN_ROUNDS_DEFAULT;
+    if (n > AGENT_RUN_ROUNDS_MAX)
+        n = AGENT_RUN_ROUNDS_MAX;
+    return n;
+}
+
 /* 构建 llm_d complete_stream 请求（透传 tools 数组与常规生成参数）。
  * 不在此处写 max_tokens：输出上限的权威在配置面（model.yaml max_output），
  * 由 llm_d 的生成参数解析统一裁决；调用方写死一个数值会让该配置永久失效。
@@ -648,7 +665,11 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
      * 在会话首轮即可调用；tool_d 不可达时仅退化为静态目录，不影响对话。 */
     run_load_dyn(&r);
 
-    for (int i = 0; i < AGENT_RUN_ROUNDS_DEFAULT; i++) {
+    const int limit = agent_run_rounds_resolve(args->rounds);
+    out->rounds_limit = limit;
+    int used = 0;
+    for (int i = 0; i < limit; i++) {
+        used = i + 1;
         if (agent_run_is_cancelled(args->session)) {
             SVC_LOG_INFO("agent.run: cancelled by user (session=%s)", r.sess ? r.sess : "?");
             rc = 1;
@@ -678,6 +699,7 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
     agent_ledger_free(&r.lg);
     cJSON_Delete(r.messages);
     cJSON_Delete(r.dyn_tools);
+    out->rounds_used = used;
     /* 终局码（含取消与预算耗尽）移交产物，失败路径就地释放；计量已直写 out。 */
     if (rc >= 0) {
         out->trace = r.trace;
