@@ -19,6 +19,8 @@
  *      只计预算口径，不推进连败（预算不足不是端点故障）。
  *   2. circuit_breaks 与「被拒次数」同值：熔断拒绝与预算拒绝共用该口径，
  *      不另立计数器；CLI/GRAD 只读这一个数。
+ *   3. GRAD 的判定输入由 prov_brk_gate() 单点给出（失败计数、冷却窗口、
+ *      预算不足事件与 breaks），调用方不必解析 JSON、不得到表里翻账。
  */
 
 #ifndef LLM_D_PROVIDERS_CORE_PROV_BREAKER_H
@@ -61,8 +63,19 @@ typedef struct {
     uint64_t budget_tmo; /* 预算不够（不计连败） */
     uint64_t rejects;    /* 被闸拒绝次数 */
     uint64_t opens;      /* 进入 OPEN 的次数 */
-    uint64_t breaks;     /* = rejects：CLI/GRAD 共用口径 */
+    uint64_t breaks;     /* = rejects + budget_tmo：CLI/GRAD 共用口径 */
 } prov_brk_stat_t;
+
+/* GRAD/CLI 的判定输入（C-3）：单个 provider 的快速失败视图。
+ * 失败计数与预算不足分列，冷却窗口给出剩余毫秒——策略层据此决定降级、
+ * 收敛轮次或直接快速失败，不需要再读 JSON 或推算时间戳。 */
+typedef struct {
+    uint32_t state;        /* prov_brk_t */
+    uint32_t open_left_ms; /* OPEN 剩余冷却；HALF/CLOSED/NONE 为 0 */
+    uint64_t fails;        /* 端点失败累计（fails + slow_tmo） */
+    uint64_t budget_tmo;   /* 预算不足终止次数 */
+    uint64_t breaks;       /* 被拒累计（熔断拒绝 + 预算终止） */
+} prov_brk_gate_t;
 
 /* 缺省配置（fail_max=5 / open_ms=30s / half_max=1），NULL 安全。 */
 void prov_brk_def(prov_brk_cfg_t *cfg);
@@ -85,6 +98,9 @@ void prov_brk_tmo(const char *provider, prov_tmo_t kind);
 /* 读面：state 返回 prov_brk_t；stat 未命中返回 -1、命中 0。 */
 int prov_brk_state(const char *provider);
 int prov_brk_stat(const char *provider, prov_brk_stat_t *out);
+
+/* 判定输入快照：0 命中 / -1 无记录（只读，不建账、不改状态）。 */
+int prov_brk_gate(const char *provider, prov_brk_gate_t *out);
 
 /* 全量快照（JSON 数组，调用方 AIRY_FREE）；无记录返回 "[]"。 */
 char *prov_brk_json(void);
