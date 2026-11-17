@@ -375,6 +375,15 @@ int shell_run_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
     if (rc != 0)
         return btool_fail(res, AIRY_ERR_EXEC_FAIL,
                           "Failed to execute command (pipe/process creation failed)");
+    if (exit_code == -1) {
+        /* C-11：超时不是「命令非零退出」。保留已捕获的部分输出，以
+         * AIRY_ETIMEDOUT 上报，作业句柄据此映射 timed_out。 */
+        res->output = out ? out : AIRY_STRDUP("");
+        res->err_code = AIRY_ETIMEDOUT;
+        res->exit_code = -1;
+        res->error = AIRY_STRDUP("Command timed out");
+        return AIRY_OK;
+    }
     if (exit_code != 0) {
         /* C-26 环境可行性归因：确定的「包/命令/仓库不可达」改判
          * ERR_EXEC_ENV 并附探针事实，避免同一命令继续盲试。 */
