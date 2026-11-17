@@ -326,6 +326,149 @@ static void test_evt_line(void)
     CHECK(agent_evt_ok(NULL) == 0, "evt: NULL rejected");
 }
 
+/* C-25：等价工具表与换路执行。注入 exec 回调验证「主工具失败后出现替代
+ * 调用」，不依赖 tool_d 与 daemon 生命周期。 */
+typedef struct {
+    int starts;
+    char tool[32];
+} alt_ev_t;
+
+static void cap_alt(const char *type, cJSON *env, void *ud)
+{
+    alt_ev_t *c = (alt_ev_t *)ud;
+    if (strcmp(type, AIRY_RS_TYPE_TOOL_START) != 0)
+        return;
+    cJSON *d = env ? cJSON_GetObjectItem(env, AIRY_RS_K_DATA) : NULL;
+    cJSON *t = d ? cJSON_GetObjectItem(d, AIRY_RS_K_TOOL) : NULL;
+    if (cJSON_IsString(t)) {
+        c->starts++;
+        AIRY_STRNCPY_TERM(c->tool, t->valuestring, sizeof(c->tool));
+    }
+}
+
+static struct {
+    int calls;
+    char tool[32];
+    char args[512];
+    const char *body;
+    int rc;
+} g_fake;
+
+static int fake_exec(const char *name, const char *args, char **out, int *code)
+{
+    g_fake.calls++;
+    AIRY_STRNCPY_TERM(g_fake.tool, name, sizeof(g_fake.tool));
+    AIRY_STRNCPY_TERM(g_fake.args, args, sizeof(g_fake.args));
+    *out = AIRY_STRDUP(g_fake.body ? g_fake.body : "");
+    *code = 0;
+    return g_fake.rc;
+}
+
+static void test_alt_table(void)
+{
+    run_alt_t a;
+    int have = run_alt_plan("shell_run", "{\"command\":\"dnf install -y tree\"}", &a);
+    CHECK(have && strcmp(a.tool, "priv_exec") == 0, "alt: privileged program routes to priv_exec");
+    cJSON *j = have ? cJSON_Parse(a.args) : NULL;
+    cJSON *p = j ? cJSON_GetObjectItem(j, "program") : NULL;
+    cJSON *ar = j ? cJSON_GetObjectItem(j, "args") : NULL;
+    CHECK(cJSON_IsString(p) && strcmp(p->valuestring, "dnf") == 0 && cJSON_GetArraySize(ar) == 3,
+          "alt: argv preserved");
+    cJSON_Delete(j);
+    run_alt_free(&a);
+
+    have = run_alt_plan("shell_run", "{\"command\":\"sudo systemctl restart sshd\"}", &a);
+    CHECK(have && strcmp(a.tool, "priv_exec") == 0, "alt: sudo prefix stripped");
+    run_alt_free(&a);
+
+    CHECK(!run_alt_plan("shell_run", "{\"command\":\"grep -r foo .\"}", &a),
+          "alt: non-privileged command has no equivalent");
+    run_alt_free(&a);
+    CHECK(!run_alt_plan("shell_run", "{\"command\":\"dnf install tree; rm -rf /\"}", &a),
+          "alt: shell metachar rejects the whole command");
+    run_alt_free(&a);
+    CHECK(!run_alt_plan("fs_read", "{\"path\":\"/tmp/a\"}", &a),
+          "alt: only shell_run has table entries");
+    run_alt_free(&a);
+
+    have = run_alt_plan("shell_run", "{\"command\":\"curl -s https://example.com/a\"}", &a);
+    CHECK(have && strcmp(a.args, "{\"command\":\"wget -qO- https://example.com/a\"}") == 0,
+          "alt: curl body fetch maps to wget");
+    run_alt_free(&a);
+    have = run_alt_plan("shell_run", "{\"command\":\"wget -qO- https://example.com/a\"}", &a);
+    CHECK(have && strcmp(a.args, "{\"command\":\"curl -sSL https://example.com/a\"}") == 0,
+          "alt: wget body fetch maps to curl");
+    run_alt_free(&a);
+    CHECK(!run_alt_plan("shell_run", "{\"command\":\"curl -X POST https://example.com/a\"}", &a),
+          "alt: unsupported curl flag is not translated");
+    run_alt_free(&a);
+}
+
+static void test_alt_switch(void)
+{
+    run_alt_t a;
+    setenv("AIRY_TOOL_FALLBACK", "off", 1);
+    CHECK(run_alt_enabled() == 0, "alt: AIRY_TOOL_FALLBACK=off disables");
+    CHECK(run_alt_plan("shell_run", "{\"command\":\"dnf install tree\"}", &a) == 0,
+          "alt: disabled table yields no plan");
+    setenv("AIRY_TOOL_FALLBACK", "0", 1);
+    CHECK(run_alt_enabled() == 0, "alt: 0 disables");
+    unsetenv("AIRY_TOOL_FALLBACK");
+    CHECK(run_alt_enabled() == 1, "alt: unset keeps enabled");
+    CHECK(run_alt_deny(AIRY_EPERM) == 1 && run_alt_deny(AIRY_ERR_GENERIC_FAIL) == 0,
+          "alt: policy denial blocks the swap");
+}
+
+static void test_alt_retry(void)
+{
+    cJSON *cat = cJSON_Parse("[{\"function\":{\"name\":\"priv_exec\"}}]");
+    run_ctx_t r;
+    agent_run_loop_result_t out;
+    agent_run_loop_args_t la;
+    alt_ev_t ev;
+    AIRY_MEMSET(&r, 0, sizeof(r));
+    AIRY_MEMSET(&out, 0, sizeof(out));
+    AIRY_MEMSET(&la, 0, sizeof(la));
+    AIRY_MEMSET(&ev, 0, sizeof(ev));
+    agent_run_event_sink_t sink = {cap_alt, &ev};
+    la.sink = &sink;
+    r.args = &la;
+    r.out = &out;
+    r.catalog = cat;
+
+    run_alt_t alt;
+    int have = run_alt_plan("shell_run", "{\"command\":\"dnf install -y tree\"}", &alt);
+    AIRY_MEMSET(&g_fake, 0, sizeof(g_fake));
+    g_fake.body = "tree installed";
+    char *res = AIRY_STRDUP("Error: dnf: command not found");
+    cJSON *fb = NULL;
+    int erc = run_alt_try(&r, &alt, fake_exec, &res, &fb);
+    CHECK(have && g_fake.calls == 1, "alt: substitute call executed once");
+    CHECK(strcmp(g_fake.tool, "priv_exec") == 0, "alt: substitute is priv_exec");
+    CHECK(erc == 0 && res && strcmp(res, "tree installed") == 0, "alt: substitute result adopted");
+    CHECK(ev.starts == 1 && strcmp(ev.tool, "priv_exec") == 0, "alt: substitute emits tool_start");
+    cJSON *okv = fb ? cJSON_GetObjectItem(fb, "ok") : NULL;
+    CHECK(cJSON_IsNumber(okv) && okv->valueint == 1, "alt: trace fallback marks ok");
+    AIRY_FREE(res);
+    cJSON_Delete(fb);
+    run_alt_free(&alt);
+
+    /* 替代也失败：两段原因回填并明示表内已无替代（可解释终止）。 */
+    have = run_alt_plan("shell_run", "{\"command\":\"dnf install -y tree\"}", &alt);
+    g_fake.body = "denied: not root";
+    g_fake.rc = -1;
+    fb = NULL;
+    res = AIRY_STRDUP("Error: dnf: command not found");
+    erc = run_alt_try(&r, &alt, fake_exec, &res, &fb);
+    CHECK(have && erc == -1, "alt: substitute failure keeps the call failed");
+    CHECK(res && strstr(res, "also failed") && strstr(res, "No further equivalent tool"),
+          "alt: both failures explained");
+    AIRY_FREE(res);
+    cJSON_Delete(fb);
+    run_alt_free(&alt);
+    cJSON_Delete(cat);
+}
+
 int main(void)
 {
     test_fail_streak();
@@ -338,6 +481,9 @@ int main(void)
     test_resume_roundtrip();
     test_fit_boundary();
     test_evt_line();
+    test_alt_table();
+    test_alt_switch();
+    test_alt_retry();
     if (g_fail)
         printf("FAILURES: %d\n", g_fail);
     else
