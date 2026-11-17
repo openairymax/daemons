@@ -1,0 +1,133 @@
+name: Daemons CI
+
+# 0.1.21 L-11 / S3：daemons 叶仓此前无任何 CI，缺陷只能靠主线回归偶然暴露。
+#
+# 结构约束：daemons 的 CMakeLists 不能独立 configure——它消费伞仓注入的
+# PROJECT_VERSION、airy_print_info 与 AIRY_COREKERN_INCLUDE_DIR，测试也注册
+# 在伞仓构建树里。因此本作业检出伞仓、初始化其余叶子，再把 daemons 目录
+# 替换成本仓工作区（即被验证的提交），最后按测试名筛选 daemon 面的用例。
+# 这比「在叶仓里另写一套构建」诚实：不复制、不改写伞仓的构建语义。
+#
+# 覆盖率当前只出账不设阈值：先让数字可见、可对比，阈值待基线稳定后再加，
+# 否则第一天就要么永久红、要么随手调低标准。
+
+on:
+  push:
+    branches: [main, 'dev/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UM: ${{ runner.temp }}/airymaxrt
+  BUILD: ${{ runner.temp }}/daemons-build
+  # daemon 面测试名（伞仓 ctest 注册名，见各模块 CMakeLists 的 add_test）
+  CTEST_RE: '(a2a_d|svc_test|test_maths|sched_d|mem_d|llm_d|sup_test|channel_e2e|daemon)'
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout daemons (under test)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build gcovr \
+            libsqlite3-dev libcjson-dev libcurl4-openssl-dev \
+            libssl-dev zlib1g-dev libzstd-dev \
+            libmicrohttpd-dev libwebsockets-dev libevent-dev \
+            python3 python3-yaml
+
+      - name: Checkout umbrella and its other leaves
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${GH_TOKEN:-}" ]; then
+            printf 'machine github.com\n  login %s\n  password %s\n' "$GH_TOKEN" "$GH_TOKEN" > "$HOME/.netrc"
+            chmod 600 "$HOME/.netrc"
+          fi
+          git clone -q --depth 1 https://github.com/openairymax/agentrt.git "$UM"
+          for leaf in atoms commons gateway heapstore protocols; do
+            git -C "$UM" submodule update --init --depth 1 -- "$leaf" \
+              || echo "::warning::leaf $leaf unavailable, dependent targets may fail"
+          done
+          rm -rf "$UM/daemons"
+          ln -s "$GITHUB_WORKSPACE" "$UM/daemons"
+
+      - name: Configure (out of tree, coverage on)
+        run: |
+          cmake -S "$UM" -B "$BUILD" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTS=ON \
+            -DCMAKE_C_FLAGS="--coverage -O0" \
+            -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+
+      - name: Build
+        run: cmake --build "$BUILD" --parallel "$(nproc)"
+
+      - name: Test (daemon surface)
+        run: |
+          n=$(ctest --test-dir "$BUILD" -N -R "$CTEST_RE" | sed -n 's/^Total Tests: //p' | tr -d '[:space:]')
+          case "$n" in ''|0) echo "::error::未匹配到 daemon 测试，筛选正则已失效"; exit 1 ;; esac
+          echo "matched tests: $n"
+          ctest --test-dir "$BUILD" -R "$CTEST_RE" --output-on-failure -j"$(nproc)"
+
+      - name: Coverage report (informational)
+        continue-on-error: true
+        run: |
+          gcovr -r "$UM" --object-directory "$BUILD" \
+            --xml-pretty -o "$BUILD/coverage.xml" \
+            --html-details "$BUILD/coverage.html"
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemons-coverage
+          path: |
+            ${{ runner.temp }}/daemons-build/coverage.xml
+            ${{ runner.temp }}/daemons-build/coverage.html
+          if-no-files-found: ignore
+          retention-days: 14
+
+  commit-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout (full history for range)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Resolve audit base
+        run: |
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          case "$base" in
+            ''|0000000000000000000000000000000000000000) base="" ;;
+          esac
+          echo "AIRY_COMMIT_BASE=$base" >> "$GITHUB_ENV"
+
+      - name: Fetch tools
+        run: |
+          git clone -q --depth 1 https://github.com/openairymax/tools.git \
+            "$RUNNER_TEMP/airy-tools"
+
+      - name: Audit new commits (R1~R9)
+        env:
+          AIRY_COMMIT_REPO: ${{ github.workspace }}
+        run: bash "$RUNNER_TEMP/airy-tools/scripts/ci/quality/gates/g47-commit-audit.sh"
