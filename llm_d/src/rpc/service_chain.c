@@ -21,6 +21,7 @@
 #include "platform_misc.h"
 #include "airy_prov/provider_base.h"
 #include "airy_prov/provider_rec.h"
+#include "airy_prov/prov_breaker.h"
 #include "rpc/gen_params.h"
 #include "router/core/llm_failover.h"
 #include "svc_logger.h"
@@ -206,14 +207,18 @@ int svc_chain_next(const llm_route_request_t *req, svc_chain_t *chain, char *pro
 }
 
 /* 健康面放行。未注册端点无从判定，按可用处理：router 未初始化或端点
- * 超出注册上限时，若按拒绝处理会把本可尝试的端点全部跳过。 */
+ * 超出注册上限时，若按拒绝处理会把本可尝试的端点全部跳过。
+ *
+ * 两闸串联：路由健康面先判端点是否可用，调用侧熔断闸再判该 provider 是否
+ * 已连续失败到阈值。健康面拒绝时不进熔断账目（本次未发起调用），避免把
+ * 探针态拒绝记成调用失败；熔断拒绝则计入 breaks（C-3 单一读数）。 */
 static int ep_gate(const provider_t *prov, const char *model)
 {
     if (!prov || !prov->name)
         return 1;
-    if (llm_rtr_admit(prov->name, model))
-        return 1;
-    return llm_rtr_known(prov->name, model) ? 0 : 1;
+    if (!llm_rtr_admit(prov->name, model) && llm_rtr_known(prov->name, model))
+        return 0;
+    return prov_brk_allow(prov->name);
 }
 
 /* 取下一个候选并解析回注册表；未命中的候选已记入集合，继续向后。 */
