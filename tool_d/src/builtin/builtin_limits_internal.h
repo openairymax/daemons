@@ -16,6 +16,7 @@
 #ifndef AIRY_RT_TOOL_BUILTIN_LIMITS_INTERNAL_H
 #define AIRY_RT_TOOL_BUILTIN_LIMITS_INTERNAL_H
 
+#include "airy_budget.h"
 #include "airy_memory.h"
 #include "error.h"
 
@@ -48,7 +49,10 @@
 #endif
 
 #define BUILTIN_OUTPUT_CAP (1U << 20) /* 1MB */
-#define BUILTIN_SHELL_TIMEOUT_MS 60000
+/* 工具兜底预算取预算树的 tool 层（0.1.21 C-21）：调用方已按
+ * airy_budget_outer(tool) 留出 25% 余量，故这里只需给出内层值；
+ * 单次调用显式传入的 timeout_ms 仍然优先。 */
+#define BUILTIN_SHELL_TIMEOUT_MS airy_budget_ms(AIRY_BUDGET_TOOL)
 #define BUILTIN_OUTPUT_DRAIN_MS 1000 /* tail-flush bound after exit */
 
 /* Directory-scan guards shared by the recursive fs tools (fs_grep /
