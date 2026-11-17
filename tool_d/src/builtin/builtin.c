@@ -368,6 +368,17 @@ static const builtin_slot_t g_builtin_slots[] = {
     {"priv_exec", priv_exec_tool},
 };
 
+int tool_builtin_exists(const char *tool_id)
+{
+    if (!tool_id || !tool_id[0])
+        return 0;
+    for (size_t i = 0; i < BUILTIN_SLOT_COUNT; ++i) {
+        if (strcmp(tool_id, g_builtin_slots[i].id) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 int tool_builtin_run(const char *tool_id, const char *params_json, uint32_t timeout_ms,
                      tool_result_t *res)
 {
