@@ -49,11 +49,23 @@ static int alt_tok_ok(const char *s)
 static int alt_split(char *buf, char *tok[], int max)
 {
     int n = 0;
-    for (char *p = strtok(buf, " \t"); p; p = strtok(NULL, " \t")) {
-        if (n >= max || !alt_tok_ok(p))
+    char *p = buf;
+    while (*p) {
+        while (*p == ' ' || *p == '\t')
+            ++p;
+        if (!*p)
+            break;
+        if (n >= max)
             return -1;
         tok[n++] = p;
+        while (*p && *p != ' ' && *p != '\t')
+            ++p;
+        if (*p)
+            *p++ = '\0';
     }
+    for (int i = 0; i < n; ++i)
+        if (!alt_tok_ok(tok[i]))
+            return -1;
     return n;
 }
 
@@ -175,7 +187,7 @@ void run_alt_free(run_alt_t *alt)
     AIRY_FREE(alt->tool);
     AIRY_FREE(alt->args);
     AIRY_FREE(alt->note);
-    memset(alt, 0, sizeof(*alt));
+    AIRY_MEMSET(alt, 0, sizeof(*alt));
 }
 
 int run_alt_enabled(void)
@@ -205,7 +217,7 @@ int run_alt_plan(const char *tool, const char *args, run_alt_t *out)
 {
     if (!out)
         return 0;
-    memset(out, 0, sizeof(*out));
+    AIRY_MEMSET(out, 0, sizeof(*out));
     if (!run_alt_enabled() || !tool || !args || strcmp(tool, "shell_run") != 0)
         return 0;
     cJSON *root = cJSON_Parse(args);
