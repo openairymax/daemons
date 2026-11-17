@@ -578,6 +578,113 @@ static void run_fit(char *buf, size_t cap, const char *src)
     buf[utf8_prefix_len(buf, strlen(buf))] = '\0';
 }
 
+/* base64url（无填充）：令牌会出现在 JSON 字段与 URL query 中，'+' '/' '='
+ * 必须避开，否则调用方还得再转义一层。 */
+static char *run_b64url(const unsigned char *src, size_t n)
+{
+    static const char tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    char *out = (char *)AIRY_MALLOC((n + 2) / 3 * 4 + 1);
+    if (!out)
+        return NULL;
+    size_t o = 0;
+    for (size_t i = 0; i < n; i += 3) {
+        unsigned v = (unsigned)src[i] << 16;
+        if (i + 1 < n)
+            v |= (unsigned)src[i + 1] << 8;
+        if (i + 2 < n)
+            v |= src[i + 2];
+        out[o++] = tbl[(v >> 18) & 63];
+        out[o++] = tbl[(v >> 12) & 63];
+        if (i + 1 < n)
+            out[o++] = tbl[(v >> 6) & 63];
+        if (i + 2 < n)
+            out[o++] = tbl[v & 63];
+    }
+    out[o] = '\0';
+    return out;
+}
+
+/* 已完成步骤摘要：只保留最近 keep 条，字段压到最小（工具名、成败、结果首
+ * 段、换路原因），避免令牌膨胀成第二份历史。 */
+static cJSON *run_resume_steps(const cJSON *trace, int keep)
+{
+    cJSON *steps = cJSON_CreateArray();
+    if (!steps)
+        return NULL;
+    int n = cJSON_GetArraySize(trace);
+    int start = n > keep ? n - keep : 0;
+    for (int i = start; i < n; i++) {
+        const cJSON *it = cJSON_GetArrayItem(trace, i);
+        const cJSON *tool = cJSON_GetObjectItem(it, "tool");
+        const cJSON *ok = cJSON_GetObjectItem(it, "ok");
+        const cJSON *res = cJSON_GetObjectItem(it, "result");
+        const cJSON *sr = cJSON_GetObjectItem(it, "switch_reason");
+        cJSON *s = cJSON_CreateObject();
+        if (!s)
+            break;
+        char brief[80];
+        run_fit(brief, sizeof(brief), cJSON_IsString(res) ? res->valuestring : "");
+        cJSON_AddStringToObject(s, "tool", cJSON_IsString(tool) ? tool->valuestring : "");
+        cJSON_AddNumberToObject(s, "ok", (cJSON_IsNumber(ok) && ok->valueint != 0) ? 1 : 0);
+        cJSON_AddStringToObject(s, "brief", brief);
+        if (cJSON_IsString(sr)) {
+            char why[80];
+            run_fit(why, sizeof(why), sr->valuestring);
+            cJSON_AddStringToObject(s, "why", why);
+        }
+        cJSON_AddItemToArray(steps, s);
+    }
+    return steps;
+}
+
+/* 续跑令牌载荷：做到哪（步骤摘要）+ 还差什么（待续正文）+ 原始诉求与计量。
+ * 服务端无状态，客户端凭令牌原地续跑，无需重发全量历史。 */
+static char *run_resume_pack(const run_ctx_t *r, int keep)
+{
+    cJSON *p = cJSON_CreateObject();
+    if (!p)
+        return NULL;
+    char prompt[AGENT_RUN_RESUME_TEXT_MAX + 1];
+    char pending[AGENT_RUN_RESUME_TEXT_MAX + 1];
+    run_fit(prompt, sizeof(prompt), r->args->prompt ? r->args->prompt : "");
+    run_fit(pending, sizeof(pending), r->text ? r->text : "");
+    cJSON_AddNumberToObject(p, "v", 1);
+    cJSON_AddStringToObject(p, "sess", r->sess ? r->sess : "");
+    cJSON_AddStringToObject(p, "prompt", prompt);
+    cJSON_AddStringToObject(p, "pending", pending);
+    cJSON *steps = run_resume_steps(r->trace, keep);
+    if (steps)
+        cJSON_AddItemToObject(p, "steps", steps);
+    cJSON_AddNumberToObject(p, "used", r->out->rounds_used);
+    cJSON_AddNumberToObject(p, "limit", r->out->rounds_limit);
+
+    char *json = cJSON_PrintUnformatted(p);
+    cJSON_Delete(p);
+    if (!json)
+        return NULL;
+    char *tok = run_b64url((const unsigned char *)json, strlen(json));
+    AIRY_FREE(json);
+    return tok;
+}
+
+/* 续跑令牌生成（C-14）：成品受 TOKEN_MAX 硬约束。步骤摘要可裁剪，超限时
+ * 先砍步骤数量再重编；砍到零仍放不下才放弃令牌（正文与 trace 不受影响）。 */
+static char *run_resume_emit(const run_ctx_t *r)
+{
+    int keep = cJSON_GetArraySize(r->trace);
+    if (keep > AGENT_RUN_RESUME_STEP_MAX)
+        keep = AGENT_RUN_RESUME_STEP_MAX;
+    for (;;) {
+        char *tok = run_resume_pack(r, keep);
+        if (tok && strlen(tok) <= AGENT_RUN_RESUME_TOKEN_MAX)
+            return tok;
+        AIRY_FREE(tok);
+        if (keep == 0)
+            return NULL;
+        keep /= 2;
+    }
+}
+
 /* 单条工具调用：tool_start → 执行 → 连败计数 → tool_end → 回填 messages /
  * 台账 / trace（后者供最终响应）。返回熔断是否触发。 */
 static int run_tool_one(run_ctx_t *r, cJSON *tc)
@@ -761,20 +868,21 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
         more = 1;
     }
 
+    out->rounds_used = used;
     /* 轮次预算耗尽不是崩溃：模型仍在推进（每轮都在调用工具），只是未收敛。
      * 如实给出终局码与可读原因，并令 trace 随结果移交——此前这里 rc 停在
      * -1，整轮产物被当作失败丢弃，调用方只得到一句通用错误。 */
     if (more) {
-        /* 轮次用尽不是崩溃：正文/trace 已完整，令牌由下一卡生成。 */
         rc = AIRY_EBUDGET;
         if (!r.text)
             r.text = AIRY_STRDUP("Tool round budget exhausted; resume with the returned token");
+        /* 暂停即可续跑：令牌自包含已执行步骤与待续目标，客户端不必重发历史。 */
+        out->resume_token = run_resume_emit(&r);
     }
 
     agent_ledger_free(&r.lg);
     cJSON_Delete(r.messages);
     cJSON_Delete(r.dyn_tools);
-    out->rounds_used = used;
     /* 终局码（含取消与预算耗尽）移交产物，失败路径就地释放；计量已直写 out。 */
     if (rc >= 0 || rc == AIRY_EBUDGET) {
         out->trace = r.trace;
