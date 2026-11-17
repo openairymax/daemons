@@ -25,7 +25,7 @@
 #include "core/tool_contract.h"
 
 static void handle_register(cJSON *params, int id, airy_sock_t fd);
-static void handle_list(int id, airy_sock_t fd);
+static void handle_list(cJSON *params, int id, airy_sock_t fd);
 static void handle_get(cJSON *params, int id, airy_sock_t fd);
 static void handle_execute(cJSON *params, int id, airy_sock_t fd);
 static void handle_health_check(int id, airy_sock_t fd);
@@ -44,14 +44,14 @@ static void handle_approve(cJSON *params, int id, airy_sock_t fd);
     } while (0)
 
 DAEMON_RPC_SHELL(register, handle_register)
-DAEMON_RPC_SHELL0(list_tools, handle_list)
+DAEMON_RPC_SHELL(list_tools, handle_list)
 DAEMON_RPC_SHELL(get_tool, handle_get)
 DAEMON_RPC_SHELL(execute_tool, handle_execute)
 
 /* L2 协议别名：tool.execute == execute_tool；tool.list == list_tools
  * （02-l2-service-protocol.md）。 */
 DAEMON_RPC_SHELL(execute, handle_execute)
-DAEMON_RPC_SHELL0(list, handle_list)
+DAEMON_RPC_SHELL(list, handle_list)
 DAEMON_RPC_SHELL0(health_check, handle_health_check)
 DAEMON_RPC_SHELL0(get_stats, handle_stats)
 DAEMON_RPC_SHELL0(pending, handle_pending)
@@ -110,9 +110,13 @@ static void handle_register(cJSON *params, int id, airy_sock_t client_fd)
     }
 }
 
-static void handle_list(int id, airy_sock_t client_fd)
+static void handle_list(cJSON *params, int id, airy_sock_t client_fd)
 {
-    char *list_json = tool_service_list(g_service);
+    /* C-16：目录协商。include_denied 缺省/非法一律按 0 处理（只回可见集），
+     * 保证旧客户端行为不变。 */
+    cJSON *inc = params ? cJSON_GetObjectItemCaseSensitive(params, "include_denied") : NULL;
+    int include_denied = cJSON_IsTrue(inc) || (cJSON_IsNumber(inc) && inc->valueint != 0);
+    char *list_json = tool_service_list_ex(g_service, include_denied);
     if (!list_json) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "List failed", id);
         return;
