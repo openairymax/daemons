@@ -32,6 +32,9 @@ static void handle_health_check(int id, airy_sock_t fd);
 static void handle_stats(int id, airy_sock_t fd);
 static void handle_pending(int id, airy_sock_t fd);
 static void handle_approve(cJSON *params, int id, airy_sock_t fd);
+static void handle_submit(cJSON *params, int id, airy_sock_t fd);
+static void handle_poll(cJSON *params, int id, airy_sock_t fd);
+static void handle_cancel(cJSON *params, int id, airy_sock_t fd);
 
 /* g_service 未就绪是全部 tool.* 方法共有的失败前置，收敛为单一出口。 */
 #define TOOLRPC_REQUIRE_SERVICE(fd, id)                                        \
@@ -39,6 +42,16 @@ static void handle_approve(cJSON *params, int id, airy_sock_t fd);
         if (!g_service) {                                                      \
             JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR,                     \
                                "Tool service not ready", id);                  \
+            return;                                                            \
+        }                                                                      \
+    } while (0)
+
+/* 作业存储未就绪与 g_service 同属「能力缺失」，统一返回内部错误。 */
+#define TOOLRPC_REQUIRE_JOBS(fd, id)                                           \
+    do {                                                                       \
+        if (!g_jobs) {                                                         \
+            JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR,                     \
+                               "Job store not ready", id);                     \
             return;                                                            \
         }                                                                      \
     } while (0)
@@ -56,6 +69,9 @@ DAEMON_RPC_SHELL0(health_check, handle_health_check)
 DAEMON_RPC_SHELL0(get_stats, handle_stats)
 DAEMON_RPC_SHELL0(pending, handle_pending)
 DAEMON_RPC_SHELL(approve, handle_approve)
+DAEMON_RPC_SHELL(submit, handle_submit)
+DAEMON_RPC_SHELL(poll, handle_poll)
+DAEMON_RPC_SHELL(cancel, handle_cancel)
 
 static void handle_register(cJSON *params, int id, airy_sock_t client_fd)
 {
@@ -298,6 +314,110 @@ static void handle_pending(int id, airy_sock_t client_fd)
     }
     cJSON *result = cJSON_CreateObject();
     cJSON_AddItemToObject(result, "pending", arr);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+static void handle_submit(cJSON *params, int id, airy_sock_t client_fd)
+{
+    const char *tid = get_string_field(params, "tool_id", NULL);
+    cJSON *jparams = jsonrpc_get_object_param(params, "params");
+    const char *agent_id = get_string_field(params, "agent_id", NULL);
+    int timeout = get_int_field(params, "timeout_sec", 0);
+    char job_id[TOOL_JOB_ID_MAX];
+    char *params_json;
+    int ret;
+
+    JSONRPC_REQUIRE(tid && jparams, client_fd,
+                    "Invalid submit params: tool_id and params required", id);
+    TOOLRPC_REQUIRE_SERVICE(client_fd, id);
+    TOOLRPC_REQUIRE_JOBS(client_fd, id);
+
+    params_json = cJSON_PrintUnformatted(jparams);
+    if (!params_json) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "JSON serialization failed", id);
+        return;
+    }
+
+    tool_execute_request_t req = {.tool_id = tid,
+                                  .params_json = params_json,
+                                  .stream = 0,
+                                  .agent_id = agent_id,
+                                  .timeout_sec = timeout};
+    ret = tooljob_submit(g_jobs, &req, timeout, job_id, sizeof(job_id));
+    AIRY_FREE((void *)params_json);
+    if (ret != 0) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
+                           ret == AIRY_ERR_BUSY ? "Too many running jobs" : airy_err_str(ret), id);
+        return;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    if (!result) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
+    cJSON_AddStringToObject(result, "job_id", job_id);
+    cJSON_AddStringToObject(result, "state", "running");
+    cJSON_AddNumberToObject(result, "timeout_sec", tooljob_clamp(timeout));
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+static void handle_poll(cJSON *params, int id, airy_sock_t client_fd)
+{
+    const char *job_id = get_string_field(params, "job_id", NULL);
+    tool_job_info_t info;
+    int ret;
+
+    JSONRPC_REQUIRE(job_id, client_fd, "Missing job_id", id);
+    TOOLRPC_REQUIRE_JOBS(client_fd, id);
+
+    ret = tooljob_poll(g_jobs, job_id, &info);
+    if (ret != 0) {
+        if (ret == AIRY_ERR_NOT_FOUND)
+            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Job not found", id);
+        else
+            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, airy_err_str(ret), id);
+        return;
+    }
+
+    cJSON *result = tooljob_json(&info);
+    tooljob_rel(&info);
+    if (!result) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+static void handle_cancel(cJSON *params, int id, airy_sock_t client_fd)
+{
+    const char *job_id = get_string_field(params, "job_id", NULL);
+    int ret;
+
+    JSONRPC_REQUIRE(job_id, client_fd, "Missing job_id", id);
+    TOOLRPC_REQUIRE_JOBS(client_fd, id);
+
+    ret = tooljob_cancel(g_jobs, job_id);
+    if (ret == AIRY_ERR_NOT_FOUND) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Job not found", id);
+        return;
+    }
+    if (ret == AIRY_ERR_STATE_ERROR) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Job already finished", id);
+        return;
+    }
+    if (ret != 0) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, airy_err_str(ret), id);
+        return;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    if (!result) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
+    cJSON_AddStringToObject(result, "job_id", job_id);
+    cJSON_AddStringToObject(result, "state", "cancelled");
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 

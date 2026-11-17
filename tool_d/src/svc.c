@@ -25,6 +25,16 @@
 #include "rpc/tool_service_internal.h"
 
 tool_service_t *g_service = NULL;
+tooljob_t *g_jobs = NULL;
+
+/* 作业执行适配：作业线程只借用服务句柄，单一执行入口仍是
+ * tool_service_execute（权限/审批/审计不在作业层复制）。 */
+static int job_execute(void *ctx, const tool_execute_request_t *req, tool_result_t **out)
+{
+    if (!ctx)
+        return AIRY_ERR_STATE_ERROR;
+    return tool_service_execute((tool_service_t *)ctx, req, out);
+}
 
 /* 执行面 worker 数配置（社区反馈③ config 旋钮）：daemon 段 max_workers
  * 策略键，ep_load 的 keys 回调提取；0 = 未配置（executor_pool 按内置
@@ -98,6 +108,9 @@ int svc_prepare(const char *config_path)
         return -1;
     }
     SVC_LOG_INFO("tool service started");
+    g_jobs = tooljob_new(NULL, job_execute, g_service);
+    if (!g_jobs)
+        SVC_LOG_WARN("tool job store unavailable, tool.submit/poll/cancel disabled");
     airy_budget_log("tool_d");
     return 0;
 }
@@ -124,6 +137,15 @@ int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 
 void svc_destroy(void)
 {
+    /* 作业线程借用 g_service，必须先收尾再销毁服务（超时则放弃等待，
+     * 随进程退出终止）。 */
+    if (g_jobs) {
+        if (tooljob_drain(g_jobs, 2000) != 0)
+            SVC_LOG_WARN("tool job store: running jobs still active at shutdown");
+        tooljob_free(g_jobs);
+        g_jobs = NULL;
+    }
+
     /* 可用性视图随 service 释放，本件只解引用（先于 service 置空，避免
      * 定时器在服务销毁后被回调访问悬垂句柄）。 */
     g_avail = NULL;

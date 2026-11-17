@@ -15,6 +15,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "io.h"
+#include "platform_misc.h"
 #include "platform_paths.h"
 #include "platform_process.h"
 #include "platform_sync.h"
@@ -452,6 +453,30 @@ int tooljob_cancel(tooljob_t *jobs, const char *job_id)
 int tooljob_count(const tooljob_t *jobs)
 {
     return jobs ? jobs->count : 0;
+}
+
+int tooljob_drain(tooljob_t *jobs, int timeout_ms)
+{
+    int waited = 0;
+
+    if (!jobs)
+        return AIRY_ERR_INVALID_PARAM;
+    for (;;) {
+        int busy = 0;
+
+        airy_mtx_lock(&jobs->lock);
+        for (int i = 0; i < TOOL_JOB_SLOTS; i++) {
+            if (jobs->slots[i] && jobs->slots[i]->info.state == TOOL_JOB_RUNNING)
+                busy++;
+        }
+        airy_mtx_unlock(&jobs->lock);
+        if (!busy)
+            return 0;
+        if (waited >= timeout_ms)
+            return AIRY_ETIMEDOUT;
+        airy_sleep_ms(20);
+        waited += 20;
+    }
 }
 
 const char *tooljob_state(tool_job_state_t state)
