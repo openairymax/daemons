@@ -16,6 +16,7 @@ set(AGENT_TEST_SOURCES
     test_run_loop.c
     test_run_stream.c
     test_task_orchestrate.c
+    test_task_ledger.c
 )
 
 set(AGENT_COMMON_INCLUDES
@@ -33,6 +34,7 @@ set(AGENT_COMMON_INCLUDES
     ${COMMONS_DIR}/utils/cache
     ${COMMONS_DIR}/utils/compat
     ${COMMONS_DIR}/utils/ipc
+    ${COMMONS_DIR}/utils/hall
     ${SYSCALL_INCLUDE_DIR}
     ${COREKERN_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
@@ -58,6 +60,13 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
     if(TEST_NAME STREQUAL "test_task_orchestrate")
         target_sources(test_agent_${TEST_NAME} PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_task_orchestrate.c
+        )
+    endif()
+
+    # 账本单测同编事件写入面：真实 hall_event 目录/信封，不 stub。
+    if(TEST_NAME STREQUAL "test_task_ledger")
+        target_sources(test_agent_${TEST_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_task_ledger.c
         )
     endif()
 
