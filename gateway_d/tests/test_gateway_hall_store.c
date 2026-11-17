@@ -345,12 +345,82 @@ static void test_invalid_params(void)
     TEST_PASS();
 }
 
+/* hall watch 读侧游标回归（0.1.21 C-18-07）：文件名里的 seq 只在类别
+ * 目录内计数，同一毫秒写进 blueprint 与 progress 会各自得到 seq=1。旧
+ * 游标以 (ts_utc, seq) 判定「已推送」，后一个事件被静默丢弃；游标改为
+ * (ts_utc, file name) 后每个事件必须恰好推送一次、且游标能继续前进。 */
+static int count_substr(const char *hay, const char *needle)
+{
+    int n = 0;
+    for (const char *p = hay; (p = strstr(p, needle)) != NULL; p++)
+        n++;
+    return n;
+}
+
+static void write_watch_event(const char *dir, const char *name, const char *cat,
+                              const char *ts_utc, int seq, int gseq, const char *state)
+{
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/%s", dir, name);
+    FILE *fp = fopen(path, "w");
+    if (!fp)
+        return;
+    fprintf(fp,
+            "{\"file\":{\"id\":\"%s\",\"category\":\"%s\",\"schema\":\"task-file-v1\","
+            "\"tenant_id\":\"default\",\"task_id\":\"taskA\",\"node_id\":\"node-1\","
+            "\"ts_utc\":\"%s\",\"seq\":%d,\"gseq\":%d,\"prev_file\":\"\"},"
+            "\"access\":{\"owner_role\":\"cognition\",\"write_roles\":[\"cognition\"],"
+            "\"read_roles\":[\"cognition\"]},\"content\":{\"event\":\"task_state\","
+            "\"state\":\"%s\"}}",
+            name, cat, ts_utc, seq, gseq, state);
+    fclose(fp);
+}
+
+static void test_watch_same_ms_no_loss(void)
+{
+    TEST_BEGIN("watch_same_ms_no_loss");
+    char root[1024];
+    snprintf(root, sizeof(root), "%s/%s/taskA", g_home, GW_HALL_TEST_ROOT_REL);
+    char db[1200], dp[1200], dr[1200];
+    snprintf(db, sizeof(db), "%s/blueprint", root);
+    snprintf(dp, sizeof(dp), "%s/progress", root);
+    snprintf(dr, sizeof(dr), "%s/result", root);
+    mkdir_p(db);
+    mkdir_p(dp);
+    mkdir_p(dr);
+    write_watch_event(db, "default.taskA.blueprint.20260101T000000123.0001.json",
+                      "blueprint", "20260101T000000123", 1, 1, "s-blueprint");
+    write_watch_event(dp, "default.taskA.progress.20260101T000000123.0001.json",
+                      "progress", "20260101T000000123", 1, 2, "s-progress");
+    write_watch_event(dr, "default.taskA.result.20260101T000000124.0001.json",
+                      "result", "20260101T000000124", 1, 3, "s-result");
+
+    gw_hall_watch_t w;
+    gw_hall_watch_init(&w);
+    char buf[8192];
+    char all[32768];
+    all[0] = '\0';
+    int n = 0;
+    while (n < 8 && gw_hall_watch_next(&w, buf, sizeof(buf)) == 1) {
+        strncat(all, buf, sizeof(all) - strlen(all) - 1);
+        strncat(all, "\n", sizeof(all) - strlen(all) - 1);
+        n++;
+    }
+    ASSERT_EQ_INT(3, n);
+    ASSERT_EQ_INT(1, count_substr(all, "s-blueprint"));
+    ASSERT_EQ_INT(1, count_substr(all, "s-progress"));
+    ASSERT_EQ_INT(1, count_substr(all, "s-result"));
+    ASSERT_EQ_INT(0, gw_hall_watch_next(&w, buf, sizeof(buf)));
+    TEST_PASS();
+}
+
 int main(void)
 {
     isolate_data_dir();
     printf("test_gateway_hall_store: AIRY_HOME=%s\n", g_home);
 
-    test_gseq_resumption(); /* 首位：须在首次 gw_hall_store_event 前预置磁盘事件 */
+    test_watch_same_ms_no_loss(); /* 先跑：此时 hall 根下只有本用例的三个事件 */
+    test_gseq_resumption(); /* 首位写事件：须在首次 gw_hall_store_event 前预置磁盘事件 */
     test_event_write_readback();
     test_prev_file_links();
     test_prev_file_category_isolated();
