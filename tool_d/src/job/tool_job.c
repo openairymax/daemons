@@ -14,6 +14,7 @@
 
 #include "airy_memory.h"
 #include "error.h"
+#include "io.h"
 #include "platform_paths.h"
 #include "platform_process.h"
 #include "platform_sync.h"
@@ -95,9 +96,94 @@ static struct job_entry *job_slot(tooljob_t *j)
     return NULL;
 }
 
+static void job_path(tooljob_t *j, const char *id, char *buf, size_t cap)
+{
+    snprintf(buf, cap, "%s/%s.json", j->root, id);
+}
+
+/* 终态记录落盘：单文件覆盖写，读回失败按无记录处理。 */
+static void job_save(tooljob_t *j, const tool_job_info_t *info)
+{
+    char path[TOOL_JOB_ROOT_MAX + TOOL_JOB_ID_MAX + 16];
+    cJSON *obj = tooljob_json(info);
+    char *text;
+
+    if (!obj)
+        return;
+    text = cJSON_PrintUnformatted(obj);
+    cJSON_Delete(obj);
+    if (!text)
+        return;
+    job_path(j, info->id, path, sizeof(path));
+    if (airy_io_write_file(path, text, (size_t)-1) != 0)
+        SVC_LOG_WARN("tool job %s persist failed: %s", info->id, path);
+    cJSON_free(text);
+}
+
+static void job_field(cJSON *obj, const char *key, char *buf, size_t cap)
+{
+    cJSON *it = cJSON_GetObjectItemCaseSensitive(obj, key);
+
+    if (cJSON_IsString(it) && it->valuestring)
+        snprintf(buf, cap, "%s", it->valuestring);
+}
+
+static int job_state_parse(const char *name, tool_job_state_t *out)
+{
+    if (!name)
+        return AIRY_ERR_INVALID_PARAM;
+    for (int s = TOOL_JOB_RUNNING; s <= TOOL_JOB_TIMED_OUT; s++) {
+        if (strcmp(tooljob_state((tool_job_state_t)s), name) == 0) {
+            *out = (tool_job_state_t)s;
+            return 0;
+        }
+    }
+    return AIRY_ERR_INVALID_PARAM;
+}
+
+/* 解析落盘记录；失败时不占用 out 的 output/error（调用方可直接丢弃）。 */
+static int job_parse(const char *text, tool_job_info_t *out)
+{
+    cJSON *obj = cJSON_Parse(text);
+    cJSON *it;
+    int rc = AIRY_ERR_INVALID_PARAM;
+
+    if (!obj)
+        return rc;
+    AIRY_MEMSET(out, 0, sizeof(*out));
+    job_field(obj, "job_id", out->id, sizeof(out->id));
+    job_field(obj, "tool_id", out->tool_id, sizeof(out->tool_id));
+    job_field(obj, "agent_id", out->agent_id, sizeof(out->agent_id));
+    it = cJSON_GetObjectItemCaseSensitive(obj, "state");
+    if (!out->id[0] || !cJSON_IsString(it) ||
+        job_state_parse(it->valuestring, &out->state) != 0)
+        goto done;
+    it = cJSON_GetObjectItemCaseSensitive(obj, "created_ms");
+    out->created_ms = cJSON_IsNumber(it) ? (uint64_t)it->valuedouble : 0;
+    it = cJSON_GetObjectItemCaseSensitive(obj, "finished_ms");
+    out->finished_ms = cJSON_IsNumber(it) ? (uint64_t)it->valuedouble : 0;
+    it = cJSON_GetObjectItemCaseSensitive(obj, "exit_code");
+    out->exit_code = cJSON_IsNumber(it) ? it->valueint : 0;
+    it = cJSON_GetObjectItemCaseSensitive(obj, "err_code");
+    out->err_code = cJSON_IsNumber(it) ? it->valueint : 0;
+    it = cJSON_GetObjectItemCaseSensitive(obj, "timeout_sec");
+    out->timeout_sec = cJSON_IsNumber(it) ? it->valueint : 0;
+    it = cJSON_GetObjectItemCaseSensitive(obj, "output");
+    if (cJSON_IsString(it) && it->valuestring)
+        out->output = job_dup(it->valuestring);
+    it = cJSON_GetObjectItemCaseSensitive(obj, "error");
+    if (cJSON_IsString(it) && it->valuestring)
+        out->error = job_dup(it->valuestring);
+    rc = 0;
+done:
+    cJSON_Delete(obj);
+    return rc;
+}
+
 /* 容量满时淘汰最早结束的作业；全在运行中则不腾位。 */
 static int job_evict(tooljob_t *j)
 {
+    char path[TOOL_JOB_ROOT_MAX + TOOL_JOB_ID_MAX + 16];
     struct job_entry *old = NULL;
 
     for (int i = 0; i < TOOL_JOB_SLOTS; i++) {
@@ -116,8 +202,61 @@ static int job_evict(tooljob_t *j)
         }
     }
     j->count--;
+    job_path(j, old->info.id, path, sizeof(path));
     job_release(old);
+    airy_io_remove_file(path);
     return 0;
+}
+
+/* 启动时读回历史记录；上次运行中的作业视为守护重启中断，改为失败。 */
+static void job_load(tooljob_t *j)
+{
+    char path[TOOL_JOB_ROOT_MAX + TOOL_JOB_ID_MAX + 16];
+    char **files = NULL;
+    size_t n = 0;
+
+    if (airy_io_mkdir_p(j->root, 0755) != 0) {
+        SVC_LOG_WARN("tool job root unavailable: %s", j->root);
+        return;
+    }
+    if (airy_io_list_files(j->root, &files, &n) != 0)
+        return;
+    for (size_t i = 0; i < n; i++) {
+        tool_job_info_t info;
+        struct job_entry *e;
+        char *text = NULL;
+
+        if (!strstr(files[i], ".json"))
+            continue;
+        snprintf(path, sizeof(path), "%s/%s", j->root, files[i]);
+        if (airy_io_read_file(path, &text, NULL) != 0)
+            continue;
+        if (job_parse(text, &info) != 0) {
+            AIRY_FREE(text);
+            continue;
+        }
+        AIRY_FREE(text);
+        if (info.state == TOOL_JOB_RUNNING) {
+            info.state = TOOL_JOB_FAILED;
+            info.err_code = AIRY_ERR_STATE_ERROR;
+            info.finished_ms = airy_time_wall_ms();
+            info.error = job_dup("daemon restarted during job");
+            job_save(j, &info);
+        }
+        e = job_slot(j);
+        if (!e && job_evict(j) == 0)
+            e = job_slot(j);
+        if (!e) {
+            tooljob_rel(&info);
+            break;
+        }
+        e->jobs = j;
+        e->info = info;
+        j->count++;
+    }
+    airy_io_free_list(files, n);
+    if (j->count)
+        SVC_LOG_INFO("tool job store loaded %d record(s) from %s", j->count, j->root);
 }
 
 static void job_id_make(tooljob_t *j, char *buf, size_t cap)
@@ -152,6 +291,7 @@ static void job_fill(tooljob_t *j, struct job_entry *e, int rc, tool_result_t *r
         e->info.error = job_dup(airy_err_str(e->info.err_code));
     }
     e->thread_done = 1;
+    job_save(j, &e->info);
     SVC_LOG_INFO("tool job %s finished: state=%s tool=%s", e->info.id,
                  tooljob_state(e->info.state), e->info.tool_id);
 }
@@ -195,6 +335,7 @@ tooljob_t *tooljob_new(const char *root, tool_job_run_t run, void *ctx)
     j->run = run;
     j->ctx = ctx;
     j->refs = 1;
+    job_load(j);
     return j;
 }
 
@@ -235,10 +376,14 @@ int tooljob_submit(tooljob_t *jobs, const tool_execute_request_t *req, int timeo
     jobs->count++;
     jobs->refs++;
     snprintf(job_id_out, cap, "%s", e->info.id);
+    job_save(jobs, &e->info);
     airy_mtx_unlock(&jobs->lock);
 
     if (airy_platform_thread_create(&e->thread, job_worker, e) != 0) {
+        char path[TOOL_JOB_ROOT_MAX + TOOL_JOB_ID_MAX + 16];
+
         airy_mtx_lock(&jobs->lock);
+        job_path(jobs, e->info.id, path, sizeof(path));
         for (int i = 0; i < TOOL_JOB_SLOTS; i++) {
             if (jobs->slots[i] == e) {
                 jobs->slots[i] = NULL;
@@ -249,6 +394,7 @@ int tooljob_submit(tooljob_t *jobs, const tool_execute_request_t *req, int timeo
         jobs->refs--;
         airy_mtx_unlock(&jobs->lock);
         job_release(e);
+        airy_io_remove_file(path);
         return AIRY_ERR_SYS_THREAD;
     }
     airy_platform_thread_detach(e->thread);
@@ -297,6 +443,7 @@ int tooljob_cancel(tooljob_t *jobs, const char *job_id)
     e->cancel = 1;
     e->info.state = TOOL_JOB_CANCELLED;
     e->info.finished_ms = airy_time_wall_ms();
+    job_save(jobs, &e->info);
     airy_mtx_unlock(&jobs->lock);
     SVC_LOG_INFO("tool job %s cancelled by client", job_id);
     return 0;

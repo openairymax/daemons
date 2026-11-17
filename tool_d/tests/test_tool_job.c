@@ -8,6 +8,7 @@
 
 #include "job/tool_job.h"
 #include "error.h"
+#include "io.h"
 #include "tool_service.h"
 
 #include <assert.h>
@@ -17,6 +18,12 @@
 #include <unistd.h>
 
 static int g_delay_ms;
+
+static void job_dir(char *buf, size_t cap, const char *tag)
+{
+    snprintf(buf, cap, "/tmp/airy-tool-job-%s-%d", tag, (int)getpid());
+    airy_io_remove_dir_recursive(buf);
+}
 
 static int fake_run(void *ctx, const tool_execute_request_t *req, tool_result_t **out)
 {
@@ -49,7 +56,9 @@ static void wait_state(tooljob_t *jobs, const char *id, tool_job_state_t want)
 
 static void test_submit_poll(void)
 {
-    tooljob_t *jobs = tooljob_new("/tmp/airy-tool-job-test", fake_run, NULL);
+    char dir[128];
+    job_dir(dir, sizeof(dir), "state");
+    tooljob_t *jobs = tooljob_new(dir, fake_run, NULL);
     tool_execute_request_t req = {0};
     char id[TOOL_JOB_ID_MAX];
 
@@ -76,11 +85,14 @@ static void test_submit_poll(void)
     cJSON_Delete(wire);
     tooljob_rel(&info);
     tooljob_free(jobs);
+    airy_io_remove_dir_recursive(dir);
 }
 
 static void test_cancel(void)
 {
-    tooljob_t *jobs = tooljob_new("/tmp/airy-tool-job-test", fake_run, NULL);
+    char dir[128];
+    job_dir(dir, sizeof(dir), "cancel");
+    tooljob_t *jobs = tooljob_new(dir, fake_run, NULL);
     tool_execute_request_t req = {0};
     char id[TOOL_JOB_ID_MAX];
 
@@ -104,11 +116,69 @@ static void test_cancel(void)
     tooljob_rel(&info);
     assert(tooljob_cancel(jobs, id) == AIRY_ERR_STATE_ERROR);
     tooljob_free(jobs);
+    airy_io_remove_dir_recursive(dir);
+}
+
+/* 落盘 → 重开同目录 → 终态可读回；残留 running 记录纠正为失败。 */
+static void test_persist(void)
+{
+    char dir[128];
+    char path[256];
+    job_dir(dir, sizeof(dir), "persist");
+    tooljob_t *jobs = tooljob_new(dir, fake_run, NULL);
+    tool_execute_request_t req = {0};
+    char id[TOOL_JOB_ID_MAX];
+    tool_job_info_t info;
+
+    assert(jobs != NULL);
+    g_delay_ms = 0;
+    req.tool_id = "fake";
+    req.params_json = "{}";
+    assert(tooljob_submit(jobs, &req, 20, id, sizeof(id)) == 0);
+    wait_state(jobs, id, TOOL_JOB_DONE);
+    tooljob_free(jobs);
+
+    jobs = tooljob_new(dir, fake_run, NULL);
+    assert(jobs != NULL);
+    assert(tooljob_count(jobs) == 1);
+    assert(tooljob_poll(jobs, id, &info) == 0);
+    assert(info.state == TOOL_JOB_DONE);
+    assert(info.output && strcmp(info.output, "hello") == 0);
+    assert(info.timeout_sec == 20);
+    tooljob_rel(&info);
+    tooljob_free(jobs);
+
+    /* 模拟守护进程在作业运行中被杀：磁盘上留下 running 记录。 */
+    snprintf(path, sizeof(path), "%s/job-crash.json", dir);
+    assert(airy_io_write_file(path,
+                              "{\"job_id\":\"job-crash\",\"tool_id\":\"fake\","
+                              "\"agent_id\":\"\",\"state\":\"running\","
+                              "\"created_ms\":1,\"finished_ms\":0}",
+                              (size_t)-1) == 0);
+    jobs = tooljob_new(dir, fake_run, NULL);
+    assert(jobs != NULL);
+    assert(tooljob_count(jobs) == 2);
+    assert(tooljob_poll(jobs, "job-crash", &info) == 0);
+    assert(info.state == TOOL_JOB_FAILED);
+    assert(info.error && strstr(info.error, "restarted") != NULL);
+    tooljob_rel(&info);
+    tooljob_free(jobs);
+
+    /* 纠正后的记录已回写，再次加载仍是失败态。 */
+    jobs = tooljob_new(dir, fake_run, NULL);
+    assert(jobs != NULL);
+    assert(tooljob_poll(jobs, "job-crash", &info) == 0);
+    assert(info.state == TOOL_JOB_FAILED);
+    tooljob_rel(&info);
+    tooljob_free(jobs);
+    airy_io_remove_dir_recursive(dir);
 }
 
 static void test_errors(void)
 {
-    tooljob_t *jobs = tooljob_new("/tmp/airy-tool-job-test", fake_run, NULL);
+    char dir[128];
+    job_dir(dir, sizeof(dir), "errors");
+    tooljob_t *jobs = tooljob_new(dir, fake_run, NULL);
     tool_execute_request_t req = {0};
     char id[TOOL_JOB_ID_MAX];
     tool_job_info_t info;
@@ -132,12 +202,14 @@ static void test_errors(void)
     assert(tooljob_clamp(30) == 30);
     assert(tooljob_clamp(100000) == 600);
     tooljob_free(jobs);
+    airy_io_remove_dir_recursive(dir);
 }
 
 int main(void)
 {
     test_submit_poll();
     test_cancel();
+    test_persist();
     test_errors();
     printf("test_tool_job: all passed\n");
     return 0;
