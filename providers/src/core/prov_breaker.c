@@ -175,7 +175,7 @@ int prov_brk_allow(const char *provider)
     brk_sync(rec);
     if (!pass) {
         rec->st.rejects++;
-        rec->st.breaks = rec->st.rejects;
+        rec->st.breaks = rec->st.rejects + rec->st.budget_tmo;
     } else {
         rec->st.calls++;
     }
@@ -242,8 +242,10 @@ void prov_brk_tmo(const char *provider, prov_tmo_t kind)
     brk_rec_t *rec = brk_rec(provider);
     if (rec) {
         if (kind == PROV_TMO_TOTAL) {
-            /* 整轮预算不够：记预算口径，不计连败（预算不是端点故障）。 */
+            /* 整轮预算不够：记预算口径，不计连败（预算不是端点故障）；但
+             * 与熔断拒绝同记 breaks——对上层都是「本次没拿到回答」。 */
             rec->st.budget_tmo++;
+            rec->st.breaks = rec->st.rejects + rec->st.budget_tmo;
         } else {
             rec->st.slow_tmo++;
             if (g_brk.cfg.fail_max > 0)
