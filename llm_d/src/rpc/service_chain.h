@@ -59,6 +59,7 @@ typedef struct {
     uint64_t start_ms;
     int hops;
     int first_err;
+    int gated_skip; /* 被健康面/熔断闸拒绝而跳过的端点次数 */
     int tried_n;
     svc_ep_t tried[SVC_CHAIN_MAX_TRIED];
 } svc_chain_t;
