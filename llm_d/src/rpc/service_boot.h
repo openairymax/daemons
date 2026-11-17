@@ -68,6 +68,18 @@ void llm_boot_drop(llm_boot_t *b);
  */
 void llm_boot_apply(struct llm_service *svc, llm_boot_t *b);
 
+/**
+ * @brief 启动期配置生效自证（0.1.21 A-8）。
+ *
+ * 在注册表装配完成后对 default_model 做「声明 = 注册 = 生效」对账并打印
+ * 生效指纹。未声明 default_model 属于「没配」而非「配错」，跳过注册对账；
+ * 声明了但不在注册表内则拒绝启动，除非 AIRY_ALLOW_UNKNOWN_MODEL 逃生开关
+ * 生效（仅告警放行，仍打印 ESCAPED）。
+ *
+ * @return 0 可放行；AIRY_ERR_INVALID_PARAM 参数非法；-1 拒绝启动
+ */
+int llm_boot_attest(struct llm_service *svc);
+
 #ifdef __cplusplus
 }
 #endif
