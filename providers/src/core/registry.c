@@ -12,6 +12,7 @@
 #include "airy_prov/registry.h"
 #include "airy_prov/secrets.h"
 #include "svc_logger.h"
+#include "platform.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -365,6 +366,15 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name
     SVC_LOG_INFO("C-L02: PROVIDER: BASE-INIT api_base=%s timeout=%.1fs retries=%d has_api_key=%d",
                  base_ctx->api_base[0] ? base_ctx->api_base : "(none)", base_ctx->timeout_sec,
                  base_ctx->max_retries, base_ctx->api_key[0] ? 1 : 0);
+
+    /* A-7：无 key 时给出一条可执行引导。local 模式的 api_key_env 为空，
+     * 不会命中；只有声明了 env 名却解析不到值才提示。密钥值不写日志。 */
+    if (base_ctx->api_key[0] == '\0' && base_ctx->api_key_env[0] != '\0') {
+        SVC_LOG_WARN("C-L02: PROVIDER: NO-KEY env=%s —— 在 %s/secrets.env 写 "
+                     "%s=<密钥>（或 airy_cli /apikey set），或把 model.yaml 该行 "
+                     "mode 改为 local 免 key；写入后下一次请求自动生效",
+                     base_ctx->api_key_env, airy_config_dir(), base_ctx->api_key_env);
+    }
 }
 
 provider_base_ctx_t *provider_base_ctx(provider_ctx_t *ctx)
