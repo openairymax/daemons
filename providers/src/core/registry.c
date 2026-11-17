@@ -10,6 +10,7 @@
 #include "daemon_platform_ext.h"
 #include "airy_budget.h"
 #include "airy_prov/registry.h"
+#include "airy_prov/provider_backend.h"
 #include "airy_prov/secrets.h"
 #include "svc_logger.h"
 #include "platform.h"
@@ -94,6 +95,13 @@ static int provider_build(const provider_config_t *pcfg, provider_t *slot)
         AIRY_STRNCPY_TERM(provider_base_ctx(ctx)->extra_headers, pcfg->extra_headers,
                           sizeof(provider_base_ctx(ctx)->extra_headers));
     provider_base_ctx(ctx)->caps = pcfg->caps;
+
+    /* B-2：后端就绪状态在装配期一次算清，请求路径只读结果（不做 I/O 判定）。 */
+    provider_backend_t backend;
+    prov_be_scan(pcfg, &backend);
+    provider_base_ctx(ctx)->backend_ready = backend.ready;
+    AIRY_STRNCPY_TERM(provider_base_ctx(ctx)->backend_reason, backend.reason,
+                      sizeof(provider_base_ctx(ctx)->backend_reason));
 
     size_t cnt = 0;
     char **models = models_dup(pcfg, &cnt);
@@ -407,6 +415,8 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name
     base_ctx->timeout_sec = timeout_sec > 0 ? timeout_sec : provider_default_timeout_sec();
     base_ctx->max_retries = max_retries > 0 ? max_retries : 3;
     base_ctx->retry_class = PROVIDER_RETRY_DEFAULT;
+    /* B-2：默认可用；装配面在 provider_build 里按配置覆盖为「未配置」。 */
+    base_ctx->backend_ready = 1;
 
     SVC_LOG_INFO("C-L02: PROVIDER: BASE-INIT api_base=%s timeout=%.1fs retries=%d has_api_key=%d",
                  base_ctx->api_base[0] ? base_ctx->api_base : "(none)", base_ctx->timeout_sec,
