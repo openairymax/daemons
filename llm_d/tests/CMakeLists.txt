@@ -53,6 +53,8 @@ set(LLM_TEST_SOURCES
     test_config_decl.c
     # 0.1.21 B-1：provider 能力位匹配与按能力选路（三组组合 + 保守可用）
     test_provider_caps.c
+    # 0.1.21 B-2：后端就绪判定与未配置快速失败（-418，5s 预算内）
+    test_backend_ready.c
     # 0.1.20 Gate 37：计费热路径两臂证据（单请求 fsync 计数 + 对照臂 p99）
     bench_cost_hotpath.c
 )
