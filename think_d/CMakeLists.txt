@@ -33,6 +33,8 @@ set(THINK_SERVICE_SOURCES
     src/service/think_orch.c
     # 0.1.20 W4：演化观测面采样（A6 monitoring 救活的落点）
     src/service/think_evolve.c
+    # 0.1.21 C-4：双思考 B 侧判决 schema 与提示词（纯函数，黄金集共用）
+    src/service/review_schema.c
 )
 
 add_library(airy_think_service STATIC ${THINK_SERVICE_SOURCES})
