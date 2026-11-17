@@ -120,6 +120,7 @@ static int provider_build(const provider_config_t *pcfg, provider_t *slot)
     slot->models = models;
     slot->model_max_output = caps;
     slot->model_max_concurrent = cncs;
+    slot->hw = pcfg->hw;
     return 0;
 }
 
@@ -212,6 +213,50 @@ const provider_t *provider_registry_find(provider_registry_t *reg, const char *m
     }
     airy_mtx_unlock(&reg->lock);
     AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
+}
+
+/* 模型成员判定（空模型名视为不限）：select 的候选过滤键。 */
+static int prov_has_model(const provider_t *p, const char *model)
+{
+    if (!model || !model[0])
+        return 1;
+    if (!p->models)
+        return 0;
+    for (char **m = p->models; *m; ++m) {
+        if (strcmp(*m, model) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+const provider_t *provider_registry_select(provider_registry_t *reg, const provider_select_t *sel)
+{
+    if (!reg) {
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
+    }
+    airy_mtx_lock(&reg->lock);
+    if (!reg->providers) {
+        airy_mtx_unlock(&reg->lock);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
+    }
+
+    /* 显式满足优先于保守可用；同分保留注册顺序（即配置顺序），因此旧行为
+     * 「按名字选第一个」在能力位全缺省时不变。 */
+    const provider_t *best = NULL;
+    int best_score = PROVIDER_CAPS_MISS;
+    for (provider_t *p = reg->providers; p->name; ++p) {
+        if (sel && !prov_has_model(p, sel->model))
+            continue;
+        int score = provider_caps_match(&p->hw, sel);
+        if (score > best_score) {
+            best = p;
+            best_score = score;
+        }
+        if (best_score == PROVIDER_CAPS_EXACT)
+            break;
+    }
+    airy_mtx_unlock(&reg->lock);
+    return best;
 }
 
 size_t provider_reg_count(provider_registry_t *reg)

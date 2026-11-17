@@ -23,6 +23,8 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 set(AIRY_TRANSPORT_SOURCES
     # 装配与身份
     src/core/registry.c
+    # 能力位匹配（B-1 选路机制面）
+    src/core/caps.c
     # 密钥面（provider 凭据解析与抹除）
     src/core/secrets.c
     # 出网传输：URL/头链/超时/出站体
