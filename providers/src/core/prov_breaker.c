@@ -22,6 +22,7 @@
 
 #include "airy_prov/prov_breaker.h"
 
+#include <cjson/cJSON.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -105,6 +106,18 @@ static brk_rec_t *brk_rec(const char *name)
     rec->last = PROV_BRK_CLOSED;
     g_brk.count++;
     return rec;
+}
+
+/* 调用方持 g.lock：只查不建，读面不因观察而扩张账目表。 */
+static brk_rec_t *brk_find(const char *name)
+{
+    if (!name || name[0] == '\0')
+        return NULL;
+    for (size_t i = 0; i < g_brk.count; ++i) {
+        if (strcmp(g_brk.recs[i].name, name) == 0)
+            return &g_brk.recs[i];
+    }
+    return NULL;
 }
 
 /* 调用方持 g.lock：把 cb 真实状态并回账目（打开次数按跳变累计）。 */
@@ -233,4 +246,102 @@ void prov_brk_reset(void)
     AIRY_MEMSET(g_brk.recs, 0, sizeof(g_brk.recs));
     g_brk.count = 0;
     airy_mtx_unlock(&g_brk.lock);
+}
+
+const char *prov_brk_text(uint32_t state)
+{
+    switch (state) {
+    case PROV_BRK_CLOSED:
+        return "closed";
+    case PROV_BRK_OPEN:
+        return "open";
+    case PROV_BRK_HALF:
+        return "half_open";
+    case PROV_BRK_NONE:
+        return "none";
+    default:
+        return "unknown";
+    }
+}
+
+int prov_brk_state(const char *provider)
+{
+    if (!brk_ready() || !provider || provider[0] == '\0')
+        return PROV_BRK_NONE;
+
+    airy_mtx_lock(&g_brk.lock);
+    brk_rec_t *rec = brk_find(provider);
+    if (rec)
+        brk_sync(rec); /* 读面回放 cb 真实状态，冷却到期的半开在此可见 */
+    int state = rec ? (int)rec->st.state : PROV_BRK_NONE;
+    airy_mtx_unlock(&g_brk.lock);
+    return state;
+}
+
+int prov_brk_stat(const char *provider, prov_brk_stat_t *out)
+{
+    if (!out)
+        return -1;
+    if (!brk_ready() || !provider || provider[0] == '\0')
+        return -1;
+
+    airy_mtx_lock(&g_brk.lock);
+    brk_rec_t *rec = brk_find(provider);
+    if (!rec) {
+        airy_mtx_unlock(&g_brk.lock);
+        return -1;
+    }
+    brk_sync(rec);
+    *out = rec->st;
+    airy_mtx_unlock(&g_brk.lock);
+    return 0;
+}
+
+char *prov_brk_json(void)
+{
+    if (!brk_ready())
+        return NULL;
+
+    cJSON *arr = cJSON_CreateArray();
+    if (!arr)
+        return NULL;
+
+    airy_mtx_lock(&g_brk.lock);
+    for (size_t i = 0; i < g_brk.count; i++) {
+        brk_rec_t *rec = &g_brk.recs[i];
+        brk_sync(rec);
+
+        cJSON *obj = cJSON_CreateObject();
+        if (!obj)
+            continue;
+        cJSON_AddStringToObject(obj, "provider", rec->name);
+        cJSON_AddStringToObject(obj, "state", prov_brk_text(rec->st.state));
+        cJSON_AddNumberToObject(obj, "calls", (double)rec->st.calls);
+        cJSON_AddNumberToObject(obj, "oks", (double)rec->st.oks);
+        cJSON_AddNumberToObject(obj, "fails", (double)rec->st.fails);
+        cJSON_AddNumberToObject(obj, "slow_tmo", (double)rec->st.slow_tmo);
+        cJSON_AddNumberToObject(obj, "budget_tmo", (double)rec->st.budget_tmo);
+        cJSON_AddNumberToObject(obj, "rejects", (double)rec->st.rejects);
+        cJSON_AddNumberToObject(obj, "opens", (double)rec->st.opens);
+        cJSON_AddNumberToObject(obj, "breaks", (double)rec->st.breaks);
+        cJSON_AddItemToArray(arr, obj);
+    }
+    airy_mtx_unlock(&g_brk.lock);
+
+    char *out = cJSON_PrintUnformatted(arr);
+    cJSON_Delete(arr);
+    return out;
+}
+
+uint64_t prov_brk_breaks(void)
+{
+    if (!brk_ready())
+        return 0;
+
+    uint64_t sum = 0;
+    airy_mtx_lock(&g_brk.lock);
+    for (size_t i = 0; i < g_brk.count; ++i)
+        sum += g_brk.recs[i].st.breaks;
+    airy_mtx_unlock(&g_brk.lock);
+    return sum;
 }
