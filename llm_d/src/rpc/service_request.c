@@ -524,6 +524,22 @@ static int stream_attempt(void *ctx, const svc_step_t *step, llm_response_t **ou
     return ret;
 }
 
+/* D-7（Q19）：受理即计数，ok/fail/timeout 三者互斥；超时按错误码单列，
+ * 不再从 error_count 反推。 */
+static void count_outcome(llm_service_t *svc, int rc)
+{
+    struct llm_service *s = (struct llm_service *)svc;
+    airy_mtx_lock(&s->lock);
+    s->req_total++;
+    if (rc == 0)
+        s->req_ok++;
+    else if (rc == AIRY_ERR_TIMEOUT)
+        s->req_timeout++;
+    else
+        s->req_fail++;
+    airy_mtx_unlock(&s->lock);
+}
+
 static int complete_impl(llm_service_t *svc, const llm_request_config_t *manager,
                          llm_response_t **out_response)
 {
@@ -614,6 +630,7 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
     int rc = complete_impl(svc, manager, out_response);
     if (req_leave(svc, gen, out_response) && rc == AIRY_OK)
         rc = AIRY_ERR_BUSY;
+    count_outcome(svc, rc);
     return rc;
 }
 
@@ -678,6 +695,7 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
         /* 已下发的分片无法追回，但聚合结果同样不得回流。 */
         rc = AIRY_ERR_BUSY;
     }
+    count_outcome(svc, rc);
     return rc;
 }
 

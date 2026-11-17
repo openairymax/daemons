@@ -489,6 +489,25 @@ int llm_service_stats(llm_service_t *svc, char **out_json)
     cJSON_AddNumberToObject(root, "llm_cache_size", cache_get_size(svc->cache));
     cJSON_AddNumberToObject(root, "llm_cache_capacity", cache_get_capacity(svc->cache));
 
+    /* D-7（Q19）：一次快照出四元组，调用方无需再从多个计数器拼失败率。 */
+    uint64_t rq_total, rq_ok, rq_fail, rq_timeout;
+    airy_mtx_lock(&svc->lock);
+    rq_total = svc->req_total;
+    rq_ok = svc->req_ok;
+    rq_fail = svc->req_fail;
+    rq_timeout = svc->req_timeout;
+    airy_mtx_unlock(&svc->lock);
+    cJSON *rq = cJSON_CreateObject();
+    if (rq) {
+        cJSON_AddNumberToObject(rq, "total", (double)rq_total);
+        cJSON_AddNumberToObject(rq, "ok", (double)rq_ok);
+        cJSON_AddNumberToObject(rq, "fail", (double)rq_fail);
+        cJSON_AddNumberToObject(rq, "timeout", (double)rq_timeout);
+        cJSON_AddNumberToObject(rq, "success_rate",
+                                rq_total ? (double)rq_ok / (double)rq_total : 0.0);
+        cJSON_AddItemToObject(root, "requests", rq);
+    }
+
     cache_stats_t cache_stats;
     cache_get_stats(svc->cache, &cache_stats);
     cJSON_AddNumberToObject(root, "llm_cache_hits", (double)cache_stats.hits);
