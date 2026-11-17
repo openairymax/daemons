@@ -161,6 +161,45 @@ static void test_run_state(void)
     CHECK(AGENT_RUN_RC_EMPTY == 6, "rc: empty code is 6");
 }
 
+/* C-23：链事件定长字段（160 字节）截断必须停在完整 UTF-8 字符上。 */
+static void test_fit_boundary(void)
+{
+    char buf[160];
+    char src[200];
+
+    memset(src, 'a', 158);
+    src[158] = (char)0xE4;
+    src[159] = (char)0xB8;
+    src[160] = (char)0xAD;
+    src[161] = '\0';
+    run_fit(buf, sizeof(buf), src);
+    CHECK(strlen(buf) == 158, "fit: split multi-byte char dropped");
+    CHECK(utf8_validate(buf, strlen(buf)), "fit: result is valid UTF-8");
+
+    run_fit(buf, sizeof(buf), "紧凑");
+    CHECK(strcmp(buf, "紧凑") == 0, "fit: short UTF-8 verbatim");
+
+    run_fit(buf, sizeof(buf), NULL);
+    CHECK(buf[0] == '\0', "fit: NULL becomes empty");
+}
+
+/* C-23：链事件落盘前必须同时满足 UTF-8 合法与 JSON 可解析。 */
+static void test_evt_line(void)
+{
+    cJSON *obj = cJSON_CreateObject();
+    cJSON_AddStringToObject(obj, "k", "值");
+    char *line = cJSON_PrintUnformatted(obj);
+    CHECK(line && agent_evt_ok(line) == 1, "evt: valid UTF-8 JSON accepted");
+    AIRY_FREE(line);
+    cJSON_Delete(obj);
+
+    CHECK(agent_evt_ok("{\"k\":1}") == 1, "evt: compact ASCII JSON accepted");
+    CHECK(agent_evt_ok("{\"k\":") == 0, "evt: truncated JSON rejected");
+    const char bad[] = {'{', '"', 'k', '"', ':', '"', (char)0xE4, (char)0xB8, '"', '}', '\0'};
+    CHECK(agent_evt_ok(bad) == 0, "evt: invalid UTF-8 rejected");
+    CHECK(agent_evt_ok(NULL) == 0, "evt: NULL rejected");
+}
+
 int main(void)
 {
     test_fail_streak();
@@ -168,6 +207,8 @@ int main(void)
     test_stream_result_free();
     test_orch_contract();
     test_run_state();
+    test_fit_boundary();
+    test_evt_line();
     if (g_fail)
         printf("FAILURES: %d\n", g_fail);
     else

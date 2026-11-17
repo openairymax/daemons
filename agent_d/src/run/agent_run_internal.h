@@ -209,6 +209,16 @@ void agent_run_gen_run_id(char *out, size_t out_size);
 int agent_run_orchestrate(const cJSON *agent_spec, const char *prompt, char **out_text,
                           char **out_err);
 
+/* ---- 决策链写侧（agent_run_exec.c） ---- */
+
+/**
+ * @brief 判定一行待落盘的链事件是否可持久化：UTF-8 合法且 JSON 可解析。
+ *
+ * 链事件按 NDJSON 追加，一条坏行会让整段回放失败，故写入前必须过此判定；
+ * 失败由调用方告警并丢弃（best effort，不阻塞 run 主流程）。
+ */
+int agent_evt_ok(const char *line);
+
 #ifdef __cplusplus
 }
 #endif

@@ -106,6 +106,19 @@ static char *run_rpc(const char *sock_name, const char *method, cJSON *params, i
     return resp;
 }
 
+int agent_evt_ok(const char *line)
+{
+    if (!line)
+        return 0;
+    if (!utf8_validate(line, strlen(line)))
+        return 0;
+    cJSON *probe = cJSON_Parse(line);
+    if (!probe)
+        return 0;
+    cJSON_Delete(probe);
+    return 1;
+}
+
 /* 记录一条 hall 事件（决策链写侧，best effort：写失败不阻塞主流程）。
  * 落盘前校验 JSON 合法性与 UTF-8：链事件是后续复盘与回放的输入，写入
  * 一条坏行会让整段链路（NDJSON）解析失败，故宁可丢弃并告警。 */
@@ -116,14 +129,11 @@ static void agent_record_event(const char *session_id, const char *category, cJS
     char *content_str = cJSON_PrintUnformatted(content);
     if (!content_str)
         return;
-    size_t len = strlen(content_str);
-    cJSON *probe = utf8_validate(content_str, len) ? cJSON_Parse(content_str) : NULL;
-    if (!probe) {
-        SVC_LOG_WARN("agent.run: dropping malformed %s event (session=%s, %zu bytes)", category,
-                     session_id, len);
-    } else {
-        cJSON_Delete(probe);
+    if (agent_evt_ok(content_str)) {
         (void)hall_evt_write(session_id, category, NULL, content_str);
+    } else {
+        SVC_LOG_WARN("agent.run: dropping malformed %s event (session=%s, %zu bytes)", category,
+                     session_id, strlen(content_str));
     }
     AIRY_FREE(content_str);
 }
