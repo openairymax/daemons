@@ -62,8 +62,9 @@ set(TOOL_SERVICE_SOURCES
     src/builtin/builtin_toolmake.c
     # C-22 特权执行通道：白名单 + 参数校验 + 审计 + 出沙箱执行
     src/builtin/builtin_priv.c
-    # C-26 环境可行性预检：失败路径只读归因
+    # C-26 环境可行性预检 / C-27 第三方二进制兼容归因（失败路径只读归因）
     src/builtin/builtin_envcheck.c
+    src/builtin/builtin_compat.c
     src/approval/tool_interactive_approval.c
     src/sandbox/os_sandbox.c
     # plugin_d → tool_d 整编——插件 dlopen 引擎随迁
