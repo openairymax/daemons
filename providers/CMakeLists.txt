@@ -25,6 +25,8 @@ set(AIRY_TRANSPORT_SOURCES
     src/core/registry.c
     # 能力位匹配（B-1 选路机制面）
     src/core/caps.c
+    # 后端就绪判定（B-2：未配置时快速失败，不出网）
+    src/core/backend.c
     # 密钥面（provider 凭据解析与抹除）
     src/core/secrets.c
     # 出网传输：URL/头链/超时/出站体
