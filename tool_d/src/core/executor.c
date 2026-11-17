@@ -205,7 +205,8 @@ static void tool_hall_emit_result(const tool_metadata_t *meta, const char *calle
     cJSON_AddStringToObject(evt, "event", "tool_result");
     cJSON_AddStringToObject(evt, "tool", meta->id ? meta->id : "");
     cJSON_AddStringToObject(evt, "name", meta->name ? meta->name : "");
-    cJSON_AddNumberToObject(evt, "success", result->success ? 1 : 0);
+    cJSON_AddNumberToObject(evt, "success", tool_result_ok(result) ? 1 : 0);
+    cJSON_AddNumberToObject(evt, "err_code", (double)result->err_code);
     cJSON_AddNumberToObject(evt, "exit_code", (double)result->exit_code);
     cJSON_AddNumberToObject(evt, "duration_ms", (double)result->duration_ms);
     if (result->error && result->error[0])
@@ -244,7 +245,7 @@ static void tool_call_log(const tool_metadata_t *meta, const char *caller_agent,
     if (result) {
         switch (result->failure_class) {
         case TOOL_RESULT_CLASS_SUCCESS:
-            st = result->success ? "success" : "fail";
+            st = tool_result_ok(result) ? "success" : "fail";
             break;
         case TOOL_RESULT_CLASS_NORMAL_FAIL:
             st = "fail";
@@ -267,7 +268,7 @@ static void tool_call_log(const tool_metadata_t *meta, const char *caller_agent,
 /* Every rejection path fills the same result fields. msg transfers to result. */
 static int tool_fail(tool_result_t *result, char *msg, tool_result_class_t cls, int err)
 {
-    result->success = 0;
+    result->err_code = (err < 0) ? err : AIRY_ERR_GENERIC_FAIL;
     result->output = AIRY_STRDUP("");
     result->error = msg;
     result->exit_code = -1;
@@ -294,7 +295,7 @@ static void tool_set_exit(tool_executor_t *exec, tool_result_t *result, int ret,
     char msg[256];
 
     if (ret == 0) {
-        result->success = 1;
+        result->err_code = AIRY_OK;
         result->exit_code = 0;
         result->failure_class = TOOL_RESULT_CLASS_SUCCESS;
         /* P2: keep the counter update under exec->lock (as the builtin branch
@@ -305,7 +306,7 @@ static void tool_set_exit(tool_executor_t *exec, tool_result_t *result, int ret,
         return;
     }
 
-    result->success = 0;
+    result->err_code = AIRY_ERR_GENERIC_FAIL;
     result->exit_code = ret;
     if (ret == -1) {
         SVC_LOG_ERROR("tool_executor_run: failed to start command '%s'", name);
@@ -319,6 +320,7 @@ static void tool_set_exit(tool_executor_t *exec, tool_result_t *result, int ret,
         SVC_LOG_ERROR("tool_executor_run: command timed out after %u ms (executable=%s)",
                       timeout_ms, name);
         result->error = AIRY_STRDUP("Command timed out");
+        result->err_code = AIRY_ERR_TIMEOUT;
         result->exit_code = -1;
         result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL;
         return;
@@ -344,7 +346,7 @@ static int tool_builtin_exec(tool_executor_t *exec, const tool_metadata_t *meta,
 {
     int rc = tool_builtin_run(meta->id, params_json, executor_budget_ms(exec, meta), result);
     result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
-    if (rc == 0 && result->success) {
+    if (rc == 0 && tool_result_ok(result)) {
         result->failure_class = TOOL_RESULT_CLASS_SUCCESS;
         airy_mtx_lock(&exec->lock);
         exec->success_count++;
@@ -405,7 +407,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         *out_result = result;
         return tool_fail(result,
                          AIRY_STRDUP("Safety approval system not configured (approval gate is NULL)"),
-                         TOOL_RESULT_CLASS_FATAL, AIRY_EPERM);
+                         TOOL_RESULT_CLASS_FATAL, AIRY_ERR_PERMISSION_DENIED);
     }
 
     {
@@ -417,7 +419,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
             return tool_fail(result,
                              deny_reason ? deny_reason
                                          : AIRY_STRDUP("Tool execution denied by safety guard"),
-                             TOOL_RESULT_CLASS_RESPOND_TO_MODEL, AIRY_EPERM);
+                             TOOL_RESULT_CLASS_RESPOND_TO_MODEL, AIRY_ERR_PERMISSION_DENIED);
         }
     }
 

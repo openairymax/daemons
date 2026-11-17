@@ -88,7 +88,7 @@ int fs_list_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     cJSON_Delete(arr);
     if (!res->output)
         return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY, "Failed to serialize directory listing");
-    res->success = 1;
+    res->err_code = AIRY_OK;
     res->exit_code = 0;
     return AIRY_OK;
 }

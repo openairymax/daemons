@@ -156,7 +156,7 @@ static void test_reject_unknown_tool_suggests(void)
     int rc = tool_service_execute(svc, &req, &res);
     CHECK(rc == AIRY_ERR_EXEC_NOT_FOUND);
     CHECK(res != NULL);
-    CHECK(res->success == 0);
+    CHECK(res->err_code != 0);
     CHECK(res->error != NULL);
     CHECK(strstr(res->error, "did you mean") != NULL);
     CHECK(strstr(res->error, "echo_tool") != NULL);
@@ -195,7 +195,7 @@ static void test_reject_bad_params_contract(void)
     int rc = tool_service_execute(svc, &req, &res);
     CHECK(rc == AIRY_ERR_EXEC_VALIDATION);
     CHECK(res != NULL);
-    CHECK(res->success == 0);
+    CHECK(res->err_code != 0);
     CHECK(res->error != NULL);
     CHECK(strstr(res->error, "declared params") != NULL);
     CHECK(strstr(res->error, "path(string, required)") != NULL);
@@ -238,7 +238,7 @@ static void test_fs_delete_builtin(void)
     CHECK(res != NULL);
     snprintf(jbuf, sizeof(jbuf), "{\"path\":\"%s\"}", fpath);
     int rc = fs_delete_tool(jbuf, 0, res);
-    CHECK(rc == 0 && res->success == 1);
+    CHECK(rc == 0 && res->err_code == 0);
     CHECK(access(fpath, F_OK) != 0);
     tool_result_free(res);
 
@@ -247,7 +247,7 @@ static void test_fs_delete_builtin(void)
     CHECK(res != NULL);
     snprintf(jbuf, sizeof(jbuf), "{\"path\":\"%s\"}", dpath);
     rc = fs_delete_tool(jbuf, 0, res);
-    CHECK(rc == 0 && res->success == 1);
+    CHECK(rc == 0 && res->err_code == 0);
     CHECK(access(dpath, F_OK) != 0);
     tool_result_free(res);
 
@@ -262,7 +262,7 @@ static void test_fs_delete_builtin(void)
     CHECK(res != NULL);
     snprintf(jbuf, sizeof(jbuf), "{\"path\":\"%s\"}", dpath);
     rc = fs_delete_tool(jbuf, 0, res);
-    CHECK(rc == 0 && res->success == 0);
+    CHECK(rc == 0 && res->err_code != 0);
     CHECK(access(dpath, F_OK) == 0);
     tool_result_free(res);
 
@@ -271,7 +271,7 @@ static void test_fs_delete_builtin(void)
     CHECK(res != NULL);
     snprintf(jbuf, sizeof(jbuf), "{\"path\":\"%s\",\"recursive\":true}", dpath);
     rc = fs_delete_tool(jbuf, 0, res);
-    CHECK(rc == 0 && res->success == 1);
+    CHECK(rc == 0 && res->err_code == 0);
     CHECK(access(dpath, F_OK) != 0);
     tool_result_free(res);
 
@@ -279,7 +279,7 @@ static void test_fs_delete_builtin(void)
     res = (tool_result_t *)calloc(1, sizeof(tool_result_t));
     CHECK(res != NULL);
     rc = fs_delete_tool("{\"path\":\"/\"}", 0, res);
-    CHECK(!(rc == 0 && res->success == 1));
+    CHECK(!(rc == 0 && res->err_code == 0));
     tool_result_free(res);
 
     printf("    PASSED\n");
@@ -306,7 +306,7 @@ static void test_tool_create_builtin(void)
 
     tool_result_t *res = NULL;
     int rc = tool_service_execute(svc, &req, &res);
-    CHECK(rc == 0 && res != NULL && res->success == 1);
+    CHECK(rc == 0 && res != NULL && res->err_code == 0);
     CHECK(res->output != NULL);
     CHECK(strstr(res->output, "\"updated\":false") != NULL);
     tool_result_free(res);
@@ -322,7 +322,7 @@ static void test_tool_create_builtin(void)
     req.params_json = "{\"who\":\"bob\"}";
     res = NULL;
     rc = tool_service_execute(svc, &req, &res);
-    CHECK(rc == 0 && res != NULL && res->success == 1);
+    CHECK(rc == 0 && res != NULL && res->err_code == 0);
     CHECK(res->output != NULL && strstr(res->output, "hi:") != NULL);
     tool_result_free(res);
 
@@ -331,7 +331,7 @@ static void test_tool_create_builtin(void)
     req.params_json = create_json;
     res = NULL;
     rc = tool_service_execute(svc, &req, &res);
-    CHECK(rc == 0 && res != NULL && res->success == 1);
+    CHECK(rc == 0 && res != NULL && res->err_code == 0);
     CHECK(strstr(res->output, "\"updated\":true") != NULL);
     tool_result_free(res);
 
@@ -340,7 +340,7 @@ static void test_tool_create_builtin(void)
                       "\"script\":\"#!/bin/sh\\nexit 0\\n\"}";
     res = NULL;
     rc = tool_service_execute(svc, &req, &res);
-    CHECK(res != NULL && res->success == 0);
+    CHECK(res != NULL && res->err_code != 0);
     CHECK(res->error != NULL && strstr(res->error, "already registered") != NULL);
     tool_result_free(res);
 
@@ -349,14 +349,14 @@ static void test_tool_create_builtin(void)
                       "\"script\":\"#!/bin/sh\\nexit 0\\n\"}";
     res = NULL;
     rc = tool_service_execute(svc, &req, &res);
-    CHECK(res != NULL && res->success == 0);
+    CHECK(res != NULL && res->err_code != 0);
     tool_result_free(res);
 
     req.params_json = "{\"name\":\"no_shebang\",\"description\":\"x\","
                       "\"script\":\"exit 0\\n\"}";
     res = NULL;
     rc = tool_service_execute(svc, &req, &res);
-    CHECK(res != NULL && res->success == 0);
+    CHECK(res != NULL && res->err_code != 0);
     CHECK(res->error != NULL && strstr(res->error, "shebang") != NULL);
     tool_result_free(res);
 

@@ -208,7 +208,7 @@ static void crud_write(tool_service_t *svc)
     cJSON_AddStringToObject(p, "content", kSource);
     res = run_tool(svc, "fs_write", "tool_d", p, &ret);
     cJSON_Delete(p);
-    TEST(ret == 0 && res && res->success == 1, "fs_write 创建 main.c");
+    TEST(ret == 0 && res && res->err_code == 0, "fs_write 创建 main.c");
     res_dump("fs_write", res);
 }
 
@@ -218,7 +218,7 @@ static void crud_read(tool_service_t *svc)
     int ret = -999;
     tool_result_t *res = run_path(svc, "fs_read", E2E_FILE, &ret);
 
-    TEST(ret == 0 && res && res->success == 1 && res->output && strcmp(res->output, kSource) == 0,
+    TEST(ret == 0 && res && res->err_code == 0 && res->output && strcmp(res->output, kSource) == 0,
          "fs_read 内容与写入一致");
     if (res)
         tool_result_free(res);
@@ -237,7 +237,7 @@ static void crud_edit(tool_service_t *svc)
     cJSON_AddStringToObject(p, "new", kEditNew);
     res = run_tool(svc, "fs_edit", "tool_d", p, &ret);
     cJSON_Delete(p);
-    TEST(ret == 0 && res && res->success == 1, "fs_edit 精确替换生效");
+    TEST(ret == 0 && res && res->err_code == 0, "fs_edit 精确替换生效");
     res_dump("fs_edit", res);
 }
 
@@ -247,7 +247,7 @@ static void crud_verify(tool_service_t *svc)
     int ret = -999;
     tool_result_t *res = run_path(svc, "fs_read", E2E_FILE, &ret);
 
-    TEST(ret == 0 && res && res->success == 1 && res->output &&
+    TEST(ret == 0 && res && res->err_code == 0 && res->output &&
              strstr(res->output, kEditNew) != NULL && strstr(res->output, kEditOld) == NULL,
          "fs_read 复核：EXIT_SUCCESS 生效且 return 0 已替换");
     if (res)
@@ -266,7 +266,7 @@ static void crud_glob(tool_service_t *svc)
     cJSON_AddStringToObject(p, "base", E2E_DIR);
     res = run_tool(svc, "fs_glob", "tool_d", p, &ret);
     cJSON_Delete(p);
-    TEST(ret == 0 && res && res->success == 1 && res->output &&
+    TEST(ret == 0 && res && res->err_code == 0 && res->output &&
              strstr(res->output, "main.c") != NULL,
          "fs_glob 定位到 main.c");
     res_dump("fs_glob", res);
@@ -284,7 +284,7 @@ static void crud_grep(tool_service_t *svc)
     cJSON_AddStringToObject(p, "path", E2E_DIR);
     res = run_tool(svc, "fs_grep", "tool_d", p, &ret);
     cJSON_Delete(p);
-    TEST(ret == 0 && res && res->success == 1 && res->output &&
+    TEST(ret == 0 && res && res->err_code == 0 && res->output &&
              strstr(res->output, "main.c") != NULL &&
              strstr(res->output, "hello airymax") != NULL,
          "fs_grep 命中 main.c 中的关键字");
@@ -297,7 +297,7 @@ static void crud_list(tool_service_t *svc)
     int ret = -999;
     tool_result_t *res = run_path(svc, "fs_list", E2E_DIR, &ret);
 
-    TEST(ret == 0 && res && res->success == 1 && res->output &&
+    TEST(ret == 0 && res && res->err_code == 0 && res->output &&
              strstr(res->output, "main.c") != NULL,
          "fs_list 目录清单包含 main.c");
     res_dump("fs_list", res);
@@ -310,10 +310,10 @@ static void crud_delete(tool_service_t *svc)
     tool_result_t *res = run_path(svc, "fs_delete", E2E_FILE, &ret);
 
 #ifndef _WIN32
-    TEST(ret == 0 && res && res->success == 1 && access(E2E_FILE, F_OK) != 0,
+    TEST(ret == 0 && res && res->err_code == 0 && access(E2E_FILE, F_OK) != 0,
          "fs_delete 文件真实删除");
 #else
-    TEST(ret == 0 && res && res->success == 1, "fs_delete 文件真实删除");
+    TEST(ret == 0 && res && res->err_code == 0, "fs_delete 文件真实删除");
 #endif
     res_dump("fs_delete", res);
 }
@@ -529,7 +529,7 @@ static void test_e2e_path_contract(tool_service_t *svc)
 
     char expect[640];
     snprintf(expect, sizeof(expect), "%s/nested/deep/note.txt", ws);
-    TEST(ret == 0 && res && res->success == 1 && res->output &&
+    TEST(ret == 0 && res && res->err_code == 0 && res->output &&
              strstr(res->output, expect) != NULL,
          "相对路径写入回执回显解析后的绝对路径 (#4)");
     if (res) {
@@ -569,7 +569,7 @@ static void test_e2e_path_contract(tool_service_t *svc)
     cJSON_AddBoolToObject(p, "create_dirs", 0);
     res = run_tool(svc, "fs_write", "tool_d", p, &ret);
     cJSON_Delete(p);
-    TEST(ret == 0 && res && res->success == 1, "create_dirs=0 且父目录存在时写入成功 (N3)");
+    TEST(ret == 0 && res && res->err_code == 0, "create_dirs=0 且父目录存在时写入成功 (N3)");
     if (res) {
         tool_result_free(res);
     }
