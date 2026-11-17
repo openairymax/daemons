@@ -71,7 +71,7 @@ typedef struct {
  * 收敛轮次或直接快速失败，不需要再读 JSON 或推算时间戳。 */
 typedef struct {
     uint32_t state;        /* prov_brk_t */
-    uint32_t open_left_ms; /* OPEN 剩余冷却；HALF/CLOSED/NONE 为 0 */
+    uint32_t open_left_ms; /* OPEN 剩余冷却；0 = 冷却已到（下次放行即半开探针） */
     uint64_t fails;        /* 端点失败累计（fails + slow_tmo） */
     uint64_t budget_tmo;   /* 预算不足终止次数 */
     uint64_t breaks;       /* 被拒累计（熔断拒绝 + 预算终止） */
