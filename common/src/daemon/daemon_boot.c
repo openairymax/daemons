@@ -23,6 +23,7 @@
 
 #include "airy_rt.h"
 #include "daemon_main.h"
+#include "compat.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -178,8 +179,8 @@ int daemon_boot(int argc, char **argv, const daemon_boot_t *boot)
 
     int core_ret = airy_init();
     if (core_ret == AIRY_SUCCESS)
-        SVC_LOG_INFO("corekern core initialized (%s, version %s, runs on corekern)",
-                     boot->daemon, DAEMON_VERSION);
+        SVC_LOG_INFO("corekern core initialized (%s, version %s, build %s, runs on corekern)",
+                     boot->daemon, DAEMON_VERSION, airy_build_id());
     else
         SVC_LOG_WARN("corekern init failed (%d), degraded (badge=0)", core_ret);
 
