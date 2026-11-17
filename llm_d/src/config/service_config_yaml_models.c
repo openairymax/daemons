@@ -246,7 +246,11 @@ static void svc_yaml_route(model_entry_t *m, struct yaml_node *item, size_t row)
 
 /* B-1 能力位：accelerator 接受厂商名或枚举值；vram_bytes 接受 k/m/g 后缀；
  * max_context 十进制 token；supports_stream/tools 三值（缺省/空 = 未知）。
- * 任一键出现即 declared=1；非法值保持未知，不静默写成 0 造成「显式不支持」。 */
+ * 任一键出现即 declared=1；非法值保持未知，不静默写成 0 造成「显式不支持」。
+ *
+ * C-1：context_window 是模型容量声明（如 "128k"），此前只作展示串留存，
+ * 路由器端点容量恒为 8192 硬编码。现当 max_context 缺省时由 context_window
+ * 派生 max_context（显式 max_context 优先），使声明值真正进入选路机制。 */
 static airy_accel_kind_t svc_yaml_accel(const char *v)
 {
     if (!v || !v[0])
@@ -288,8 +292,9 @@ static void svc_yaml_hw_apply(model_entry_t *m, struct yaml_node *item)
     const char *mc = svc_yaml_item_str(item, "max_context");
     const char *st = svc_yaml_item_str(item, "supports_stream");
     const char *tl = svc_yaml_item_str(item, "supports_tools");
+    int cw_fallback = (!mc && m->context_window[0]);
 
-    if (!acc && !vr && !mc && !st && !tl)
+    if (!acc && !vr && !mc && !st && !tl && !cw_fallback)
         return;
     m->hw_caps.declared = 1;
     m->hw_caps.supports_stream = -1;
@@ -300,6 +305,11 @@ static void svc_yaml_hw_apply(model_entry_t *m, struct yaml_node *item)
         m->hw_caps.vram_bytes = svc_yaml_bytes(vr);
     if (mc)
         m->hw_caps.max_context = (uint32_t)strtoul(mc, NULL, 10);
+    else if (cw_fallback) {
+        int n = svc_tokens_parse(m->context_window);
+        if (n > 0)
+            m->hw_caps.max_context = (uint32_t)n;
+    }
     if (st)
         m->hw_caps.supports_stream = svc_yaml_tristate(st);
     if (tl)
