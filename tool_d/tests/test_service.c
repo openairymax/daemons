@@ -103,6 +103,50 @@ static void test_service_list_tools(void)
     printf("    PASSED\n");
 }
 
+/* C-16：include_denied 语义——不可用工具默认不下发；显式请求时下发并
+ * 带 available=false 与 denied_reason，供上层记录降级原因。 */
+static void test_service_list_ex(void)
+{
+    printf("  test_service_list_ex...\n");
+
+    tool_service_t *svc = tool_service_create(NULL);
+    CHECK(svc != NULL);
+
+    tool_metadata_t ok;
+    AIRY_MEMSET(&ok, 0, sizeof(ok));
+    ok.id = "ex_ok_tool";
+    ok.name = "ex_ok_tool";
+    ok.executable = "/bin/echo";
+    ok.timeout_sec = 10;
+
+    tool_metadata_t missing;
+    AIRY_MEMSET(&missing, 0, sizeof(missing));
+    missing.id = "ex_missing_binary";
+    missing.name = "ex_missing_binary";
+    missing.executable = "/nonexistent/airy/unit_test_binary";
+    missing.timeout_sec = 10;
+
+    CHECK(tool_service_register(svc, &ok) == AIRY_OK);
+    CHECK(tool_service_register(svc, &missing) == AIRY_OK);
+
+    char *visible = tool_service_list_ex(svc, 0);
+    CHECK(visible != NULL);
+    CHECK(strstr(visible, "ex_ok_tool") != NULL);
+    CHECK(strstr(visible, "ex_missing_binary") == NULL);
+    free(visible);
+
+    char *all = tool_service_list_ex(svc, 1);
+    CHECK(all != NULL);
+    CHECK(strstr(all, "ex_missing_binary") != NULL);
+    CHECK(strstr(all, "missing_binary") != NULL);
+    CHECK(strstr(all, "\"available\":false") != NULL);
+    free(all);
+
+    tool_service_destroy(svc);
+
+    printf("    PASSED\n");
+}
+
 static void test_service_get_tool(void)
 {
     printf("  test_service_get_tool...\n");
@@ -380,6 +424,7 @@ int main(void)
     test_service_create_destroy();
     test_service_register_tool();
     test_service_list_tools();
+    test_service_list_ex();
     test_service_get_tool();
     test_reject_unknown_tool_suggests();
     test_reject_bad_params_contract();
