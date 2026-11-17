@@ -229,6 +229,17 @@ static int pick_error(llm_service_t *svc)
     return svc_reg_empty(svc) ? AIRY_ERR_LLM_NO_PROVIDER : AIRY_ERR_LLM_INVALID_MODEL;
 }
 
+/* A-8：首次真实调用成功时打印一次「声明 → 实际」模型对。之后静默，
+ * 避免热路径日志放大；原子交换保证多线程下至多一次。 */
+static void attest_first_call(llm_service_t *svc, const char *declared, const char *actual)
+{
+    if (__atomic_exchange_n(&svc->attest_first_seen, 1, __ATOMIC_RELAXED))
+        return;
+    SVC_LOG_INFO("C-L02: ATTEST: first call declared=%s actual=%s",
+                 (declared && declared[0]) ? declared : svc->default_model,
+                 (actual && actual[0]) ? actual : "(unknown)");
+}
+
 /* 双入口统一的选取链：策略路由优先，miss 时回落注册表精确查找；
  * 仍无可用 provider 则记录带 STACK 的失败日志并返回 NULL。 */
 static const provider_t *pick_provider(llm_service_t *svc, const llm_request_config_t *manager,
@@ -549,6 +560,7 @@ static int complete_impl(llm_service_t *svc, const llm_request_config_t *manager
     }
 
     note_truncation(resp, hit.model, hit.max_tokens, manager->max_tokens);
+    attest_first_call(svc, manager->model, hit.model);
     update_cost_tracking(svc, hit.model, resp);
 
     /* 写入键改用实际模型：同一逻辑请求换端点后答案不可互相冒充（H8）。 */
@@ -616,6 +628,7 @@ static int stream_impl(llm_service_t *svc, const llm_request_config_t *manager,
 
     if (resp) {
         note_truncation(resp, hit.model, hit.max_tokens, manager->max_tokens);
+        attest_first_call(svc, manager->model, hit.model);
         update_cost_tracking(svc, hit.model, resp);
     }
 

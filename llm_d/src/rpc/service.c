@@ -315,6 +315,13 @@ llm_service_t *llm_service_create(const char *config_path)
     llm_route_init(svc);
     llm_watch_cfg(svc, config_path);
 
+    /* 0.1.21 A-8：声明 = 注册 = 生效。未闭合即拒绝启动，不以默认值兜底；
+     * 逃生开关只降级为 ESCAPED 告警，不放宽对账本身。 */
+    if (llm_boot_attest(svc) != 0) {
+        llm_service_destroy(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_SVC_CONFIG, "config attestation rejected");
+    }
+
     SVC_LOG_INFO("C-L02: SVC: CREATE-OK pricing_rules=%d llm_cache_capacity=%zu cache_ttl=%u",
                  (int)svc->rule_count, b.base.llm_cache_capacity, b.base.llm_cache_ttl_sec);
     return svc;

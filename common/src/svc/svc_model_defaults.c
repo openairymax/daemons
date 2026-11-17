@@ -380,6 +380,49 @@ int svc_model_defaults_models0_from_yaml(const char *path, svc_model_llm_config_
     return rc;
 }
 
+int svc_model_ids_from_yaml(const char *path, char ids[][SVC_MODEL_ID_MAX], size_t cap,
+                            size_t *out_n)
+{
+    if (!path || !path[0] || !ids || cap == 0 || !out_n)
+        return AIRY_ERR_INVALID_PARAM;
+
+    *out_n = 0;
+    yaml_document_t *doc = yaml_open(path);
+    if (!doc)
+        return AIRY_ERR_IO;
+
+    /* 简化 llm 段优先：存在且非空时 llm_d 只展开这一个 provider。 */
+    struct yaml_node *llm = yaml_get(yaml_root(doc), "llm");
+    if (llm && llm->type == YAML_NODE_MAPPING) {
+        const char *one = yaml_as_string(yaml_get(llm, "model"), "");
+        if (one && one[0]) {
+            AIRY_STRNCPY_TERM(ids[0], one, SVC_MODEL_ID_MAX);
+            *out_n = 1;
+        }
+    }
+
+    struct yaml_node *models = yaml_get(yaml_root(doc), "models");
+    if (models && models->type == YAML_NODE_SEQUENCE) {
+        for (size_t i = 0; i < models->sequence.count && *out_n < cap; ++i) {
+            struct yaml_node *item = yaml_get_index(models, i);
+            if (!item || item->type != YAML_NODE_MAPPING)
+                continue;
+            const char *id = yaml_as_string(yaml_get(item, "model_id"), "");
+            if (!id || !id[0])
+                continue;
+            size_t k = 0;
+            for (; k < *out_n; ++k) {
+                if (strcmp(ids[k], id) == 0)
+                    break;
+            }
+            if (k == *out_n)
+                AIRY_STRNCPY_TERM(ids[(*out_n)++], id, SVC_MODEL_ID_MAX);
+        }
+    }
+    yaml_destroy(doc);
+    return *out_n > 0 ? 0 : AIRY_ERR_NOT_FOUND;
+}
+
 int svc_model_defaults_think_from_yaml(const char *path, svc_model_think_config_t *out)
 {
     if (!path || !path[0] || !out)
