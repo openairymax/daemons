@@ -25,7 +25,7 @@
 #include <string.h>
 #include <time.h>
 #include <cjson/cJSON.h>
-#include <airymax/sched.h>
+#include <linux/airymax/sched.h>
 
 int sched_service_create(const sched_config_t *config, sched_service_t **service)
 {
