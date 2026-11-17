@@ -18,7 +18,8 @@
     "pool": { "max_events": 64, "min": 4, "max": 8, "queue": 256 },
     "methods": [
       "register", "list_tools", "get_tool", "execute_tool", "execute",
-      "list", "health_check", "get_stats", "pending", "approve"
+      "list", "health_check", "get_stats", "pending", "approve",
+      "submit", "poll", "cancel"
     ]
   },
   "deps": { "required": [], "optional": [] },

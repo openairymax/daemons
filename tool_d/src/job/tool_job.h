@@ -76,6 +76,13 @@ tooljob_t *tooljob_new(const char *root, tool_job_run_t run, void *ctx);
 void tooljob_free(tooljob_t *jobs);
 
 /**
+ * @brief 等待运行中作业收尾（守护退出前用，避免执行线程访问已销毁服务）。
+ * @param timeout_ms 最长等待毫秒数
+ * @return 0 = 全部结束；AIRY_ETIMEDOUT = 仍有作业运行；负值 = 参数错误
+ */
+int tooljob_drain(tooljob_t *jobs, int timeout_ms);
+
+/**
  * @brief 提交作业（立即返回 job_id，执行在后台线程）。
  * @param timeout_sec 本次执行预算（秒）；<=0 用工具元数据缺省值。
  * @return 0 成功；AIRY_ERR_* 失败（未知工具、容量满、线程创建失败）。
