@@ -280,12 +280,17 @@ tool_metadata_t *tool_service_get(tool_service_t *svc, const char *tool_id)
 
 char *tool_service_list(tool_service_t *svc)
 {
+    return tool_service_list_ex(svc, 0);
+}
+
+char *tool_service_list_ex(tool_service_t *svc, int include_denied)
+{
     if (!svc) {
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     airy_mtx_lock(&svc->lock);
-    char *json = tool_registry_list_json(svc->registry);
+    char *json = tool_registry_catalog_json(svc->registry, include_denied);
     airy_mtx_unlock(&svc->lock);
 
     return json;
