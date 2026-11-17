@@ -387,11 +387,13 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name
     /* Record the api_key_env name (for secrets.env hot-reload on request).
      * Prefer extracting from the "env:NAME" prefix; otherwise derive the
      * conventional env var name from the declared provider name (brand-neutral
-     * rule in core/secrets.c, no vendor table). */
+     * rule in core/secrets.c, no vendor table). An explicit empty api_key means
+     * the provider has no key (local adapter): do not fabricate an env name,
+     * which would emit a misleading NO-KEY warning for self-hosted models. */
     base_ctx->api_key_env[0] = '\0';
     if (api_key && strncmp(api_key, "env:", 4) == 0) {
         copy_fit(base_ctx->api_key_env, sizeof(base_ctx->api_key_env), api_key + 4);
-    } else {
+    } else if (!api_key || api_key[0] != '\0') {
         char env_name[128];
         if (sec_env_name_for(provider_name, env_name, sizeof(env_name))) {
             AIRY_STRNCPY_TERM(base_ctx->api_key_env, env_name, sizeof(base_ctx->api_key_env));
