@@ -18,6 +18,8 @@
 #include "llm_d_internal.h"
 #include "airy_prov/prov_diag.h"
 #include "airy_prov/prov_breaker.h"
+#include "airy_prov/provider_http.h"
+#include "airy_prov/secrets.h"
 #include "response.h"
 #include "router/core/llm_rtr_health.h"
 #include "token.h"
@@ -253,6 +255,127 @@ static void handle_count_tokens(cJSON *params, int id, airy_sock_t fd)
     cJSON_AddStringToObject(result, "text", text->valuestring);
     cJSON_AddNumberToObject(result, "tokens", (double)tokens);
     cJSON_AddStringToObject(result, "algorithm", airy_token_get_algorithm_info());
+    JSONRPC_SEND_SUCCESS(fd, result, id);
+}
+
+/* D-2：Provider 连通性探测。密钥写入后由 `agentrt key` 立即调用；
+ * 判据与业务请求同源（provider_refresh_api_key 热解析 + prov_probe_get
+ * 出网），不复用任何旧值，失败给出可判读原因。 */
+typedef struct {
+    const char *want;
+    const provider_t *hit;
+    int exact;
+} probe_pick_t;
+
+static int probe_walk(const provider_t *prov, void *ud)
+{
+    probe_pick_t *pick = (probe_pick_t *)ud;
+    if (!prov || !prov->name)
+        return 0;
+    if (!pick->hit)
+        pick->hit = prov;
+    if (pick->want && strcmp(prov->name, pick->want) == 0) {
+        pick->hit = prov;
+        pick->exact = 1;
+        return 1;
+    }
+    return 0;
+}
+
+static const char *probe_reason(int rc, long code, int key_missing, int base_missing)
+{
+    if (base_missing)
+        return "api_base_missing";
+    if (key_missing)
+        return "api_key_missing";
+    if (rc != AIRY_OK && code == 0)
+        return (rc == AIRY_ERR_TIMEOUT) ? "timeout" : "unreachable";
+    if (code >= 200 && code < 400)
+        return "ok";
+    if (code == 401 || code == 403)
+        return "auth_failed";
+    if (code == 404)
+        return "endpoint_not_found";
+    if (code == 429)
+        return "rate_limited";
+    if (code >= 500)
+        return "upstream_error";
+    return "unexpected_status";
+}
+
+static void handle_probe(cJSON *params, int id, airy_sock_t fd)
+{
+    JSONRPC_REQUIRE(params && g_service, fd, "Invalid params", id);
+
+    cJSON *pj = cJSON_GetObjectItem(params, "provider");
+    cJSON *mj = cJSON_GetObjectItem(params, "model");
+    const char *want = (cJSON_IsString(pj) && pj->valuestring && pj->valuestring[0])
+                           ? pj->valuestring
+                           : NULL;
+    const char *model = (cJSON_IsString(mj) && mj->valuestring && mj->valuestring[0])
+                            ? mj->valuestring
+                            : NULL;
+
+    provider_registry_t *reg = llm_svc_reg(g_service);
+    const provider_t *prov = (model && reg) ? provider_registry_find(reg, model) : NULL;
+    if (model && !prov) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "model not registered", id);
+        return;
+    }
+    if (!prov) {
+        probe_pick_t pick = {.want = want, .hit = NULL, .exact = 0};
+        provider_reg_walk(reg, probe_walk, &pick);
+        if (want && !pick.exact) {
+            JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "provider not found", id);
+            return;
+        }
+        prov = pick.hit;
+    }
+    if (!prov) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "no provider configured", id);
+        return;
+    }
+
+    provider_base_ctx_t *base = prov->ctx ? provider_base_ctx(prov->ctx) : NULL;
+    if (!base) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "provider base unavailable", id);
+        return;
+    }
+
+    /* 热解析：secrets.env 刚写入的密钥本次即可生效，无需重启。 */
+    provider_refresh_api_key(base);
+
+    int base_missing = (base->api_base[0] == '\0');
+    int key_missing = (!base_missing && prov->adapter && prov->adapter->headers &&
+                       prov->adapter->headers->auth != PROVIDER_AUTH_NONE &&
+                       base->api_key[0] == '\0');
+
+    int rc = AIRY_ERR_INVALID_PARAM;
+    long code = 0;
+    double latency_ms = 0.0;
+    if (!base_missing && !key_missing) {
+        uint64_t t0 = airy_time_ms();
+        provider_http_resp_t *resp = NULL;
+        rc = prov_probe_get(base, "/models", prov->adapter ? prov->adapter->headers : NULL,
+                            8.0, &resp, &code);
+        latency_ms = (double)(airy_time_ms() - t0);
+        provider_http_resp_free(resp);
+    }
+
+    const char *reason = probe_reason(rc, code, key_missing, base_missing);
+    cJSON *result = cJSON_CreateObject();
+    if (!result) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
+    cJSON_AddStringToObject(result, "provider", prov->name);
+    cJSON_AddStringToObject(result, "api_base", base->api_base);
+    cJSON_AddBoolToObject(result, "reachable", strcmp(reason, "ok") == 0);
+    cJSON_AddNumberToObject(result, "http_code", (double)code);
+    cJSON_AddNumberToObject(result, "latency_ms", latency_ms);
+    cJSON_AddStringToObject(result, "reason", reason);
+    if (!base_missing && !key_missing && rc != AIRY_OK)
+        cJSON_AddNumberToObject(result, "rc", (double)rc);
     JSONRPC_SEND_SUCCESS(fd, result, id);
 }
 
@@ -605,6 +728,7 @@ DAEMON_RPC_SHELL(list_models, handle_list_models)
 DAEMON_RPC_SHELL(slots_get, handle_slots_get)
 DAEMON_RPC_SHELL(slots_set, handle_slots_set)
 DAEMON_RPC_SHELL(count_tokens, handle_count_tokens)
+DAEMON_RPC_SHELL(probe, handle_probe)
 DAEMON_RPC_SHELL(health_check, handle_health_check)
 DAEMON_RPC_SHELL(get_stats, handle_get_stats)
 DAEMON_RPC_SHELL(embeddings, handle_embeddings)
