@@ -360,6 +360,10 @@ int sup_decl_load(sup_ctx_t *ctx)
     ctx->max_attempts = (int)env_long("AIRYRT_SUP_MAX_ATTEMPTS", SUP_DEFAULT_MAX_ATTEMPTS);
     ctx->liveness_ticks = (int)env_long("AIRYRT_SUP_LIVENESS_TICKS", SUP_DEFAULT_LIVENESS_TICKS);
     ctx->admit_retry_ms = env_long("AIRYRT_SUP_ADMIT_RETRY_MS", SUP_DEFAULT_ADMIT_RETRY_MS);
+    /* A-9 回退开关：显式置 1 关闭 CORE 自动重建（排障/维护用），
+     * 死因仍入 last_death，显式 sup_activate 可手工复活。 */
+    const char *nr = getenv("AIRY_SUPERVISOR_NO_RESPAWN");
+    ctx->no_respawn = (nr && strcmp(nr, "1") == 0) ? 1 : 0;
     ctx->shutdown = 0;
 
     char pfile[SUP_PATH_MAX];

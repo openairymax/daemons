@@ -79,7 +79,11 @@ int sup_svc_step(sup_ctx_t *ctx, int lfd)
     sup_reconcile(ctx);
     if (g_stop || ctx->shutdown)
         return 1;
-    sup_ctrl_serve(ctx, lfd, (int)ctx->tick_ms);
+    /* A-9：退避到期不必等整拍——按最近待办时刻收窄 poll 超时 */
+    long long wake = sup_next_wake_ms(ctx);
+    if (wake > ctx->tick_ms)
+        wake = ctx->tick_ms;
+    sup_ctrl_serve(ctx, lfd, (int)wake);
     return 0;
 }
 
