@@ -17,6 +17,7 @@
 #include "svc_llm_d.h"
 #include "llm_d_internal.h"
 #include "airy_prov/prov_diag.h"
+#include "airy_prov/prov_breaker.h"
 #include "response.h"
 #include "router/core/llm_rtr_health.h"
 #include "token.h"
@@ -255,6 +256,17 @@ static void handle_health_check(cJSON *params, int id, airy_sock_t fd)
         AIRY_FREE(ej);
         if (endpoints)
             cJSON_AddItemToObject(result, "endpoints", endpoints);
+    }
+
+    /* B-4 调用侧熔断视图：按 provider 聚合并出状态与分口径计数。与端点
+     * 健康并置而非合并——前者是"熔断闸开没开"，后者是"端点此刻可不可达"，
+     * 两者共同回答"上层失败时是端点挂了还是闸门已跳"。 */
+    char *bj = prov_brk_json();
+    if (bj) {
+        cJSON *breakers = cJSON_Parse(bj);
+        AIRY_FREE(bj);
+        if (breakers)
+            cJSON_AddItemToObject(result, "breakers", breakers);
     }
 
     JSONRPC_SEND_SUCCESS(fd, result, id);
