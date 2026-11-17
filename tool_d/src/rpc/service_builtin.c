@@ -182,6 +182,8 @@ void register_builtin_tools(tool_service_t *svc)
     static tool_param_t shell_params[] = {
         {"command", "{\"type\":\"string\"}", 1},
         {"cwd", "{\"type\":\"string\"}", 0},
+        /* C-24：默认严格（set -e + pipefail），传 false 回退旧语义。 */
+        {"shell_strict", "{\"type\":\"boolean\"}", 0},
     };
     static tool_param_t fs_list_params[] = {
         {"path", "{\"type\":\"string\"}", 0},

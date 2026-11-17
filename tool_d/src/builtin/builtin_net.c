@@ -193,7 +193,7 @@ int web_fetch_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
     int exit_code = -1;
 
     int rc = builtin_shell_run(cmd, NULL, &out, &exit_code, timeout_ms ? timeout_ms : 25000, NULL,
-                               NULL);
+                               NULL, 0);
     if (rc != 0)
         return btool_fail(res, AIRY_ERR_EXEC_FAIL,
                           "Failed to execute web fetch (pipe/process creation failed)");
@@ -544,7 +544,7 @@ static int web_search_via(const web_src_t *src, const char *query, int max_resul
              WEB_SEARCH_UA, url);
     char *out = NULL;
     int exit_code = -1;
-    if (builtin_shell_run(cmd, NULL, &out, &exit_code, src->shell_ms, NULL, NULL) != 0 || !out ||
+    if (builtin_shell_run(cmd, NULL, &out, &exit_code, src->shell_ms, NULL, NULL, 0) != 0 || !out ||
         exit_code != 0 || strstr(out, "command not found")) {
         AIRY_FREE(out);
         return -1;
