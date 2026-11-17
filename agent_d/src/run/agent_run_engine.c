@@ -141,6 +141,8 @@ const char *run_rc_msg(int rc)
         return "agent.run failed in the orchestration branch (sub-agent)";
     case AGENT_RUN_RC_TOOL_ROUNDS:
         return "agent.run exhausted the tool-loop round budget";
+    case AIRY_EBUDGET:
+        return "agent.run paused: round budget exhausted, resume_token issued";
     case AGENT_RUN_RC_EMPTY:
         return "agent.run finished without output";
     default:
