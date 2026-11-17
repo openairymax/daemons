@@ -123,17 +123,21 @@ typedef struct {
  * @param agent_spec   params.agent 对象（可 NULL；存在时走编排分支）
  * @param agent_file   params.agent_file 路径（可 NULL；回退构建 spec）
  * @param session_id   调用方预分配会话 ID（可 NULL；为空则引擎生成）
+ * @param rounds       工具环轮次预算（<=0 取策略缺省；上限 32）
+ * @param resume_token 续跑令牌（可 NULL；非空时忽略 prompt/history 的全量重放）
  * @param sink         run_stream 事件推送 sink（可 NULL 表示非流式）
  * @param out_result   JSON-RPC result 对象（AIRY_* 成功时非 NULL，调用方
  *                     cJSON_Delete；GCCP 交互轮含 interaction_required 等）
  * @return 0 成功；1 用户取消；2 工具连败熔断（AGENT_RUN_RC_TOOL_FUSE）；
- *         3 编排失败（AGENT_RUN_RC_SUBAGENT_FAIL）；其余非零失败
+ *         3 编排失败（AGENT_RUN_RC_SUBAGENT_FAIL）；AIRY_EBUDGET 预算耗尽
+ *         （产物与 resume_token 随 result 移交）；其余非零失败
  *         （失败时 *out_result 为 NULL）
  */
 int agent_run_execute(const char *prompt, const char *model, const cJSON *history,
                       const char *gccp_answers, const cJSON *agent_spec,
-                      const char *agent_file, const char *session_id,
-                      const agent_run_event_sink_t *sink, cJSON **out_result);
+                      const char *agent_file, const char *session_id, int rounds,
+                      const char *resume_token, const agent_run_event_sink_t *sink,
+                      cJSON **out_result);
 
 #ifdef __cplusplus
 }
