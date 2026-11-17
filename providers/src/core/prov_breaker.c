@@ -19,6 +19,7 @@
 #include "circuit_breaker.h"
 #include "daemon_platform_ext.h"
 #include "error.h"
+#include "platform_misc.h"
 
 #include "airy_prov/prov_breaker.h"
 
@@ -296,6 +297,49 @@ int prov_brk_state(const char *provider)
     return state;
 }
 
+/* 调用方持 g.lock 且已 brk_sync：OPEN 的剩余冷却毫秒；0 表示冷却已到
+ * （cb 仍在 OPEN，直到下一次 allow 才转半开，故这里按时间自行折算）。 */
+static uint32_t brk_left(const brk_rec_t *rec)
+{
+    cb_stats_t cs;
+
+    if (rec->st.state != PROV_BRK_OPEN)
+        return 0;
+    if (cb_get_stats(rec->cb, &cs) != AIRY_OK)
+        return g_brk.cfg.open_ms;
+
+    uint64_t now = airy_time_ms();
+    uint64_t since = cs.last_state_change_time;
+    if (now < since)
+        return g_brk.cfg.open_ms;
+
+    uint64_t used = now - since;
+    return used >= g_brk.cfg.open_ms ? 0u : (uint32_t)(g_brk.cfg.open_ms - used);
+}
+
+int prov_brk_gate(const char *provider, prov_brk_gate_t *out)
+{
+    if (!out)
+        return -1;
+    if (!brk_ready() || !provider || provider[0] == '\0')
+        return -1;
+
+    airy_mtx_lock(&g_brk.lock);
+    brk_rec_t *rec = brk_find(provider);
+    if (!rec) {
+        airy_mtx_unlock(&g_brk.lock);
+        return -1;
+    }
+    brk_sync(rec);
+    out->state = rec->st.state;
+    out->open_left_ms = brk_left(rec);
+    out->fails = rec->st.fails + rec->st.slow_tmo;
+    out->budget_tmo = rec->st.budget_tmo;
+    out->breaks = rec->st.breaks;
+    airy_mtx_unlock(&g_brk.lock);
+    return 0;
+}
+
 int prov_brk_stat(const char *provider, prov_brk_stat_t *out)
 {
     if (!out)
@@ -334,6 +378,7 @@ char *prov_brk_json(void)
             continue;
         cJSON_AddStringToObject(obj, "provider", rec->name);
         cJSON_AddStringToObject(obj, "state", prov_brk_text(rec->st.state));
+        cJSON_AddNumberToObject(obj, "open_left_ms", (double)brk_left(rec));
         cJSON_AddNumberToObject(obj, "calls", (double)rec->st.calls);
         cJSON_AddNumberToObject(obj, "oks", (double)rec->st.oks);
         cJSON_AddNumberToObject(obj, "fails", (double)rec->st.fails);
