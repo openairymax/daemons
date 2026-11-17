@@ -19,7 +19,7 @@
 #include "svc_logger.h"
 #include "platform.h"
 #include "multi_agent_collaboration.h"
-#include <airymax/sched.h>
+#include <linux/airymax/sched.h>
 
 #include <stdio.h>
 #include <string.h>
