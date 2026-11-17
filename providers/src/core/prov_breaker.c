@@ -196,6 +196,16 @@ void prov_brk_ok(const char *provider)
     airy_mtx_unlock(&g_brk.lock);
 }
 
+/* 超时族：传输层把一次超时拆成三种可执行结论（连接未建立/停摆/整轮预算），
+ * 对端点而言都是"没在预算内出结果"，统一计入 slow_tmo 并推进连败；账目
+ * 不因拆分而把超时错记成普通业务失败。 */
+static int brk_is_tmo(int err)
+{
+    int code = err > 0 ? -err : err;
+    return code == AIRY_ERR_TIMEOUT || code == AIRY_ETIMEDOUT ||
+           code == AIRY_ERR_LLM_STREAM_STALL;
+}
+
 void prov_brk_fail(const char *provider, int err)
 {
     if (!brk_ready())
@@ -207,7 +217,7 @@ void prov_brk_fail(const char *provider, int err)
     airy_mtx_lock(&g_brk.lock);
     brk_rec_t *rec = brk_rec(provider);
     if (rec) {
-        if (err == AIRY_ERR_TIMEOUT)
+        if (brk_is_tmo(err))
             rec->st.slow_tmo++;
         else
             rec->st.fails++;

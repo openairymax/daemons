@@ -292,7 +292,11 @@ static int chain_gate(svc_chain_t *chain, const provider_t *prov, const char *mo
 }
 
 /* 单次尝试：退座、成功度量、失败记账一次收口。返回 attempt 的错误码，
- * 失败路径上的半成品响应在此释放，避免每次切换泄漏一次。 */
+ * 失败路径上的半成品响应在此释放，避免每次切换泄漏一次。
+ *
+ * 调用侧熔断与端点健康同源记账：一次调用只产生一个结论，两本账各取所需。
+ * 熔断账按 provider 名聚合（跨模型共享连败），端点健康按 provider+模型
+ * 聚合（选路粒度），二者不互相推导。 */
 static int attempt_run(const provider_t *prov, const char *model, svc_attempt_fn attempt,
                        void *actx, svc_step_t *step, int gated, llm_response_t **resp)
 {
@@ -302,6 +306,7 @@ static int attempt_run(const provider_t *prov, const char *model, svc_attempt_fn
     if (gated > 0)
         svc_gate_release(prov);
     if (ret == 0) {
+        prov_brk_ok(prov->name);
         (void)llm_rtr_ok(prov->name, model);
         (void)llm_rtr_meas(prov->name, model, *resp, airy_time_ms() - t0);
         return 0;
@@ -310,8 +315,10 @@ static int attempt_run(const provider_t *prov, const char *model, svc_attempt_fn
     llm_response_free(*resp);
     *resp = NULL;
     /* 下游取消不是端点故障：记进健康账本会把用户中止算成上游不可用。 */
-    if (ret != AIRY_ERR_CANCELED)
+    if (ret != AIRY_ERR_CANCELED) {
+        prov_brk_fail(prov->name, ret);
         (void)llm_rtr_fail(prov->name, model, ret);
+    }
     return ret;
 }
 
@@ -366,8 +373,15 @@ static int chain_try(run_ctx_t *rc, svc_chain_t *chain, int auto_mode, const pro
     /* 记账已在 attempt_run 内完成；此处只做模式分派。 */
     if (!auto_mode)
         return ret;
-    if (!svc_chain_retry(chain, ret))
+    if (!svc_chain_retry(chain, ret)) {
+        /* 链终止可能因蒙版、深度或预算。只有预算耗尽要单独入账：预算不够
+         * 是链级事实、不是端点故障，记 budget_tmo 且不推进连败；失败本身
+         * 已在 attempt_run 按端点故障入账，两笔各记各的成因。 */
+        if (llm_fo_should(ret, chain->cfg.on_mask) && chain->hops < chain->cfg.depth &&
+            !svc_chain_left(chain, airy_time_ms()))
+            prov_brk_tmo(prov->name, PROV_TMO_TOTAL);
         return CHAIN_STOP;
+    }
     /* 首字节已下发后再换端点会让下游收到两段互不相接的内容。 */
     return (rc->sent && rc->sent(rc->actx)) ? CHAIN_STOP : CHAIN_NEXT;
 }
