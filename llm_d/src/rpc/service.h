@@ -78,6 +78,13 @@ struct llm_service {
      * grad_degraded 事件，不允许静默。 */
     svc_model_slots_t slots;
     unsigned slots_degraded;
+    /* 0.1.21 D-7（Q19）：请求四元组。只统计已受理（req_enter 成功）的请求，
+     * 三者互斥且 total = ok + fail + timeout，失败率不再由多个重叠计数器
+     * 反推。计数器在 svc->lock 内累加，与注册表查询共用同一把短锁。 */
+    uint64_t req_total;
+    uint64_t req_ok;
+    uint64_t req_fail;
+    uint64_t req_timeout;
 };
 
 /* 计费/用量持久化路径（$AIRY_DATA_DIR/agentrt/llm_usage.json）：
