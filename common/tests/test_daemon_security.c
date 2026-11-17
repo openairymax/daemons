@@ -6,12 +6,16 @@
  */
 
 #include "../include/daemon_security.h"
+#include "../src/security/daemon_security_internal.h"
+
+#include "airy_dirent.h"
 
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #if defined(_WIN32)
 #include <direct.h>
@@ -340,6 +344,149 @@ static void test_rules_file_loading(void)
     PASS();
 }
 
+/* ---- A-3：审计轮转契约用例 ---- */
+static unsigned t_scan_backups(char *newest, size_t cap)
+{
+    char dir[600];
+    snprintf(dir, sizeof(dir), "%s/data/agentrt/logs", g_home);
+    unsigned count = 0;
+    if (newest && cap) {
+        newest[0] = '\0';
+    }
+    DIR *d = opendir(dir);
+    if (!d) {
+        return 0;
+    }
+    struct dirent *ent = NULL;
+    while ((ent = readdir(d)) != NULL) {
+        if (strncmp(ent->d_name, "daemon_audit.log.", 17) != 0) {
+            continue;
+        }
+        count++;
+        if (newest && cap) {
+            snprintf(newest, cap, "%s/%s", dir, ent->d_name);
+        }
+    }
+    closedir(d);
+    return count;
+}
+
+static void t_clear_rot_env(void)
+{
+    AIRY_TEST_SETENV("AIRY_AUDIT_MAX_BYTES", "");
+    AIRY_TEST_SETENV("AIRY_AUDIT_KEEP_FILES", "");
+    AIRY_TEST_SETENV("AIRY_AUDIT_COMPRESS", "");
+    AIRY_TEST_SETENV("AIRY_AUDIT_ENCRYPT", "");
+}
+
+static void t_clean_backups(void)
+{
+    char dir[600];
+    snprintf(dir, sizeof(dir), "%s/data/agentrt/logs", g_home);
+    DIR *d = opendir(dir);
+    if (!d) {
+        return;
+    }
+    struct dirent *ent = NULL;
+    while ((ent = readdir(d)) != NULL) {
+        if (strncmp(ent->d_name, "daemon_audit.log.", 17) == 0) {
+            char victim[900];
+            snprintf(victim, sizeof(victim), "%s/%s", dir, ent->d_name);
+            remove(victim);
+        }
+    }
+    closedir(d);
+}
+
+static void test_audit_policy_contract(void)
+{
+    TEST("audit policy equals contract (500MB/365)");
+    audit_rot_policy_t p;
+    aud_rot_policy(&p);
+    ASSERT(p.max_bytes == AUD_MAX_BYTES_DEF, "default cap must be 500MB");
+    ASSERT(p.keep_files == AUD_KEEP_FILES_DEF, "default keep must be 365");
+    ASSERT(p.max_bytes == 500ULL * 1024ULL * 1024ULL, "500MB literal");
+    PASS();
+}
+
+static void test_audit_rotate_size(void)
+{
+    TEST("audit rotate on size cap and restore backup");
+    airy_err_t err = AIRY_OK;
+    t_clean_backups();
+    AIRY_TEST_SETENV("AIRY_AUDIT_MAX_BYTES", "2048");
+    AIRY_TEST_SETENV("AIRY_AUDIT_KEEP_FILES", "3");
+    ASSERT(daemon_security_init(NULL, &err) == 0, "init should succeed");
+    for (int i = 0; i < 40; i++) {
+        (void)daemon_audit_log_event("svc", "rotate_probe", "/r", 0, "agent");
+    }
+    daemon_security_shutdown();
+
+    char path[600];
+    t_audit_path(path, sizeof(path));
+    struct stat st;
+    ASSERT(stat(path, &st) == 0, "main audit file must exist");
+    ASSERT((unsigned long long)st.st_size <= 2048ULL, "main file must fall back below cap");
+
+    char backup[700];
+    unsigned n = t_scan_backups(backup, sizeof(backup));
+    ASSERT(n >= 1, "rotation must produce a backup");
+    ASSERT(backup[0] != '\0', "backup path must be found");
+
+    audit_rot_policy_t p;
+    aud_rot_policy(&p);
+    if (p.compress) {
+        ASSERT(strstr(backup, ".zst") != NULL, "zstd build must emit .zst backup");
+    }
+    if (p.encrypt) {
+        ASSERT(strstr(backup, ".enc") != NULL, "openssl build must emit .enc backup");
+    }
+
+    char out[700];
+    snprintf(out, sizeof(out), "%s/restored.log", g_home);
+    ASSERT(aud_rot_restore(backup, out) == 0, "backup must decrypt/decompress");
+    ASSERT(t_file_has(out, "operation=rotate_probe"), "restored backup carries events");
+    remove(out);
+    t_clear_rot_env();
+    PASS();
+}
+
+static void test_audit_rotate_keep(void)
+{
+    TEST("audit rotation respects keep_files");
+    airy_err_t err = AIRY_OK;
+    t_clean_backups();
+    AIRY_TEST_SETENV("AIRY_AUDIT_MAX_BYTES", "512");
+    AIRY_TEST_SETENV("AIRY_AUDIT_KEEP_FILES", "2");
+    ASSERT(daemon_security_init(NULL, &err) == 0, "init should succeed");
+    for (int i = 0; i < 60; i++) {
+        (void)daemon_audit_log_event("svc", "keep_probe", "/r", 0, "agent");
+    }
+    daemon_security_shutdown();
+    unsigned n = t_scan_backups(NULL, 0);
+    ASSERT(n >= 1, "rotation must have happened");
+    ASSERT(n <= 2, "keep_files=2 must bound backup count");
+    t_clear_rot_env();
+    PASS();
+}
+
+static void test_audit_rotate_disabled(void)
+{
+    TEST("audit rotation disabled by AIRY_AUDIT_MAX_BYTES=0");
+    airy_err_t err = AIRY_OK;
+    t_clean_backups();
+    AIRY_TEST_SETENV("AIRY_AUDIT_MAX_BYTES", "0");
+    ASSERT(daemon_security_init(NULL, &err) == 0, "init should succeed");
+    for (int i = 0; i < 40; i++) {
+        (void)daemon_audit_log_event("svc", "off_probe", "/r", 0, "agent");
+    }
+    daemon_security_shutdown();
+    unsigned n = t_scan_backups(NULL, 0);
+    ASSERT(n == 0, "no backup when rotation is disabled");
+    t_clear_rot_env();
+    PASS();
+}
+
 int main(void)
 {
     printf("\n=== Daemon Security Module Unit Tests ===\n\n");
@@ -361,6 +508,10 @@ int main(void)
     test_audit_log_event_null_params();
     test_init_with_config();
     test_rules_file_loading();
+    test_audit_policy_contract();
+    test_audit_rotate_size();
+    test_audit_rotate_keep();
+    test_audit_rotate_disabled();
 
     printf("\n=== Results: %d/%d tests passed ===\n\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
