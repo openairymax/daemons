@@ -63,10 +63,16 @@ int daemon_audit_log_event(const char *service_name, const char *operation, cons
              agent_id ? agent_id : "system", result_str);
 
     if (g_security_ctx.audit_fp) {
+        /* A-3：写前按「当前字节 + 本条字节」判限，超限先轮转再写，
+         * 保证任何单条事件都落在阈值内文件，且不因轮转失败丢事件。 */
+        size_t msg_len = strlen(log_msg);
+        (void)aud_rot_apply((unsigned long long)msg_len);
         /* P1-4：审计是安全追踪证据（E-6），fflush 只刷到内核页缓存，
          * 断电/崩溃会丢事件；写后 fsync 保证落盘。 */
-        if (fwrite(log_msg, 1, strlen(log_msg), g_security_ctx.audit_fp) == strlen(log_msg) &&
+        if (g_security_ctx.audit_fp &&
+            fwrite(log_msg, 1, msg_len, g_security_ctx.audit_fp) == msg_len &&
             fflush(g_security_ctx.audit_fp) == 0) {
+            g_security_ctx.audit_bytes += (unsigned long long)msg_len;
 #ifdef _WIN32
             _commit(_fileno(g_security_ctx.audit_fp));
 #else
