@@ -464,7 +464,7 @@ static void test_e2e_fail_closed(tool_service_t *svc)
     int ret = -999;
     tool_result_t *res = run_tool(svc, "fs_read", "e2e_unauthorized", p, &ret);
     cJSON_Delete(p);
-    TEST(ret == AIRY_EPERM, "未授权 agent 被 fail-closed 拒绝 (EPERM)");
+    TEST(ret == AIRY_ERR_PERMISSION_DENIED, "未授权 agent 被 fail-closed 拒绝 (EPERM)");
     if (res) {
         tool_result_free(res);
     }

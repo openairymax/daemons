@@ -261,8 +261,8 @@ static void test_sandbox_deny_path(void)
 /* ========== TEST 3: sandbox NULL fail-closed ==========
  *
  * Verifies that invoke returns EINVAL when the sandbox handle is NULL.
- * This corresponds to the `if (!exec->sandbox) return AIRY_EPERM` defense in
- * tool_executor_run.
+ * This corresponds to the `if (!exec->sandbox) return AIRY_ERR_PERMISSION_DENIED`
+ * defense in tool_executor_run.
  */
 static void test_sandbox_null_fail_closed(void)
 {
@@ -313,16 +313,16 @@ static void test_executor_sandbox_integration(void)
     tool_result_t *result = NULL;
     int ret = tool_executor_run(exec, &meta, "hello", NULL, &result);
 
-    /* Verifies: unset approval_ctx -> fail-closed denial (EPERM)
-     * Note: AIRY_EPERM is the return value in executor.c for a NULL
-     * approval_ctx. This confirms sandbox initialization does not bypass
+    /* Verifies: unset approval_ctx -> fail-closed denial (PERMISSION_DENIED)
+     * Note: AIRY_ERR_PERMISSION_DENIED is the return value in executor.c for a
+     * NULL approval_ctx. This confirms sandbox initialization does not bypass
      * approval_ctx's fail-closed behavior. */
-    if (ret != AIRY_EPERM) {
+    if (ret != AIRY_ERR_PERMISSION_DENIED) {
         char msg[128];
         snprintf(msg, sizeof(msg),
-                 "tool_executor_run returned %d (expected EPERM=%d, approval_ctx NULL should "
-                 "fail-closed)",
-                 ret, (int)AIRY_EPERM);
+                 "tool_executor_run returned %d (expected PERMISSION_DENIED=%d, "
+                 "approval_ctx NULL should fail-closed)",
+                 ret, (int)AIRY_ERR_PERMISSION_DENIED);
         TEST_FAIL(msg);
         if (result)
             tool_result_free(result);
