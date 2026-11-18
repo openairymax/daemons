@@ -17,6 +17,7 @@ set(AGENT_TEST_SOURCES
     test_run_stream.c
     test_task_orchestrate.c
     test_task_ledger.c
+    test_turn_ckpt.c
 )
 
 set(AGENT_COMMON_INCLUDES
@@ -55,6 +56,8 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_task_ledger.c
             # C-25: 等价工具表（run loop 换路判定）
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_alt.c
+            # D-12: 工具边界检查点（run loop 调用 pend/done）
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_turn_ckpt.c
         )
     endif()
 

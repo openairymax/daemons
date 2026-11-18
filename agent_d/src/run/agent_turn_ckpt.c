@@ -94,6 +94,9 @@ static cJSON *ck_new(void)
     return root;
 }
 
+static void ck_put_s(cJSON *it, const char *key, const char *val);
+static void ck_put_n(cJSON *it, const char *key, double val);
+
 static int ck_write(cJSON *root)
 {
     char path[AIRY_PATH_MAX];
@@ -101,7 +104,7 @@ static int ck_write(cJSON *root)
     int rc;
     if (ck_mkdir() != 0 || ck_path(path, sizeof(path)) != 0)
         return -1;
-    cJSON_ReplaceItemInObject(root, "saved_at", cJSON_CreateNumber((double)time(NULL)));
+    ck_put_n(root, "saved_at", (double)time(NULL));
     body = cJSON_PrintUnformatted(root);
     if (!body)
         return -1;
@@ -124,14 +127,24 @@ static int ck_same(const cJSON *it, const char *turn)
     return cJSON_IsString(v) && strcmp(v->valuestring, turn) == 0;
 }
 
+static void ck_put(cJSON *it, const char *key, cJSON *val)
+{
+    /* Replace 只在键已存在时生效，新条目必须补一次 Add，
+     * 否则对象会写成空的 {}（见 test_turn_ckpt 回归）。 */
+    if (!val)
+        return;
+    if (!cJSON_ReplaceItemInObject(it, key, val))
+        cJSON_AddItemToObject(it, key, val);
+}
+
 static void ck_put_s(cJSON *it, const char *key, const char *val)
 {
-    cJSON_ReplaceItemInObject(it, key, cJSON_CreateString(val ? val : ""));
+    ck_put(it, key, cJSON_CreateString(val ? val : ""));
 }
 
 static void ck_put_n(cJSON *it, const char *key, double val)
 {
-    cJSON_ReplaceItemInObject(it, key, cJSON_CreateNumber(val));
+    ck_put(it, key, cJSON_CreateNumber(val));
 }
 
 static cJSON *ck_find(cJSON *turns, const char *turn)
