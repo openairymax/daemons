@@ -125,7 +125,7 @@ typedef struct {
 agent_fail_desc_t agent_fail_desc(int rc, int denied);
 
 /** @brief 轮次预算解析：请求 > 策略（AIRY_AGENT_TOOL_ROUNDS）> 缺省 8，夹取 [1,32]。 */
-int agent_run_rounds_resolve(int requested);
+int rounds_resolve(int requested);
 
 /**
  * @brief ReAct 工具循环：LLM complete_stream -> 增量上屏 -> tool_calls ->
@@ -222,7 +222,7 @@ void agent_run_gen_session_id(char *out, size_t out_size);
 void agent_run_gen_run_id(char *out, size_t out_size);
 
 /** @brief 在途回合数（D-12 退出排水观测：注册表条目在 run 结束才注销）。 */
-size_t agent_run_active_count(void);
+size_t run_active_cnt(void);
 
 /** @brief 排水兜底：全部在途会话置取消，返回受影响数。 */
 int agent_run_cancel_all(void);

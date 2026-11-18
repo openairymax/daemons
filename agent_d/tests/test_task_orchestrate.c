@@ -88,7 +88,7 @@ static void test_gccp_gate(void)
     bool confirmed = false;
 
     /* 无答案：保持声明值 false，missing 为空（`打开火狐` 基线）。 */
-    CHECK(agent_task_gccp_check(NULL, &confirmed, missing, AGENT_TASK_MISSING_MAX, &count) == 0,
+    CHECK(gccp_ok(NULL, &confirmed, missing, AGENT_TASK_MISSING_MAX, &count) == 0,
           "gccp_check(NULL)");
     CHECK(!confirmed, "no answers must stay unconfirmed");
     CHECK(count == 0, "no answers must not report missing slots");
@@ -96,7 +96,7 @@ static void test_gccp_gate(void)
     /* 空对象：四个槽全缺。 */
     cJSON *empty = cJSON_CreateObject();
     confirmed = false;
-    CHECK(agent_task_gccp_check(empty, &confirmed, missing, AGENT_TASK_MISSING_MAX, &count) == 0,
+    CHECK(gccp_ok(empty, &confirmed, missing, AGENT_TASK_MISSING_MAX, &count) == 0,
           "gccp_check({})");
     CHECK(!confirmed, "empty answers must stay unconfirmed");
     CHECK(count == 4, "empty answers missing=%zu want=4", count);
@@ -109,12 +109,12 @@ static void test_gccp_gate(void)
     cJSON_AddStringToObject(full, "constraints", "不改变书签");
     cJSON_AddStringToObject(full, "plan", "启动并校验进程");
     confirmed = false;
-    CHECK(agent_task_gccp_check(full, &confirmed, missing, AGENT_TASK_MISSING_MAX, &count) == 0,
+    CHECK(gccp_ok(full, &confirmed, missing, AGENT_TASK_MISSING_MAX, &count) == 0,
           "gccp_check(full)");
     CHECK(confirmed && count == 0, "full answers must confirm (count=%zu)", count);
 
     /* needs_intent 结果形状：status/mode/mode_reason/gccp_confirmed/gccp_missing。 */
-    cJSON *out = agent_task_build_needs_intent(NULL, missing, 0);
+    cJSON *out = need_intent(NULL, missing, 0);
     CHECK(out != NULL, "build_needs_intent");
     if (out) {
         cJSON *st = cJSON_GetObjectItem(out, "status");
@@ -134,46 +134,46 @@ static void test_gate_decision(void)
     /* gate:lab：`-p` 未确认（gccp_confirmed=false）时 task 门禁关闭，
      * 调用方必须在此之后、引擎之前返回 needs_intent——因此不可能产生
      * 任何 tool_start/tool_end 事件。chat 与已确认任务一律放行。 */
-    CHECK(!agent_task_gate_allows(AGENT_TASK_MODE_TASK, false),
+    CHECK(!gate_allows(AGENT_TASK_MODE_TASK, false),
           "unconfirmed task must be gated");
-    CHECK(agent_task_gate_allows(AGENT_TASK_MODE_TASK, true), "confirmed task must pass");
-    CHECK(agent_task_gate_allows(AGENT_TASK_MODE_CHAT, false), "chat must never be gated");
-    CHECK(agent_task_gate_allows(NULL, false), "unknown mode defaults to pass");
+    CHECK(gate_allows(AGENT_TASK_MODE_TASK, true), "confirmed task must pass");
+    CHECK(gate_allows(AGENT_TASK_MODE_CHAT, false), "chat must never be gated");
+    CHECK(gate_allows(NULL, false), "unknown mode defaults to pass");
 }
 
 /* 判据静态门禁：只有「能交给 verifier 复核」的形态才算合法。 */
 static void test_criteria_gate(void)
 {
-    CHECK(!agent_task_criteria_ok(NULL), "NULL criteria must be rejected");
-    CHECK(!agent_task_criteria_ok(""), "empty criteria must be rejected");
-    CHECK(!agent_task_criteria_ok("[]"), "empty array must be rejected");
-    CHECK(!agent_task_criteria_ok("{\"criteria\":[]}"), "empty wrapped array must be rejected");
-    CHECK(!agent_task_criteria_ok("\"done\""), "bare string must be rejected");
+    CHECK(!criteria_ok(NULL), "NULL criteria must be rejected");
+    CHECK(!criteria_ok(""), "empty criteria must be rejected");
+    CHECK(!criteria_ok("[]"), "empty array must be rejected");
+    CHECK(!criteria_ok("{\"criteria\":[]}"), "empty wrapped array must be rejected");
+    CHECK(!criteria_ok("\"done\""), "bare string must be rejected");
 
     /* 四类合法判据各一条。 */
-    CHECK(agent_task_criteria_ok("[{\"type\":\"file\",\"path\":\"out/a.txt\"}]"),
+    CHECK(criteria_ok("[{\"type\":\"file\",\"path\":\"out/a.txt\"}]"),
           "file criteria must pass");
-    CHECK(agent_task_criteria_ok("[{\"type\":\"cmd\",\"cmd\":\"true\"}]"), "cmd criteria must pass");
-    CHECK(agent_task_criteria_ok("[{\"type\":\"service\",\"port\":2027}]"),
+    CHECK(criteria_ok("[{\"type\":\"cmd\",\"cmd\":\"true\"}]"), "cmd criteria must pass");
+    CHECK(criteria_ok("[{\"type\":\"service\",\"port\":2027}]"),
           "service criteria must pass");
-    CHECK(agent_task_criteria_ok(
+    CHECK(criteria_ok(
               "[{\"type\":\"rpc\",\"daemon\":\"tool\",\"method\":\"list_tools\"}]"),
           "rpc criteria must pass");
-    CHECK(agent_task_criteria_ok("{\"criteria\":[{\"type\":\"cmd\",\"cmd\":\"true\"}]}"),
+    CHECK(criteria_ok("{\"criteria\":[{\"type\":\"cmd\",\"cmd\":\"true\"}]}"),
           "wrapped object must be accepted");
 
     /* 必需字段缺失 / 类型未知 / 端口越界：一律 fail-closed。 */
-    CHECK(!agent_task_criteria_ok("[{\"type\":\"file\"}]"), "file without path must fail");
-    CHECK(!agent_task_criteria_ok("[{\"type\":\"cmd\"}]"), "cmd without cmd must fail");
-    CHECK(!agent_task_criteria_ok("[{\"type\":\"service\",\"port\":0}]"),
+    CHECK(!criteria_ok("[{\"type\":\"file\"}]"), "file without path must fail");
+    CHECK(!criteria_ok("[{\"type\":\"cmd\"}]"), "cmd without cmd must fail");
+    CHECK(!criteria_ok("[{\"type\":\"service\",\"port\":0}]"),
           "service port 0 must fail");
-    CHECK(!agent_task_criteria_ok("[{\"type\":\"service\",\"port\":70000}]"),
+    CHECK(!criteria_ok("[{\"type\":\"service\",\"port\":70000}]"),
           "service port 70000 must fail");
-    CHECK(!agent_task_criteria_ok("[{\"type\":\"rpc\",\"daemon\":\"tool\"}]"),
+    CHECK(!criteria_ok("[{\"type\":\"rpc\",\"daemon\":\"tool\"}]"),
           "rpc without method must fail");
-    CHECK(!agent_task_criteria_ok("[{\"type\":\"shell\",\"cmd\":\"true\"}]"),
+    CHECK(!criteria_ok("[{\"type\":\"shell\",\"cmd\":\"true\"}]"),
           "unknown type must fail");
-    CHECK(!agent_task_criteria_ok("[{\"cmd\":\"true\"}]"), "missing type must fail");
+    CHECK(!criteria_ok("[{\"cmd\":\"true\"}]"), "missing type must fail");
 }
 
 static void test_criteria_count(void)
@@ -190,7 +190,7 @@ static void test_criteria_count(void)
     cJSON_Delete(arr);
     CHECK(s != NULL, "serialize 17 criteria");
     if (s) {
-        CHECK(!agent_task_criteria_ok(s), "17 criteria must exceed the cap");
+        CHECK(!criteria_ok(s), "17 criteria must exceed the cap");
         free(s);
     }
 
@@ -206,7 +206,7 @@ static void test_criteria_count(void)
     cJSON_Delete(arr);
     CHECK(s != NULL, "serialize 16 criteria");
     if (s) {
-        CHECK(agent_task_criteria_ok(s), "16 criteria must stay within the cap");
+        CHECK(criteria_ok(s), "16 criteria must stay within the cap");
         free(s);
     }
 }
@@ -243,7 +243,7 @@ static void test_criteria_from_plan(void)
         cJSON *arr = cJSON_Parse(derived);
         CHECK(cJSON_IsArray(arr) && cJSON_GetArraySize(arr) == 3,
               "derived criteria count must be 3");
-        CHECK(agent_task_criteria_ok(derived), "derived criteria must be verifier-ready");
+        CHECK(criteria_ok(derived), "derived criteria must be verifier-ready");
         cJSON_Delete(arr);
         free(derived);
     }

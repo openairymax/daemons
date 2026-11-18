@@ -91,7 +91,7 @@ void svc_teardown(void)
      * 不再删除检查点），再给 2s 自然收尾窗口；未收尾的统一取消，最后
      * 一个工具边界的令牌留待重启后客户端续跑。 */
     int npend = agent_ckpt_drain();
-    for (int i = 0; i < 20 && agent_run_active_count() > 0; i++)
+    for (int i = 0; i < 20 && run_active_cnt() > 0; i++)
         airy_sleep_ms(100);
     int nruns = agent_run_cancel_all();
     if (npend > 0 || nruns > 0)

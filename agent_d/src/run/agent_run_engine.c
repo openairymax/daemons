@@ -123,7 +123,7 @@ bool agent_run_is_cancelled(const agent_run_session_t *s)
     return s && s->cancelled != 0;
 }
 
-void agent_run_cancel_meta(const agent_run_session_t *s, const char **by, uint64_t *ts_ms)
+void run_cancel_meta(const agent_run_session_t *s, const char **by, uint64_t *ts_ms)
 {
     if (by)
         *by = (s && s->cancel_by[0]) ? s->cancel_by : "";
@@ -195,7 +195,7 @@ int agent_run_cancel_by_session(const char *session_id, const char *by)
     return found ? AIRY_SUCCESS : AIRY_ERR_NOT_FOUND;
 }
 
-size_t agent_run_active_count(void)
+size_t run_active_cnt(void)
 {
     size_t n = 0;
     run_lock_init();

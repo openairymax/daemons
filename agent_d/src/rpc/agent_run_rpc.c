@@ -359,15 +359,15 @@ static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
     agent_task_missing_slot_t missing[AGENT_TASK_MISSING_MAX];
     size_t missing_count = 0;
     bool confirmed = meta.gccp_confirmed;
-    (void)agent_task_gccp_check(answers, &confirmed, missing, AGENT_TASK_MISSING_MAX,
+    (void)gccp_ok(answers, &confirmed, missing, AGENT_TASK_MISSING_MAX,
                                 &missing_count);
     meta.gccp_confirmed = confirmed;
     cJSON_Delete(answers_parsed);
 
     /* 门禁（唯一判定实现）：关闭时零引擎 / 零工具调用，直接返回
      * needs_intent（gate:lab：`-p` 未确认不得产生任何工具调用事件）。 */
-    if (!agent_task_gate_allows(meta.mode, meta.gccp_confirmed)) {
-        cJSON *ni = agent_task_build_needs_intent(&meta, missing, missing_count);
+    if (!gate_allows(meta.mode, meta.gccp_confirmed)) {
+        cJSON *ni = need_intent(&meta, missing, missing_count);
         AIRY_FREE(a.gccp_owned);
         AIRY_FREE(a.criteria_owned);
         task_send_notice(id, fd, sink, meta.task_id, ni);
@@ -378,7 +378,7 @@ static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
      * （零引擎 / 零工具调用），并回补判据示例。服务端自动裁决出的 task 不在此
      * 拒绝——其判据可由计划节点 postcondition 派生，派生失败按 unverified 收尾。 */
     if (a.mode_declared && strcmp(meta.mode, AGENT_TASK_MODE_TASK) == 0 &&
-        !agent_task_criteria_ok(meta.success_criteria)) {
+        !criteria_ok(meta.success_criteria)) {
         cJSON *nc = need_criteria_of(
             &meta, "task mode requires at least one valid success criterion");
         AIRY_FREE(a.gccp_owned);
@@ -424,7 +424,7 @@ static void handle_task_submit(cJSON *params, int id, airy_sock_t client_fd)
     task_submit_common(params, id, client_fd, NULL);
 }
 
-static void handle_task_submit_stream(cJSON *params, int id, airy_sock_t client_fd)
+static void submit_sse(cJSON *params, int id, airy_sock_t client_fd)
 {
     rs_sink_ctx_t sink_ctx = {client_fd, 0};
     agent_run_event_sink_t sink = {rs_sink_emit, &sink_ctx};
@@ -465,4 +465,4 @@ DAEMON_RPC_SHELL(run_cancel, handle_cancel)
  * task.cancel 在 gateway 侧归入 agent.cancel 的同一中止实现（run_cancel），
  * 不另设守护进程入口。 */
 DAEMON_RPC_SHELL(task_submit, handle_task_submit)
-DAEMON_RPC_SHELL(task_submit_stream, handle_task_submit_stream)
+DAEMON_RPC_SHELL(task_submit_stream, submit_sse)

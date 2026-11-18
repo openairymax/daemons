@@ -38,7 +38,7 @@
 
 /* 轮次预算解析：请求值优先；未给则读策略面环境变量；再缺省 8；
  * 最后夹取到机制硬上限 32。策略只能收紧或放宽到上限，不能突破。 */
-int agent_run_rounds_resolve(int requested)
+int rounds_resolve(int requested)
 {
     int n = requested;
     if (n <= 0) {
@@ -678,7 +678,7 @@ static int run_cat_denied_has(const cJSON *denied, const char *name)
     return 0;
 }
 
-static const char *run_cat_denied_reason(const cJSON *denied, const char *name)
+static const char *cat_block(const cJSON *denied, const char *name)
 {
     const cJSON *it = NULL;
     if (!denied || !name)
@@ -1082,7 +1082,7 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
     if (!run_cat_has(r->catalog, tname)) {
         /* C-16：派发面与下发面同源。模型可能凭历史记忆调用本轮目录外
          * 的工具（已撤销或不存在的），这里不执行并回填可行动原因。 */
-        const char *why = run_cat_denied_reason(r->cat_denied, tname);
+        const char *why = cat_block(r->cat_denied, tname);
         erc = -1;
         snprintf(note, sizeof(note),
                  "Error: tool \"%s\" is not available in this run's catalog (reason: %s); "
@@ -1264,7 +1264,7 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
         return -1;
     }
 
-    const int limit = agent_run_rounds_resolve(args->rounds);
+    const int limit = rounds_resolve(args->rounds);
     out->rounds_limit = limit;
     int used = 0;
     for (int i = 0; i < limit; i++) {
