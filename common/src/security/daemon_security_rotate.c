@@ -230,17 +230,50 @@ static int rot_key_load(const char *path, unsigned char key[ROT_KEY_LEN])
 #endif
 }
 
+/* 读取当前轮转密钥（路径解析与读取失败一律 -1）。 */
+static int rot_key_ready(unsigned char key[ROT_KEY_LEN])
+{
+    return rot_key_load(rot_key_path(), key);
+}
+
+/* 打开成对流：任一失败即回收已开的一侧（NULL 化，便于收尾统一判空）。 */
+static int rot_open_pair(const char *src, const char *dst, FILE **in, FILE **out)
+{
+    *in = fopen(src, "rb");
+    if (!*in) {
+        return -1;
+    }
+    *out = fopen(dst, "wb");
+    if (!*out) {
+        fclose(*in);
+        *in = NULL;
+        return -1;
+    }
+    return 0;
+}
+
+/* 成对流收尾：关闭两侧（允许未开），失败时删除半成品输出。 */
+static int rot_close_pair(FILE *in, FILE *out, const char *dst, int rc)
+{
+    if (in) {
+        fclose(in);
+    }
+    if (out) {
+        fclose(out);
+    }
+    if (rc != 0) {
+        remove(dst);
+    }
+    return rc;
+}
+
 /* ---- zstd 流式压缩 ---- */
 #ifdef AIRY_HAS_ZSTD
 static int rot_zstd_pack(const char *src, const char *dst)
 {
-    FILE *in = fopen(src, "rb");
-    if (!in) {
-        return -1;
-    }
-    FILE *out = fopen(dst, "wb");
-    if (!out) {
-        fclose(in);
+    FILE *in = NULL;
+    FILE *out = NULL;
+    if (rot_open_pair(src, dst, &in, &out) != 0) {
         return -1;
     }
     ZSTD_CCtx *cctx = ZSTD_createCCtx();
@@ -286,12 +319,7 @@ static int rot_zstd_pack(const char *src, const char *dst)
     }
     AIRY_FREE(ibuf);
     AIRY_FREE(obuf);
-    fclose(in);
-    fclose(out);
-    if (rc != 0) {
-        remove(dst);
-    }
-    return rc;
+    return rot_close_pair(in, out, dst, rc);
 }
 #endif
 
@@ -299,18 +327,13 @@ static int rot_zstd_pack(const char *src, const char *dst)
 #ifdef AIRY_HAS_OPENSSL
 static int rot_aes_pack(const char *src, const char *dst)
 {
-    const char *kp = rot_key_path();
     unsigned char key[ROT_KEY_LEN];
-    if (rot_key_load(kp, key) != 0) {
+    if (rot_key_ready(key) != 0) {
         return -1;
     }
-    FILE *in = fopen(src, "rb");
-    if (!in) {
-        return -1;
-    }
-    FILE *out = fopen(dst, "wb");
-    if (!out) {
-        fclose(in);
+    FILE *in = NULL;
+    FILE *out = NULL;
+    if (rot_open_pair(src, dst, &in, &out) != 0) {
         return -1;
     }
     unsigned char iv[ROT_IV_LEN];
@@ -354,12 +377,7 @@ static int rot_aes_pack(const char *src, const char *dst)
     }
     AIRY_FREE(ibuf);
     AIRY_FREE(obuf);
-    fclose(in);
-    fclose(out);
-    if (rc != 0) {
-        remove(dst);
-    }
-    return rc;
+    return rot_close_pair(in, out, dst, rc);
 }
 #endif
 
@@ -551,13 +569,9 @@ int aud_rot_apply(unsigned long long pending)
 /* ---- 取证还原：解密 → 解压 ---- */
 static int rot_copy_file(const char *src, const char *dst)
 {
-    FILE *in = fopen(src, "rb");
-    if (!in) {
-        return -1;
-    }
-    FILE *out = fopen(dst, "wb");
-    if (!out) {
-        fclose(in);
+    FILE *in = NULL;
+    FILE *out = NULL;
+    if (rot_open_pair(src, dst, &in, &out) != 0) {
         return -1;
     }
     char buf[ROT_CHUNK];
@@ -569,17 +583,14 @@ static int rot_copy_file(const char *src, const char *dst)
             break;
         }
     }
-    fclose(in);
-    fclose(out);
-    return ok ? 0 : -1;
+    return rot_close_pair(in, out, dst, ok ? 0 : -1);
 }
 
 #ifdef AIRY_HAS_OPENSSL
 static int rot_aes_unpack(const char *src, const char *dst)
 {
-    const char *kp = rot_key_path();
     unsigned char key[ROT_KEY_LEN];
-    if (rot_key_load(kp, key) != 0) {
+    if (rot_key_ready(key) != 0) {
         return -1;
     }
     FILE *in = fopen(src, "rb");
@@ -652,27 +663,16 @@ static int rot_aes_unpack(const char *src, const char *dst)
     }
     AIRY_FREE(ibuf);
     AIRY_FREE(obuf);
-    if (out) {
-        fclose(out);
-    }
-    fclose(in);
-    if (rc != 0) {
-        remove(dst);
-    }
-    return rc;
+    return rot_close_pair(in, out, dst, rc);
 }
 #endif
 
 #ifdef AIRY_HAS_ZSTD
 static int rot_zstd_unpack(const char *src, const char *dst)
 {
-    FILE *in = fopen(src, "rb");
-    if (!in) {
-        return -1;
-    }
-    FILE *out = fopen(dst, "wb");
-    if (!out) {
-        fclose(in);
+    FILE *in = NULL;
+    FILE *out = NULL;
+    if (rot_open_pair(src, dst, &in, &out) != 0) {
         return -1;
     }
     ZSTD_DCtx *dctx = ZSTD_createDCtx();
@@ -700,12 +700,7 @@ static int rot_zstd_unpack(const char *src, const char *dst)
     }
     AIRY_FREE(ibuf);
     AIRY_FREE(obuf);
-    fclose(in);
-    fclose(out);
-    if (rc != 0) {
-        remove(dst);
-    }
-    return rc;
+    return rot_close_pair(in, out, dst, rc);
 }
 #endif
 
