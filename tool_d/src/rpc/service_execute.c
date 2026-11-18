@@ -12,6 +12,7 @@
 #include "airy_memory.h"
 #include "daemon_security.h"
 #include "error.h"
+#include "job/tool_audit.h"
 #include "job/tool_job.h"
 #include "rpc/service.h"
 #include "svc_logger.h"
@@ -252,7 +253,8 @@ static void apply_timeout(tool_metadata_t *meta, const tool_execute_request_t *r
  * 并附带合成取消结果。
  */
 static int do_execute_tool(tool_service_t *svc, tool_metadata_t *meta, const char *params_json,
-                           const char *agent_id, tool_result_t **out_result)
+                           const char *agent_id, int allow_dangerous,
+                           tool_result_t **out_result)
 {
     if (!svc || !meta || !out_result) {
         return AIRY_ERR_INVALID_PARAM;
@@ -263,7 +265,8 @@ static int do_execute_tool(tool_service_t *svc, tool_metadata_t *meta, const cha
     }
 
     tool_result_t *res = NULL;
-    int ret = executor_pool_run(svc->exec_pool, meta, params_json, agent_id, &res);
+    int ret = executor_pool_run_ex(svc->exec_pool, meta, params_json, agent_id, allow_dangerous,
+                                   &res);
 
     if (ret != 0) {
         SVC_LOG_ERROR("Tool execution failed, error: %d", ret);
@@ -323,7 +326,10 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
      * confirmation cannot be skipped. */
     tool_result_t *cached_result = NULL;
     const char *subject = (req->agent_id && req->agent_id[0]) ? req->agent_id : "tool_d";
-    if (daemon_check_tool_permission(subject, req->tool_id, "execute") == 0) {
+    /* D-9：高危调用必须逐次审批，缓存命中会绕过审批门，故一律不查缓存。 */
+    int high_risk =
+        tool_audit_risk(req->tool_id, req->params_json, NULL, 0) == TOOL_AUDIT_RISK_HIGH;
+    if (!high_risk && daemon_check_tool_permission(subject, req->tool_id, "execute") == 0) {
         cached_result = get_cached_result(svc, meta, req->tool_id, req->params_json, req->agent_id);
     }
     if (cached_result) {
@@ -336,7 +342,8 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
     tool_result_t *res = NULL;
     airy_timestamp_t ts0, ts1;
     airy_time_monotonic(&ts0);
-    int ret = do_execute_tool(svc, meta, req->params_json, req->agent_id, &res);
+    int ret = do_execute_tool(svc, meta, req->params_json, req->agent_id, req->allow_dangerous,
+                              &res);
     airy_time_monotonic(&ts1);
     atomic_fetch_add_explicit(&svc->exec_total, 1, memory_order_relaxed);
     atomic_fetch_add_explicit(&svc->exec_ms_total,

@@ -21,6 +21,7 @@
 #include "core/executor_budget.h"
 #include "core/executor_run.h"
 #include "core/executor_gate.h"
+#include "job/tool_audit.h"
 #include "builtin/builtin.h"
 #include "daemon_platform_ext.h"
 #include "svc_logger.h"
@@ -360,6 +361,13 @@ static int tool_builtin_exec(tool_executor_t *exec, const tool_metadata_t *meta,
 int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const char *params_json,
                       const char *agent_id, tool_result_t **out_result)
 {
+    return tool_executor_run_ex(exec, meta, params_json, agent_id, 0, out_result);
+}
+
+int tool_executor_run_ex(tool_executor_t *exec, const tool_metadata_t *meta,
+                         const char *params_json, const char *agent_id, int allow_dangerous,
+                         tool_result_t **out_result)
+{
     if (!exec || !meta || !out_result) {
         SVC_LOG_ERROR("tool_executor_run: NULL parameter (exec/meta/out_result)");
         return AIRY_ERR_INVALID_PARAM;
@@ -379,6 +387,13 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     exec->total_executions++;
     airy_mtx_unlock(&exec->lock);
     time_t start_time = time(NULL);
+
+    /* D-9：沙箱层级随结果透出；降级（Landlock 不可用）必须告警留痕。 */
+    snprintf(result->sandbox, sizeof(result->sandbox), "%s", tool_audit_sbox());
+    if (strcmp(result->sandbox, "degraded") == 0)
+        SVC_LOG_WARN("sandbox degraded: Landlock unavailable, tool '%s' runs with reduced "
+                     "isolation",
+                     meta->id ? meta->id : "?");
 
     if (!meta->executable || strlen(meta->executable) == 0) {
         SVC_LOG_ERROR("tool_executor_run: no executable specified in tool metadata (id=%s)",
@@ -413,7 +428,8 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     {
         char *deny_reason = NULL;
         approval_gate_verdict_t verdict =
-            gate_ask(exec->gate, caller_agent, meta, params_json, &deny_reason);
+            gate_ask_ex(exec->gate, caller_agent, meta, params_json, allow_dangerous,
+                        result->approval, sizeof(result->approval), &deny_reason);
         if (verdict != APPROVAL_GATE_ALLOWED) {
             *out_result = result;
             return tool_fail(result,

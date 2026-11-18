@@ -347,6 +347,8 @@ static void test_tool_create_builtin(void)
     tool_execute_request_t req = {0};
     req.tool_id = "tool_create";
     req.params_json = create_json;
+    /* D-9：tool_create 为高危工具，用例显式接受风险（审计仍留痕）。 */
+    req.allow_dangerous = 1;
 
     tool_result_t *res = NULL;
     int rc = tool_service_execute(svc, &req, &res);
@@ -402,6 +404,18 @@ static void test_tool_create_builtin(void)
     rc = tool_service_execute(svc, &req, &res);
     CHECK(res != NULL && res->err_code != 0);
     CHECK(res->error != NULL && strstr(res->error, "shebang") != NULL);
+    tool_result_free(res);
+
+    /* D-9：高危工具未显式放行必须被拒（fail-closed），且错误可诊断。 */
+    req.tool_id = "tool_create";
+    req.params_json = create_json;
+    req.allow_dangerous = 0;
+    res = NULL;
+    rc = tool_service_execute(svc, &req, &res);
+    CHECK(rc != 0);
+    CHECK(res != NULL && res->err_code != 0);
+    CHECK(res->error != NULL && strstr(res->error, "requires approval") != NULL);
+    CHECK(strcmp(res->approval, "none") == 0);
     tool_result_free(res);
 
     tool_service_destroy(svc);
