@@ -58,7 +58,8 @@ void svc_destroy(void);
     X("task_submit_stream", m_task_submit_stream) \
     X("health_check", m_health_check) \
     X("get_stats", m_get_stats) \
-    X("vocab", m_vocab)
+    X("vocab", m_vocab) \
+    X("turns", m_turns)
 
 #define SVC_AGENT_D_METHODS(X) \
     SVC_AGENT_D_RPC_METHODS(X) \
