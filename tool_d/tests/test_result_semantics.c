@@ -68,17 +68,21 @@ static tool_result_t *run_tool(tool_executor_t *exec, const char *id, const char
     return result;
 }
 
-/* 进程退出非 0：/bin/false 退出码 1，必须判失败且给通用业务码。 */
+/* 进程退出非 0：false 退出码 1，必须判失败且给通用业务码。 */
 static void test_nonzero_exit(void)
 {
     printf("  test_nonzero_exit...\n");
+
+    /* macOS 无 /bin/false（在 /usr/bin），按宿主实际位置取。 */
+    const char *false_exe =
+        access("/bin/false", X_OK) == 0 ? "/bin/false" : "/usr/bin/false";
 
     tool_executor_t *exec = tool_executor_create(NULL);
 
     assert(exec != NULL);
     setup_approval(exec, "nonzero_exit");
 
-    tool_result_t *res = run_tool(exec, "nonzero_exit", "/bin/false", NULL, 5);
+    tool_result_t *res = run_tool(exec, "nonzero_exit", false_exe, NULL, 5);
 
     assert(!tool_result_ok(res));
     assert(res->err_code == AIRY_ERR_GENERIC_FAIL);

@@ -328,6 +328,10 @@ int main(int argc, char **argv)
     if (pid == 0) {
         char exe[512];
         ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+        if (n <= 0) {
+            /* macOS 无 /proc：ctest 以绝对路径启动子进程，argv[0] 即可执行体。 */
+            n = snprintf(exe, sizeof(exe), "%s", argv[0]);
+        }
         if (n <= 0)
             _exit(127);
         exe[n] = '\0';
