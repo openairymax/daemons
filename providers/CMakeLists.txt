@@ -91,7 +91,6 @@ target_include_directories(airy_llm_transport PUBLIC
     ${COMMONS_INCLUDE_DIR}/utils/sync
     ${COMMONS_INCLUDE_DIR}/utils/cache
     ${COMMONS_INCLUDE_DIR}/utils/compat
-    ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${CURL_INCLUDE_DIRS}
     ${CJSON_INCLUDE_DIRS}

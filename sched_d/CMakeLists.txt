@@ -65,7 +65,6 @@ target_include_directories(sched_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/cache
     ${COMMONS_INCLUDE_DIR}/utils/compat
     # 新增网络和IPC模块
-    ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${CJSON_INCLUDE_DIRS}
 )
