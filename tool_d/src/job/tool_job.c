@@ -370,6 +370,23 @@ void tooljob_free(tooljob_t *jobs)
     job_put(jobs);
 }
 
+/* 取空闲槽位并初始化公共字段（jobs 回指 + 任务号）；返回时持锁，
+ * 未取到则已解锁。submit/record 共用同一「淘汰-重取」序列。 */
+static struct job_entry *job_alloc(tooljob_t *jobs)
+{
+    airy_mtx_lock(&jobs->lock);
+    struct job_entry *e = job_slot(jobs);
+    if (!e && job_evict(jobs) == 0)
+        e = job_slot(jobs);
+    if (!e) {
+        airy_mtx_unlock(&jobs->lock);
+        return NULL;
+    }
+    e->jobs = jobs;
+    job_id_make(jobs, e->info.id, sizeof(e->info.id));
+    return e;
+}
+
 int tooljob_submit(tooljob_t *jobs, const tool_execute_request_t *req, int timeout_sec,
                    char *job_id_out, size_t cap)
 {
@@ -377,16 +394,9 @@ int tooljob_submit(tooljob_t *jobs, const tool_execute_request_t *req, int timeo
 
     if (!jobs || !req || !req->tool_id || !job_id_out || cap < 8)
         return AIRY_ERR_INVALID_PARAM;
-    airy_mtx_lock(&jobs->lock);
-    e = job_slot(jobs);
-    if (!e && job_evict(jobs) == 0)
-        e = job_slot(jobs);
-    if (!e) {
-        airy_mtx_unlock(&jobs->lock);
+    e = job_alloc(jobs);
+    if (!e)
         return AIRY_ERR_BUSY;
-    }
-    e->jobs = jobs;
-    job_id_make(jobs, e->info.id, sizeof(e->info.id));
     snprintf(e->info.tool_id, sizeof(e->info.tool_id), "%s", req->tool_id);
     if (req->agent_id)
         snprintf(e->info.agent_id, sizeof(e->info.agent_id), "%s", req->agent_id);
@@ -462,16 +472,9 @@ int tooljob_record(tooljob_t *jobs, const char *tool_id, const char *agent_id,
 
     if (!jobs || !tool_id || !res || !job_id_out || cap < 8)
         return AIRY_ERR_INVALID_PARAM;
-    airy_mtx_lock(&jobs->lock);
-    e = job_slot(jobs);
-    if (!e && job_evict(jobs) == 0)
-        e = job_slot(jobs);
-    if (!e) {
-        airy_mtx_unlock(&jobs->lock);
+    e = job_alloc(jobs);
+    if (!e)
         return AIRY_ERR_BUSY;
-    }
-    e->jobs = jobs;
-    job_id_make(jobs, e->info.id, sizeof(e->info.id));
     snprintf(e->info.tool_id, sizeof(e->info.tool_id), "%s", tool_id);
     if (agent_id)
         snprintf(e->info.agent_id, sizeof(e->info.agent_id), "%s", agent_id);
