@@ -57,7 +57,10 @@ void svc_destroy(void);
     X("approve", m_approve) \
     X("submit", m_submit) \
     X("poll", m_poll) \
-    X("cancel", m_cancel)
+    X("cancel", m_cancel) \
+    X("verify", m_verify) \
+    X("jobs", m_jobs) \
+    X("job", m_job)
 
 #define SVC_TOOL_D_METHODS(X) \
     SVC_TOOL_D_RPC_METHODS(X) \

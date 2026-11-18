@@ -67,6 +67,13 @@ extern "C" {
  * 它会让会话历史出现「成功但空白」的轮次，客户端只能靠用户重发；按失败
  * 回传，使上层可重试或改写提示。 */
 #define AGENT_RUN_RC_EMPTY 6
+/* 完成判据未满足（C-17）：模型自报做完，tool_d verifier 只读复核判定未过。
+ * 与 EMPTY/FUSE 分界：产物存在但不符合判据，属确定性失败——原样重试无意义，
+ * 必须按逐项证据修复产物后重新提交（next_action=adjust）。 */
+#define AGENT_RUN_RC_UNMET 7
+/* 判据无法取证（C-17 回退）：verifier 连续不可达，复核未能执行。既非通过
+ * 也非失败，状态记为 unverified，不得显示 completed。 */
+#define AGENT_RUN_RC_UNVERIFIED 8
 /* 流式 LLM 调用的双窗口：TIMEOUT_MS 是相邻两段数据之间的最大沉默时间
  * （每收一段即重置），TOTAL_MS 是整条流的硬上限。只有前者会把持续吐 token
  * 的长推理在 90s 处腰斩——那是「卡住后报错」的直接来源。

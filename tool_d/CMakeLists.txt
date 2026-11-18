@@ -79,6 +79,8 @@ set(TOOL_SERVICE_SOURCES
     src/job/tool_job.c
     # D-9 审计留痕：风险分级 / 参数脱敏 / 输出摘要 / 沙箱标记
     src/job/tool_audit.c
+    # C-17 完成判据复核：tool.verify 只读实现（cmd/file/service/rpc）
+    src/verify/tool_verify.c
 )
 
 add_library(airy_tool_service STATIC ${TOOL_SERVICE_SOURCES})

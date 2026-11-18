@@ -19,7 +19,7 @@
     "methods": [
       "register", "list_tools", "get_tool", "execute_tool", "execute",
       "list", "health_check", "get_stats", "pending", "approve",
-      "submit", "poll", "cancel"
+      "submit", "poll", "cancel", "verify", "jobs", "job"
     ]
   },
   "deps": { "required": [], "optional": [] },

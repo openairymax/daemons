@@ -42,7 +42,8 @@
       "run/agent_run_stream.c",
       "run/agent_task_ledger.c",
       "run/agent_task_orchestrate.c",
-      "run/agent_turn_ckpt.c"
+      "run/agent_turn_ckpt.c",
+      "run/agent_verify.c"
     ]}
   ]
 }

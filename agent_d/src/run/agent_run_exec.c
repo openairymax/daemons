@@ -18,6 +18,7 @@
 #include "agent_run_engine.h"
 #include "agent_run_internal.h"
 #include "agent_task_ledger.h"
+#include "agent_verify.h"
 
 #include "airy_memory.h"
 #include "airy_run_stream.h"
@@ -78,6 +79,8 @@ typedef struct {
     int rc;
     bool cancelled;
     char run_id[AGENT_RUN_SESSION_ID_LEN];
+    cJSON *verify;        /* C-17：tool_d verifier 逐项证据（可 NULL） */
+    char *criteria;       /* C-17：生效判据串（任务自带或计划派生，自持有） */
 } run_ctx_t;
 
 static void run_free(run_ctx_t *c)
@@ -86,13 +89,18 @@ static void run_free(run_ctx_t *c)
         cJSON_Delete(c->trace);
     if (c->think)
         cJSON_Delete(c->think);
+    if (c->verify)
+        cJSON_Delete(c->verify);
     if (c->spec_owned)
         cJSON_Delete(c->spec_owned);
+    AIRY_FREE(c->criteria);
     AIRY_FREE(c->text);
     AIRY_FREE(c->reason);
     AIRY_FREE(c->resume_out);
     AIRY_MEMSET(c, 0, sizeof(*c));
 }
+
+static void run_criteria_prepare(run_ctx_t *c, const cJSON *plan);
 
 /* task_state 帧：C-15 任务时间线的唯一状态出口（仅 task.submit 携带 task
  * 元数据时发帧）。run_id 取 task_id，unregister 之后仍用本地副本。
@@ -534,6 +542,10 @@ static void run_plan(run_ctx_t *c, const cJSON *plan)
     if (!plan_str)
         return;
 
+    /* C-17：计划到手即确定生效判据（请求自带或节点 postcondition 派生），
+     * 使执行阶段与收尾阶段看到同一份判据。 */
+    run_criteria_prepare(c, plan);
+
     cJSON *evt = cJSON_CreateObject();
     if (evt) {
         char pbuf[1024];
@@ -724,6 +736,30 @@ static void run_chain(run_ctx_t *c)
     }
 }
 
+/* C-17：模型自报完成后，由 tool_d verifier 在独立上下文只读复核判据。
+ * 关键纪律：[TASK:DONE] 之类的自报不构成完成依据；只有逐项取证通过才是
+ * 完成，未过即确定性失败（rc=UNMET），无法取证则记 unverified。 */
+static void run_verify(run_ctx_t *c)
+{
+    cJSON *verification = NULL;
+    int vrc = agent_verify_apply(c->criteria, &verification);
+    c->verify = verification;
+    if (vrc != 0)
+        c->rc = vrc;
+}
+
+/* 判据来源二选一：请求自带优先；task 模式缺失时由计划节点 postcondition
+ * 汇总派生（用户未给判据的唯一补全路径）。chat 轮不复核。 */
+static void run_criteria_prepare(run_ctx_t *c, const cJSON *plan)
+{
+    if (!c->task || strcmp(c->task->mode, AGENT_TASK_MODE_TASK) != 0)
+        return;
+    if (c->criteria && c->criteria[0])
+        return;
+    AIRY_FREE(c->criteria);
+    c->criteria = agent_task_criteria_from_plan(plan);
+}
+
 /* D-10：失败载荷唯一装配点。code 原样保留，分层只补语义字段与建议动作。 */
 static cJSON *run_fail_obj(const run_ctx_t *c)
 {
@@ -744,6 +780,10 @@ static cJSON *run_fail_obj(const run_ctx_t *c)
     cJSON_AddNumberToObject(f, AIRY_RS_K_BUDGET_TOTAL, c->rounds_limit);
     cJSON_AddStringToObject(f, AIRY_RS_K_NODE, node);
     cJSON_AddStringToObject(f, AIRY_RS_K_NEXT_ACTION, d.next_action);
+    /* C-17：逐项证据随失败载荷下发（type/expect/actual/pass），客户端无需
+     * 猜测哪条判据未过，也不必回读 verifier。 */
+    if (c->verify)
+        cJSON_AddItemToObject(f, AIRY_RS_K_VERIFICATION, cJSON_Duplicate(c->verify, 1));
     return f;
 }
 
@@ -792,10 +832,12 @@ static cJSON *run_fill(run_ctx_t *c)
         cJSON_AddStringToObject(result, AIRY_RS_K_MODE, c->task->mode);
         cJSON_AddStringToObject(result, AIRY_RS_K_MODE_REASON, c->task->mode_reason);
         cJSON_AddBoolToObject(result, AIRY_RS_K_GCCP_CONFIRMED, c->task->gccp_confirmed);
-        if (c->task->success_criteria && c->task->success_criteria[0])
-            cJSON_AddStringToObject(result, AIRY_RS_K_SUCCESS_CRITERIA,
-                                    c->task->success_criteria);
+        if (c->criteria && c->criteria[0])
+            cJSON_AddStringToObject(result, AIRY_RS_K_SUCCESS_CRITERIA, c->criteria);
     }
+    /* C-17：复核证据与 result 同源（成功含 ok=true，未过含逐项 actual）。 */
+    if (c->verify)
+        cJSON_AddItemToObject(result, AIRY_RS_K_VERIFICATION, cJSON_Duplicate(c->verify, 1));
     cJSON_AddStringToObject(result, "response", c->text ? c->text : "");
     /* 一等终态（C-14）：status 是客户端渲染「继续/放弃」的唯一判据，
      * error_code 保留原始码供排障；Paused 时 resume_token 随结果下发，
@@ -859,7 +901,9 @@ static void run_tail(run_ctx_t *c, const cJSON *res)
     const cJSON *rt = res ? cJSON_GetObjectItem(res, AIRY_RS_K_RESUME_TOKEN) : NULL;
     const bool resumable = cJSON_IsString(rt) && rt->valuestring && rt->valuestring[0];
 
-    if (c->rc == 0 && !c->gccp_round && c->text) {
+    /* C-17：判据无法取证时终态是 unverified，但正文仍需交付——否则用户
+     * 拿到结论却看不到内容，无从判断是否需要补判据。 */
+    if ((c->rc == 0 || c->rc == AGENT_RUN_RC_UNVERIFIED) && !c->gccp_round && c->text) {
         cJSON *msg = cJSON_CreateObject();
         if (msg) {
             cJSON_AddStringToObject(msg, AIRY_RS_K_ROLE, "assistant");
@@ -893,6 +937,10 @@ static void run_tail(run_ctx_t *c, const cJSON *res)
         cJSON_AddNumberToObject(end, AIRY_RS_K_ROUNDS_LIMIT, c->rounds_limit);
         if (resumable)
             cJSON_AddStringToObject(end, AIRY_RS_K_RESUME_TOKEN, rt->valuestring);
+        /* C-17：复核证据随终态帧下发（成功亦包含 ok=true），客户端据此
+         * 逐条呈现判据结果，不再依赖正文字样推断完成。 */
+        if (c->verify)
+            cJSON_AddItemToObject(end, AIRY_RS_K_VERIFICATION, cJSON_Duplicate(c->verify, 1));
         /* D-10/D-11：终态帧与 result 同源，失败载荷与 usage 一处装配两处下发。 */
         if (c->rc != 0 && !c->cancelled) {
             cJSON *fail = run_fail_obj(c);
@@ -953,9 +1001,15 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
     c.task = task;
     c.sink = sink;
     c.rc = -1;
+    /* C-17：请求自带判据先落到 ctx（自持有一份，生命周期与本轮一致）；计划
+     * 派生只在缺失时补位。 */
+    if (task && task->success_criteria && task->success_criteria[0])
+        c.criteria = AIRY_STRDUP(task->success_criteria);
 
-    if (run_open(&c) != 0)
+    if (run_open(&c) != 0) {
+        AIRY_FREE(c.criteria);
         return -1;
+    }
 
     run_announce(&c);
     if (!c.agent_spec && c.agent_file) {
@@ -979,6 +1033,16 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
      * GCCP 交互轮以问题集为产物、取消轮由取消语义覆盖，二者不判空。 */
     if (c.rc == 0 && !c.cancelled && !c.gccp_round && (!c.text || !c.text[0]))
         c.rc = AGENT_RUN_RC_EMPTY;
+
+    /* 完成判据外部化（C-17）：有判据的 task 轮在收尾前必须经 verifier 复核，
+     * 「模型说完成」不进入终态判定。空输出已判 EMPTY，无需再复核。task 模式
+     * 一条判据都拿不到时记 unverified——可交付但不得冒充 completed。 */
+    if (c.rc == 0 && !c.cancelled && !c.gccp_round && c.task &&
+        strcmp(c.task->mode, AGENT_TASK_MODE_TASK) == 0 &&
+        (!c.criteria || !c.criteria[0]))
+        c.rc = AGENT_RUN_RC_UNVERIFIED;
+    if (c.rc == 0 && !c.cancelled && !c.gccp_round && c.criteria && c.criteria[0])
+        run_verify(&c);
 
     /* 终态必写决策链（0.1.21 L-9）：旧行为只在成功时写 run_result，失败与
      * 取消在链上无终局，看板与回放永远停在 running，只能靠日志猜结果。
