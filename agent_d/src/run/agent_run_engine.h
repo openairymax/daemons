@@ -97,14 +97,22 @@ typedef struct agent_run_session_s {
      * 请求辨识同一次运行；与 session_id（会话槽位）解耦。 */
     char run_id[AGENT_RUN_SESSION_ID_LEN];
     volatile int cancelled;
+    /* D-13（E-20）：取消追溯。发起者与发生时间在置位时一并记录，终态
+     * 落账与 task_state 帧都要带，否则无法区分用户取消与关机取消。 */
+    char cancel_by[AGENT_RUN_SESSION_ID_LEN];
+    uint64_t cancel_at_ms;
     struct agent_run_session_s *next;
 } agent_run_session_t;
 
 /** @brief 查询会话是否已被取消。 */
 bool agent_run_is_cancelled(const agent_run_session_t *s);
 
-/** @brief 按 session_id 请求取消（agent.cancel 入口，返回 0 命中）。 */
-int agent_run_cancel_by_session(const char *session_id);
+/** @brief 读取取消追溯信息（未取消时 by 为空、ts 为 0）。 */
+void agent_run_cancel_meta(const agent_run_session_t *s, const char **by, uint64_t *ts_ms);
+
+/** @brief 按 session_id 请求取消（agent.cancel 入口，返回 0 命中）。
+ *  @param by 发起者标识（客户端/调用方自报，可 NULL → "client"）。 */
+int agent_run_cancel_by_session(const char *session_id, const char *by);
 
 /** @brief 终态名：run_end 的 status 与决策链的 state 共用这一映射点。 */
 const char *run_state_name(int rc, int cancelled);
