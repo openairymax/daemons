@@ -23,6 +23,8 @@
 #include "svc_logger.h"
 
 #include "core/tool_contract.h"
+#include "job/tool_job.h"
+#include "platform_time.h"
 
 static void handle_register(cJSON *params, int id, airy_sock_t fd);
 static void handle_list(cJSON *params, int id, airy_sock_t fd);
@@ -240,7 +242,14 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
                                   .allow_dangerous = allow_dangerous};
 
     tool_result_t *res = NULL;
+    uint64_t started_ms = airy_time_wall_ms();
     int ret = tool_service_execute(g_service, &req, &res);
+    /* D-9：同步执行同样落一条终态作业记录（与 tool.submit 同一实体），
+     * 响应回带 job_id，jobs show 可还原命令/退出码/耗时/审批人。 */
+    char job_id[TOOL_JOB_ID_MAX] = {0};
+    if (g_jobs && res)
+        (void)tooljob_record(g_jobs, tid, agent_id ? agent_id : "tool_d", params_json, res,
+                             started_ms, job_id, sizeof(job_id));
     AIRY_FREE((void *)params_json);
 
     /* Error layering: a JSON-RPC error envelope is reserved for protocol /
@@ -278,6 +287,8 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
             cJSON_AddStringToObject(result, "approval", res->approval);
         if (res->sandbox[0])
             cJSON_AddStringToObject(result, "sandbox", res->sandbox);
+        if (job_id[0])
+            cJSON_AddStringToObject(result, "job_id", job_id);
         if (!ok) {
             put_tool_err(result, ecode, res->error ? res->error : airy_err_str(ecode), tid);
             SVC_LOG_ERROR("Tool execution failed: %s (err_code=%d)", tid, (int)res->err_code);

@@ -276,6 +276,16 @@ static void job_id_make(tooljob_t *j, char *buf, size_t cap)
              j->seq % 10000u);
 }
 
+/* 结果码 → 作业终态；同步落账与异步收尾共用同一映射。 */
+static tool_job_state_t job_state_for(const tool_result_t *res)
+{
+    if (res->err_code == 0)
+        return TOOL_JOB_DONE;
+    if (res->err_code == AIRY_ETIMEDOUT || res->err_code == AIRY_ERR_TIMEOUT)
+        return TOOL_JOB_TIMED_OUT;
+    return TOOL_JOB_FAILED;
+}
+
 /* 结果落账（锁内调用）：仅当未被协作取消时写入终态。 */
 static void job_fill(tooljob_t *j, struct job_entry *e, int rc, tool_result_t *res)
 {
@@ -294,12 +304,7 @@ static void job_fill(tooljob_t *j, struct job_entry *e, int rc, tool_result_t *r
             snprintf(e->info.approval, sizeof(e->info.approval), "%s", res->approval);
         if (res->sandbox[0])
             snprintf(e->info.sandbox, sizeof(e->info.sandbox), "%s", res->sandbox);
-        if (res->err_code == 0)
-            e->info.state = TOOL_JOB_DONE;
-        else if (res->err_code == AIRY_ETIMEDOUT || res->err_code == AIRY_ERR_TIMEOUT)
-            e->info.state = TOOL_JOB_TIMED_OUT;
-        else
-            e->info.state = TOOL_JOB_FAILED;
+        e->info.state = job_state_for(res);
     } else {
         e->info.state = TOOL_JOB_FAILED;
         e->info.err_code = rc ? rc : AIRY_ERR_GENERIC_FAIL;
@@ -444,6 +449,57 @@ int tooljob_poll(tooljob_t *jobs, const char *job_id, tool_job_info_t *out)
     out->output = job_dup(e->info.output);
     out->error = job_dup(e->info.error);
     airy_mtx_unlock(&jobs->lock);
+    return 0;
+}
+
+int tooljob_record(tooljob_t *jobs, const char *tool_id, const char *agent_id,
+                   const char *params_json, const tool_result_t *res, uint64_t start_ms,
+                   char *job_id_out, size_t cap)
+{
+    struct job_entry *e;
+    tool_job_state_t state;
+    int risk;
+
+    if (!jobs || !tool_id || !res || !job_id_out || cap < 8)
+        return AIRY_ERR_INVALID_PARAM;
+    airy_mtx_lock(&jobs->lock);
+    e = job_slot(jobs);
+    if (!e && job_evict(jobs) == 0)
+        e = job_slot(jobs);
+    if (!e) {
+        airy_mtx_unlock(&jobs->lock);
+        return AIRY_ERR_BUSY;
+    }
+    e->jobs = jobs;
+    job_id_make(jobs, e->info.id, sizeof(e->info.id));
+    snprintf(e->info.tool_id, sizeof(e->info.tool_id), "%s", tool_id);
+    if (agent_id)
+        snprintf(e->info.agent_id, sizeof(e->info.agent_id), "%s", agent_id);
+    e->info.created_ms = start_ms ? start_ms : airy_time_wall_ms();
+    e->info.finished_ms = airy_time_wall_ms();
+    e->info.err_code = res->err_code;
+    e->info.exit_code = res->exit_code;
+    e->info.output = job_dup(res->output);
+    e->info.error = job_dup(res->error);
+    e->info.state = job_state_for(res);
+    e->params = job_dup(params_json ? params_json : "{}");
+    e->info.risk = (int)tool_audit_risk(tool_id, e->params, e->info.risk_reason,
+                                        sizeof(e->info.risk_reason));
+    tool_audit_mask(e->params, e->info.params_sum, sizeof(e->info.params_sum));
+    tool_audit_sum(res->output, e->info.output_sum, sizeof(e->info.output_sum));
+    snprintf(e->info.approval, sizeof(e->info.approval), "%s",
+             res->approval[0] ? res->approval : "none");
+    snprintf(e->info.sandbox, sizeof(e->info.sandbox), "%s",
+             res->sandbox[0] ? res->sandbox : tool_audit_sbox());
+    jobs->count++;
+    job_save(jobs, &e->info);
+    snprintf(job_id_out, cap, "%s", e->info.id);
+    /* 槽位可能在解锁后被淘汰，日志内容先拷出再解锁。 */
+    state = e->info.state;
+    risk = e->info.risk;
+    airy_mtx_unlock(&jobs->lock);
+    SVC_LOG_INFO("tool job %s recorded: state=%s tool=%s risk=%d", job_id_out,
+                 tooljob_state(state), tool_id, risk);
     return 0;
 }
 
