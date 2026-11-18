@@ -68,14 +68,18 @@ static tool_result_t *run_tool(tool_executor_t *exec, const char *id, const char
     return result;
 }
 
+/* 宿主可执行体位置：macOS 的 true/false/sleep 在 /usr/bin，Linux 在 /bin。 */
+static const char *pick_exe(const char *a, const char *b)
+{
+    return access(a, X_OK) == 0 ? a : b;
+}
+
 /* 进程退出非 0：false 退出码 1，必须判失败且给通用业务码。 */
 static void test_nonzero_exit(void)
 {
     printf("  test_nonzero_exit...\n");
 
-    /* macOS 无 /bin/false（在 /usr/bin），按宿主实际位置取。 */
-    const char *false_exe =
-        access("/bin/false", X_OK) == 0 ? "/bin/false" : "/usr/bin/false";
+    const char *false_exe = pick_exe("/bin/false", "/usr/bin/false");
 
     tool_executor_t *exec = tool_executor_create(NULL);
 
@@ -103,7 +107,8 @@ static void test_timeout(void)
     assert(exec != NULL);
     setup_approval(exec, "timeout_case");
 
-    tool_result_t *res = run_tool(exec, "timeout_case", "/bin/sleep", "5", 1);
+    tool_result_t *res = run_tool(exec, "timeout_case", pick_exe("/bin/sleep", "/usr/bin/sleep"),
+                                  "5", 1);
 
     assert(!tool_result_ok(res));
     assert(res->err_code == AIRY_ERR_TIMEOUT);
@@ -122,7 +127,7 @@ static void test_empty_output(void)
     assert(exec != NULL);
     setup_approval(exec, "empty_out");
 
-    tool_result_t *res = run_tool(exec, "empty_out", "/bin/true", NULL, 5);
+    tool_result_t *res = run_tool(exec, "empty_out", pick_exe("/bin/true", "/usr/bin/true"), NULL, 5);
 
     assert(tool_result_ok(res));
     assert(res->err_code == AIRY_OK);
