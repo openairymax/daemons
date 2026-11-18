@@ -21,6 +21,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 
 #include "accounting/metrics.h"
 #include "rpc/gen_params.h"
@@ -235,8 +238,13 @@ static int pick_error(llm_service_t *svc)
  * 避免热路径日志放大；原子交换保证多线程下至多一次。 */
 static void attest_first_call(llm_service_t *svc, const char *declared, const char *actual)
 {
+#ifdef _MSC_VER
+    if (InterlockedExchange((volatile long *)&svc->attest_first_seen, 1L))
+        return;
+#else
     if (__atomic_exchange_n(&svc->attest_first_seen, 1, __ATOMIC_RELAXED))
         return;
+#endif
     SVC_LOG_INFO("C-L02: ATTEST: first call declared=%s actual=%s",
                  (declared && declared[0]) ? declared : svc->default_model,
                  (actual && actual[0]) ? actual : "(unknown)");

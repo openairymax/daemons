@@ -639,7 +639,7 @@ int svc_slot_save(const char *path, const svc_model_slots_t *slots)
     const char *end = src + n;
 
     while (p < end) {
-        const char *nl = (const char *)__builtin_memchr(p, '\n', (size_t)(end - p));
+        const char *nl = (const char *)memchr(p, '\n', (size_t)(end - p));
         const char *le = nl ? nl : end;
         const char *next = nl ? nl + 1 : end;
         const char *q = p;

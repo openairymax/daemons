@@ -21,7 +21,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(_MSC_VER)
+/* MSVC 无 strings.h，等价物是 string.h 里的 _stricmp。 */
+#define strcasecmp _stricmp
+#else
 #include <strings.h>
+#endif
 
 #define ALT_CMD_MAX 512
 #define ALT_TOK_MAX 24
