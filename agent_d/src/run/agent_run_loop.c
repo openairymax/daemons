@@ -80,6 +80,18 @@ agent_fail_desc_t agent_fail_desc(int rc, int denied)
         d.retryable = 1;
         d.next_action = AIRY_RS_NEXT_RETRY;
         break;
+    case AGENT_RUN_RC_UNMET:
+        /* 判据未过是确定性事实：证据已随 verification 下发，重发同一请求
+         * 不会改变结果，必须按逐项 expect/actual 修复产物。 */
+        d.origin = AIRY_RS_ORIGIN_VERIFIER;
+        d.reason = AIRY_RS_REASON_UNMET;
+        d.next_action = AIRY_RS_NEXT_ADJUST;
+        break;
+    case AGENT_RUN_RC_UNVERIFIED:
+        d.origin = AIRY_RS_ORIGIN_VERIFIER;
+        d.reason = AIRY_RS_REASON_UNVERIFIED;
+        d.retryable = 1;
+        break;
     case -1:
         d.origin = AIRY_RS_ORIGIN_PROVIDER;
         d.reason = AIRY_RS_REASON_PROVIDER;

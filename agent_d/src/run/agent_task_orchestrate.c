@@ -14,6 +14,7 @@
 
 #include "airy_memory.h"
 #include "airy_run_stream.h"
+#include "airy_verify.h"
 #include "platform.h"
 #include "safe_utf8.h"
 
@@ -198,4 +199,139 @@ bool agent_task_gate_allows(const char *mode, bool gccp_confirmed)
     if (!mode || strcmp(mode, AGENT_TASK_MODE_TASK) != 0)
         return true;
     return gccp_confirmed;
+}
+
+/* ---- 完成判据（C-17） ---- */
+
+/* 单条判据的结构合法性：type 决定唯一必需字段，缺一即不可复核。 */
+static bool criteria_item_ok(const cJSON *it)
+{
+    if (!cJSON_IsObject(it))
+        return false;
+    const cJSON *t = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_TYPE);
+    if (!cJSON_IsString(t) || !t->valuestring)
+        return false;
+
+    const cJSON *need = NULL;
+    if (strcmp(t->valuestring, AIRY_VC_T_CMD) == 0) {
+        need = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_CMD);
+    } else if (strcmp(t->valuestring, AIRY_VC_T_FILE) == 0) {
+        need = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_PATH);
+    } else if (strcmp(t->valuestring, AIRY_VC_T_SERVICE) == 0) {
+        need = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_PORT);
+        if (need && cJSON_IsNumber(need) && need->valueint > 0 && need->valueint <= 65535)
+            return true;
+        return false;
+    } else if (strcmp(t->valuestring, AIRY_VC_T_RPC) == 0) {
+        const cJSON *m = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_METHOD);
+        need = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_DAEMON);
+        return cJSON_IsString(need) && need->valuestring && need->valuestring[0] &&
+               cJSON_IsString(m) && m->valuestring && m->valuestring[0];
+    } else {
+        return false;
+    }
+    return cJSON_IsString(need) && need->valuestring && need->valuestring[0];
+}
+
+/* 取出判据数组（兼容裸数组与 {"criteria":[...]} 两种线形态）。 */
+static const cJSON *criteria_array(const cJSON *root)
+{
+    if (!root)
+        return NULL;
+    return cJSON_IsArray(root) ? root : cJSON_GetObjectItemCaseSensitive(root, AIRY_VK_CRITERIA);
+}
+
+bool agent_task_criteria_ok(const char *criteria)
+{
+    cJSON *root = (criteria && criteria[0]) ? cJSON_Parse(criteria) : NULL;
+    if (!root)
+        return false;
+
+    const cJSON *arr = criteria_array(root);
+    int n = cJSON_IsArray(arr) ? cJSON_GetArraySize(arr) : 0;
+    bool ok = n >= 1 && n <= AGENT_TASK_CRITERIA_MAX;
+    for (int i = 0; ok && i < n; i++)
+        ok = criteria_item_ok(cJSON_GetArrayItem(arr, i));
+    cJSON_Delete(root);
+    return ok;
+}
+
+/* 把一条 postcondition 收进判据数组：显式对象逐项校验，数组逐项展开，
+ * 其余形态（含自然语言字符串）一律跳过。 */
+static void plan_post_append(cJSON *dst, const cJSON *post)
+{
+    if (cJSON_IsObject(post)) {
+        if (criteria_item_ok(post) && cJSON_GetArraySize(dst) < AGENT_TASK_CRITERIA_MAX)
+            cJSON_AddItemToArray(dst, cJSON_Duplicate(post, 1));
+        return;
+    }
+    if (!cJSON_IsArray(post))
+        return;
+    int n = cJSON_GetArraySize(post);
+    for (int i = 0; i < n; i++) {
+        const cJSON *it = cJSON_GetArrayItem(post, i);
+        if (criteria_item_ok(it) && cJSON_GetArraySize(dst) < AGENT_TASK_CRITERIA_MAX)
+            cJSON_AddItemToArray(dst, cJSON_Duplicate(it, 1));
+    }
+}
+
+char *agent_task_criteria_from_plan(const cJSON *plan)
+{
+    const cJSON *steps =
+        cJSON_IsObject(plan) ? cJSON_GetObjectItemCaseSensitive(plan, "steps") : plan;
+    if (!cJSON_IsArray(steps))
+        return NULL;
+
+    cJSON *arr = cJSON_CreateArray();
+    if (!arr)
+        return NULL;
+    int n = cJSON_GetArraySize(steps);
+    for (int i = 0; i < n && cJSON_GetArraySize(arr) < AGENT_TASK_CRITERIA_MAX; i++) {
+        const cJSON *step = cJSON_GetArrayItem(steps, i);
+        plan_post_append(arr, cJSON_GetObjectItemCaseSensitive(step, "postcondition"));
+    }
+    if (cJSON_GetArraySize(arr) == 0) {
+        cJSON_Delete(arr);
+        return NULL;
+    }
+    char *out = cJSON_PrintUnformatted(arr);
+    cJSON_Delete(arr);
+    return out;
+}
+
+cJSON *agent_task_build_needs_criteria(const agent_run_task_meta_t *meta, const char *why)
+{
+    cJSON *out = cJSON_CreateObject();
+    if (!out)
+        return NULL;
+    cJSON_AddStringToObject(out, AIRY_RS_K_STATUS, AGENT_TASK_STATUS_NEEDS_CRITERIA);
+    if (meta) {
+        cJSON_AddStringToObject(out, AIRY_RS_K_TASK_ID, meta->task_id);
+        cJSON_AddStringToObject(out, AIRY_RS_K_MODE, meta->mode);
+        cJSON_AddStringToObject(out, AIRY_RS_K_MODE_REASON, meta->mode_reason);
+        cJSON_AddBoolToObject(out, AIRY_RS_K_GCCP_CONFIRMED, meta->gccp_confirmed);
+    }
+    cJSON_AddStringToObject(out, "message",
+                            why && why[0] ? why
+                                          : "task mode requires at least one success criterion");
+    /* 补判据示例：一条文件判据 + 一条命令判据，均为只读取证，客户端可
+     * 直接照抄成 success_criteria 后重提。 */
+    cJSON *ex = cJSON_AddObjectToObject(out, "example");
+    cJSON *arr = ex ? cJSON_AddArrayToObject(ex, AIRY_VK_CRITERIA) : NULL;
+    if (arr) {
+        cJSON *f = cJSON_CreateObject();
+        if (f) {
+            cJSON_AddStringToObject(f, AIRY_VC_TYPE, AIRY_VC_T_FILE);
+            cJSON_AddStringToObject(f, AIRY_VC_PATH, "out/result.txt");
+            cJSON_AddStringToObject(f, AIRY_VC_CONTAINS, "done");
+            cJSON_AddItemToArray(arr, f);
+        }
+        cJSON *s = cJSON_CreateObject();
+        if (s) {
+            cJSON_AddStringToObject(s, AIRY_VC_TYPE, AIRY_VC_T_CMD);
+            cJSON_AddStringToObject(s, AIRY_VC_CMD, "test -f out/result.txt");
+            cJSON_AddItemToArray(arr, s);
+        }
+    }
+    return out;
 }

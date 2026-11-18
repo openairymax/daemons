@@ -12,6 +12,7 @@
  */
 
 #include "airy_memory.h"
+#include "airy_verify.h"
 #include "error.h"
 #include "svc_tool_d.h"
 #include "tool_d_internal.h"
@@ -25,6 +26,7 @@
 #include "core/tool_contract.h"
 #include "job/tool_job.h"
 #include "platform_time.h"
+#include "verify/tool_verify.h"
 
 static void handle_register(cJSON *params, int id, airy_sock_t fd);
 static void handle_list(cJSON *params, int id, airy_sock_t fd);
@@ -38,6 +40,7 @@ static void handle_submit(cJSON *params, int id, airy_sock_t fd);
 static void handle_poll(cJSON *params, int id, airy_sock_t fd);
 static void handle_cancel(cJSON *params, int id, airy_sock_t fd);
 static void handle_jobs(cJSON *params, int id, airy_sock_t fd);
+static void handle_verify(cJSON *params, int id, airy_sock_t fd);
 
 /* g_service 未就绪是全部 tool.* 方法共有的失败前置，收敛为单一出口。 */
 #define TOOLRPC_REQUIRE_SERVICE(fd, id)                                        \
@@ -80,6 +83,9 @@ DAEMON_RPC_SHELL(cancel, handle_cancel)
  * （与 poll 同形，按 job_id 取快照）。 */
 DAEMON_RPC_SHELL(jobs, handle_jobs)
 DAEMON_RPC_SHELL(job, handle_poll)
+
+/* C-17：完成判据复核（daemon 间方法，不进入 gateway 工具目录）。 */
+DAEMON_RPC_SHELL(verify, handle_verify)
 
 static void handle_register(cJSON *params, int id, airy_sock_t client_fd)
 {
@@ -501,4 +507,19 @@ static void handle_approve(cJSON *params, int id, airy_sock_t client_fd)
     } else {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Failed to resolve approval", id);
     }
+}
+
+/* C-17：完成判据复核。只读取证，逐项回传 {expect, actual, pass}；不注册
+ * 工具、不改审批状态，因此无需 TOOLRPC_REQUIRE_SERVICE（判据复核与工具
+ * 目录解耦，daemon 间直连可独立于服务装配顺序）。 */
+static void handle_verify(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *criteria = params ? cJSON_GetObjectItemCaseSensitive(params, AIRY_VK_CRITERIA) : NULL;
+    int timeout_ms = params ? get_int_field(params, AIRY_VK_TIMEOUT_MS, 0) : 0;
+    cJSON *result = tool_verify_run(criteria, timeout_ms);
+    if (!result) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }

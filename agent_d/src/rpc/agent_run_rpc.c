@@ -182,9 +182,9 @@ static void handle_run(cJSON *params, int id, airy_sock_t client_fd)
         cJSON_Delete(result);
         return;
     }
-    /* 预算耗尽不是失败：result 携带 status=paused、error_code 与 resume_token，
-     * 客户端据此三选（继续/放弃/看失败步骤），因此按成功帧下发。 */
-    if ((rc != 0 && rc != AIRY_EBUDGET) || !result) {
+    /* 预算耗尽与判据无法取证都不是传输失败：result 携带 status=paused /
+     * unverified 与证据，客户端据此三选或补判据，因此按成功帧下发。 */
+    if ((rc != 0 && rc != AIRY_EBUDGET && rc != AGENT_RUN_RC_UNVERIFIED) || !result) {
         /* 失败原因可判读：引擎把原因写入 response（如工具连败熔断说明），
          * D-10 另带结构化 failure，客户端无需再解析文案。 */
         const char *detail = NULL;
@@ -217,6 +217,8 @@ typedef struct {
     const char *resume_token;
     const char *declared_mode; /* "chat"/"task"/"auto"/NULL */
     const char *success_criteria;
+    char *criteria_owned;      /* success_criteria 为数组时的序列化副本（自持有） */
+    bool mode_declared;        /* 客户端显式声明 chat/task（非 auto） */
     const char *client;
     int rounds;
     bool gccp_confirmed;
@@ -265,7 +267,16 @@ static int parse_task_args(cJSON *params, int id, airy_sock_t fd, task_args_t *o
     out->declared_mode = json_str(params, "mode");
     if (out->declared_mode && strcmp(out->declared_mode, AGENT_TASK_MODE_AUTO) == 0)
         out->declared_mode = NULL;
-    out->success_criteria = json_str(params, "success_criteria");
+    out->mode_declared = out->declared_mode != NULL;
+    /* C-17 判据：字符串与原生数组两种线形态都接受；数组序列化后交给引擎，
+     * 避免引擎层反复解析两种形态。 */
+    cJSON *crit = cJSON_GetObjectItem(params, "success_criteria");
+    if (cJSON_IsArray(crit)) {
+        out->criteria_owned = cJSON_PrintUnformatted(crit);
+        out->success_criteria = out->criteria_owned;
+    } else {
+        out->success_criteria = json_str(params, "success_criteria");
+    }
     out->client = json_str(params, "client");
     out->rounds = cJSON_IsNumber(rounds) ? rounds->valueint : 0;
     out->gccp_confirmed = cJSON_IsBool(conf) && cJSON_IsTrue(conf);
@@ -280,6 +291,29 @@ static int parse_task_args(cJSON *params, int id, airy_sock_t fd, task_args_t *o
         out->gccp_answers = out->gccp_owned;
     }
     return 0;
+}
+
+/* needs_intent / needs_criteria 等「零执行」结果的唯一下发口：同步请求走
+ * JSON-RPC 成功帧，流式请求作为 task_state 帧下发（state 与 status 同名），
+ * 客户端按 state 渲染补全表单。obj 的所有权移交本函数。 */
+static void task_send_notice(int id, airy_sock_t fd, const agent_run_event_sink_t *sink,
+                             const char *task_id, cJSON *obj)
+{
+    if (!obj) {
+        if (!sink)
+            JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR,
+                               "task.submit failed: notice build", id);
+        return;
+    }
+    if (!sink) {
+        JSONRPC_SEND_SUCCESS(fd, obj, id);
+        return;
+    }
+    const char *st = json_str(obj, AIRY_RS_K_STATUS);
+    if (st)
+        cJSON_AddStringToObject(obj, AIRY_RS_K_STATE, st);
+    uint64_t seq = 0;
+    agent_run_emit_event(sink, &seq, task_id ? task_id : "", "", AIRY_RS_TYPE_TASK_STATE, obj);
 }
 
 /* 同步/流式共用主流程：裁决模式 -> GCCP 门禁 -> 引擎执行。
@@ -303,6 +337,7 @@ static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
     if (agent_task_decide_mode(a.goal, a.declared_mode, meta.mode, sizeof(meta.mode),
                                meta.mode_reason, sizeof(meta.mode_reason)) != 0) {
         AIRY_FREE(a.gccp_owned);
+        AIRY_FREE(a.criteria_owned);
         if (!sink)
             JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR,
                                "task.submit failed: mode decision", id);
@@ -330,21 +365,21 @@ static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
     if (!agent_task_gate_allows(meta.mode, meta.gccp_confirmed)) {
         cJSON *ni = agent_task_build_needs_intent(&meta, missing, missing_count);
         AIRY_FREE(a.gccp_owned);
-        if (!ni) {
-            if (!sink)
-                JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR,
-                                   "task.submit failed: needs_intent build", id);
-            return;
-        }
-        if (!sink) {
-            JSONRPC_SEND_SUCCESS(fd, ni, id);
-            return;
-        }
-        /* 流式无 JSON-RPC 成功帧：把 needs_intent 作为 task_state 帧下发，
-         * 客户端按 state 渲染补全表单（TUI C-15-06 消费）。 */
-        cJSON_AddStringToObject(ni, AIRY_RS_K_STATE, AGENT_TASK_STATUS_NEEDS_INTENT);
-        uint64_t seq = 0;
-        agent_run_emit_event(sink, &seq, meta.task_id, "", AIRY_RS_TYPE_TASK_STATE, ni);
+        AIRY_FREE(a.criteria_owned);
+        task_send_notice(id, fd, sink, meta.task_id, ni);
+        return;
+    }
+
+    /* C-17 判据门禁：显式声明 task 必须带可执行判据；缺失/非法一律拒绝进入
+     * （零引擎 / 零工具调用），并回补判据示例。服务端自动裁决出的 task 不在此
+     * 拒绝——其判据可由计划节点 postcondition 派生，派生失败按 unverified 收尾。 */
+    if (a.mode_declared && strcmp(meta.mode, AGENT_TASK_MODE_TASK) == 0 &&
+        !agent_task_criteria_ok(meta.success_criteria)) {
+        cJSON *nc = agent_task_build_needs_criteria(
+            &meta, "task mode requires at least one valid success criterion");
+        AIRY_FREE(a.gccp_owned);
+        AIRY_FREE(a.criteria_owned);
+        task_send_notice(id, fd, sink, meta.task_id, nc);
         return;
     }
 
@@ -352,6 +387,7 @@ static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
     int rc = agent_run_execute(a.goal, a.model, a.history, a.gccp_answers, NULL, NULL,
                                a.session_id, a.rounds, a.resume_token, &meta, sink, &result);
     AIRY_FREE(a.gccp_owned);
+    AIRY_FREE(a.criteria_owned);
     if (sink) {
         if (result)
             cJSON_Delete(result);
