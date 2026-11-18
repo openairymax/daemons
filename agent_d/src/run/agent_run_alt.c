@@ -131,25 +131,44 @@ static int alt_priv(char *tok[], int n, run_alt_t *out)
     return 0;
 }
 
+/* 短旗标白名单：'-' 之后每个字符都须在 allowed 中（长旗标不在本表契约）。 */
+static int alt_flags_ok(char *tok[], int n, const char *allowed)
+{
+    for (int i = 1; i < n; ++i) {
+        if (tok[i][0] != '-')
+            continue;
+        for (const char *p = tok[i] + 1; *p; ++p)
+            if (!strchr(allowed, *p))
+                return 0;
+    }
+    return 1;
+}
+
+/* 单 URL 提取：只看位置参数，恰好一个 http(s) 才算数；旗标合法性由调用方
+ * 先行判定。违背即返回 NULL（宁可无替代也不猜语义）。 */
+static const char *alt_url_only(char *tok[], int n)
+{
+    const char *url = NULL;
+    for (int i = 1; i < n; ++i) {
+        if (tok[i][0] == '-')
+            continue;
+        if (url || strncmp(tok[i], "http", 4) != 0)
+            return NULL;
+        url = tok[i];
+    }
+    return url;
+}
+
 /* curl -s[S][L] URL → wget -qO- URL：只接受静默短旗标与单个 http(s) URL，
  * 其余旗标（-X/-d/-H/-o …）需要语义翻译，不做。 */
 static int alt_curl2wget(char *tok[], int n, run_alt_t *out)
 {
-    const char *url = NULL;
-    for (int i = 1; i < n; ++i) {
-        if (tok[i][0] == '-') {
-            for (const char *p = tok[i] + 1; *p; ++p)
-                if (!strchr("sSL", *p))
-                    return 0;
-            continue;
-        }
-        if (url || strncmp(tok[i], "http", 4) != 0)
-            return 0;
-        url = tok[i];
-    }
-    char cmd[ALT_CMD_MAX];
+    if (!alt_flags_ok(tok, n, "sSL"))
+        return 0;
+    const char *url = alt_url_only(tok, n);
     if (!url)
         return 0;
+    char cmd[ALT_CMD_MAX];
     snprintf(cmd, sizeof(cmd), "wget -qO- %s", url);
     return alt_cmd(out, cmd, "curl body fetch failed; retry the same URL with wget");
 }
@@ -157,21 +176,17 @@ static int alt_curl2wget(char *tok[], int n, run_alt_t *out)
 /* wget -qO- URL → curl -sSL URL：wget 静默正文取回的正向等价，跟随即 -L。 */
 static int alt_wget2curl(char *tok[], int n, run_alt_t *out)
 {
-    const char *url = NULL;
     for (int i = 1; i < n; ++i) {
-        if (tok[i][0] == '-') {
-            if (strcmp(tok[i], "-q") != 0 && strcmp(tok[i], "-O-") != 0 &&
-                strcmp(tok[i], "-qO-") != 0)
-                return 0;
+        if (tok[i][0] != '-')
             continue;
-        }
-        if (url || strncmp(tok[i], "http", 4) != 0)
+        if (strcmp(tok[i], "-q") != 0 && strcmp(tok[i], "-O-") != 0 &&
+            strcmp(tok[i], "-qO-") != 0)
             return 0;
-        url = tok[i];
     }
-    char cmd[ALT_CMD_MAX];
+    const char *url = alt_url_only(tok, n);
     if (!url)
         return 0;
+    char cmd[ALT_CMD_MAX];
     snprintf(cmd, sizeof(cmd), "curl -sSL %s", url);
     return alt_cmd(out, cmd, "wget body fetch failed; retry the same URL with curl");
 }
