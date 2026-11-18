@@ -234,7 +234,7 @@ void llm_boot_apply(struct llm_service *svc, llm_boot_t *b)
 }
 
 /* 逃生开关：仅排障用。只把「不闭合」降级为告警，不放宽对账本身。 */
-int llm_boot_allow_unknown(void)
+int llm_boot_unknown(void)
 {
     const char *esc = getenv("AIRY_ALLOW_UNKNOWN_MODEL");
     return (esc && esc[0] && strcmp(esc, "0") != 0) ? 1 : 0;
@@ -275,7 +275,7 @@ int llm_boot_attest(struct llm_service *svc)
             .in_registry = boot_reg_hit(svc, v),
         };
     }
-    airy_attest_opts_t opts = {.owner = "llm_d", .allow_unknown = llm_boot_allow_unknown()};
+    airy_attest_opts_t opts = {.owner = "llm_d", .allow_unknown = llm_boot_unknown()};
     airy_attest_result_t res;
     int rc = airy_attest_run(&opts, items, n, &res);
 

@@ -338,7 +338,7 @@ static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
     meta.gccp_confirmed = a.gccp_confirmed;
     meta.allow_dangerous = a.allow_dangerous;
 
-    if (agent_task_decide_mode(a.goal, a.declared_mode, meta.mode, sizeof(meta.mode),
+    if (atk_decide_mode(a.goal, a.declared_mode, meta.mode, sizeof(meta.mode),
                                meta.mode_reason, sizeof(meta.mode_reason)) != 0) {
         AIRY_FREE(a.gccp_owned);
         AIRY_FREE(a.criteria_owned);
@@ -379,7 +379,7 @@ static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
      * 拒绝——其判据可由计划节点 postcondition 派生，派生失败按 unverified 收尾。 */
     if (a.mode_declared && strcmp(meta.mode, AGENT_TASK_MODE_TASK) == 0 &&
         !agent_task_criteria_ok(meta.success_criteria)) {
-        cJSON *nc = agent_task_build_needs_criteria(
+        cJSON *nc = need_criteria_of(
             &meta, "task mode requires at least one valid success criterion");
         AIRY_FREE(a.gccp_owned);
         AIRY_FREE(a.criteria_owned);

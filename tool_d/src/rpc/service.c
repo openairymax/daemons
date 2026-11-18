@@ -290,7 +290,7 @@ char *tool_service_list_ex(tool_service_t *svc, int include_denied)
     }
 
     airy_mtx_lock(&svc->lock);
-    char *json = tool_registry_catalog_json(svc->registry, include_denied);
+    char *json = tool_catalog_json(svc->registry, include_denied);
     airy_mtx_unlock(&svc->lock);
 
     return json;

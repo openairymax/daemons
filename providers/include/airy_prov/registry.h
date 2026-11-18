@@ -33,7 +33,7 @@ const provider_t *provider_registry_find(provider_registry_t *reg, const char *m
  * @param sel 选路要求（可空）
  * @return 命中的 provider；无候选返回 NULL
  */
-const provider_t *provider_registry_select(provider_registry_t *reg,
+const provider_t *provider_select(provider_registry_t *reg,
                                            const provider_select_t *sel);
 
 /* 在用 provider 条数：区分「注册表为空」（装配问题）与「模型未配置」

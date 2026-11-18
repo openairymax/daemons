@@ -237,7 +237,7 @@ static int prov_has_model(const provider_t *p, const char *model)
     return 0;
 }
 
-const provider_t *provider_registry_select(provider_registry_t *reg, const provider_select_t *sel)
+const provider_t *provider_select(provider_registry_t *reg, const provider_select_t *sel)
 {
     if (!reg) {
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
@@ -358,7 +358,7 @@ int provider_registry_enumerate(provider_registry_t *reg,
  * 只发一次请求时由本值兜底；多次重试的总耗时上界由 rpc/methods.c 的
  * LLM_RETRY_FAST_FAIL_MS 共同保证（3 × 5s + provider）。模型行可用
  * timeout_sec 显式覆盖，覆盖后由预算树的钳制保证仍小于调用方背压。 */
-static double provider_default_timeout_sec(void)
+static double prov_timeout_sec(void)
 {
     return (double)airy_budget_ms(AIRY_BUDGET_PROVIDER) / 1000.0;
 }
@@ -414,7 +414,7 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name
 
     copy_fit(base_ctx->organization, sizeof(base_ctx->organization), organization);
 
-    base_ctx->timeout_sec = timeout_sec > 0 ? timeout_sec : provider_default_timeout_sec();
+    base_ctx->timeout_sec = timeout_sec > 0 ? timeout_sec : prov_timeout_sec();
     base_ctx->max_retries = max_retries > 0 ? max_retries : 3;
     base_ctx->retry_class = PROVIDER_RETRY_DEFAULT;
     /* B-2：默认可用；装配面在 provider_build 里按配置覆盖为「未配置」。 */
