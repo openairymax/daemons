@@ -30,7 +30,7 @@ extern "C" {
 /** 后端类别：只描述线格式所属族，不写具体产品名（禁冒名）。 */
 typedef enum {
     PROVIDER_BACKEND_KIND_NONE = 0,   /**< 未声明加速器：沿用既有默认端点 */
-    PROVIDER_BACKEND_KIND_OPENAI = 1, /**< OpenAI 兼容端点（本地推理服务） */
+    PROVIDER_BACKEND_KIND_STDAPI = 1, /**< OpenAI 兼容端点（本地推理服务） */
 } provider_backend_kind_t;
 
 /** 装配期计算出的后端就绪状态。 */

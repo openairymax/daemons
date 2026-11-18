@@ -37,7 +37,7 @@ void prov_be_scan(const provider_config_t *pcfg, provider_backend_t *out)
     if (!be_has_accel(pcfg))
         return;
 
-    out->kind = PROVIDER_BACKEND_KIND_OPENAI;
+    out->kind = PROVIDER_BACKEND_KIND_STDAPI;
     if (!pcfg->api_base || pcfg->api_base[0] == '\0') {
         out->ready = 0;
         snprintf(out->reason, sizeof(out->reason),
