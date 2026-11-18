@@ -27,6 +27,7 @@ extern "C" {
 
 #define TOOL_JOB_ID_MAX 48
 #define TOOL_JOB_FIELD_MAX 64
+#define TOOL_JOB_SUMMARY_MAX 256
 #define TOOL_JOB_SLOTS 128 /* 内存中保留的作业条目上限（含已结束） */
 
 /** @brief 作业状态机：running 是唯一运行态，其余均为终态。 */
@@ -51,6 +52,13 @@ typedef struct {
     uint64_t finished_ms;
     char *output;
     char *error;
+    /* D-9 审计留痕（定长，随快照按值复制） */
+    int risk;                    /* 0 = 普通，1 = 高危 */
+    char risk_reason[TOOL_JOB_FIELD_MAX];
+    char params_sum[TOOL_JOB_SUMMARY_MAX];
+    char output_sum[TOOL_JOB_SUMMARY_MAX];
+    char approval[TOOL_JOB_FIELD_MAX]; /* none|acl|interactive|allow_dangerous|warn */
+    char sandbox[32];                  /* landlock|degraded|off */
 } tool_job_info_t;
 
 /** @brief 作业存储（不透明）。 */

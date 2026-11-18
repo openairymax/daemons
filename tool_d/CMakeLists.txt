@@ -77,6 +77,8 @@ set(TOOL_SERVICE_SOURCES
     src/rpc/skill_rpc.c
     # C-11 长任务作业句柄：内存状态机 / 后台执行 / 落盘恢复
     src/job/tool_job.c
+    # D-9 审计留痕：风险分级 / 参数脱敏 / 输出摘要 / 沙箱标记
+    src/job/tool_audit.c
 )
 
 add_library(airy_tool_service STATIC ${TOOL_SERVICE_SOURCES})

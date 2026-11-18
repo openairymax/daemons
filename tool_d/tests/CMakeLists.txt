@@ -53,6 +53,8 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/skill_rpc.c
     # C-11 作业句柄：状态机 / 后台执行 / 落盘恢复
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/job/tool_job.c
+    # D-9 审计留痕：风险分级 / 参数脱敏 / 输出摘要 / 沙箱标记
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/job/tool_audit.c
 )
 
 set(TOOL_TEST_SOURCES
@@ -87,6 +89,8 @@ set(TOOL_TEST_SOURCES
     test_skill_rpc.c
     # C-11: 作业句柄核心状态机（提交/轮询/取消/夹取/JSON）
     test_tool_job.c
+    # D-9: 审计留痕（风险分级/参数脱敏/输出摘要/沙箱标记）
+    test_tool_audit.c
 )
 # os_sandbox 测试依赖 Landlock/seccomp/unshare/mount 等 Linux-only 能力，
 # macOS/BSD 上 os_sandbox.c 为空实现（OS_SANDBOX_MODE_OFF），该测试不适用。
