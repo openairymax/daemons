@@ -98,6 +98,8 @@ endif()
 # POSIX shell 的 sleep 命令，Windows（cmd.exe）不适用。
 if(UNIX)
     list(APPEND TOOL_TEST_SOURCES test_pool_e2e.c)
+    # C-11: 作业句柄端到端（真实 shell_run 子进程 + 落盘/超时/取消）
+    list(APPEND TOOL_TEST_SOURCES test_job_e2e.c)
 endif()
 
 set(TOOL_COMMON_INCLUDES
