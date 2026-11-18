@@ -64,19 +64,28 @@ int rv_schema_parse(const char *content, const char *key, int *raw,
     return ok;
 }
 
+/* 正文截断口径：空正文占位「(无)」，超限截到 REVIEW_BODY_MAX 并标注。 */
+static const char *rv_body(const char *body, int *take, const char **cut)
+{
+    const char *b = (body && body[0]) ? body : "(无)";
+    size_t bl = strlen(b);
+    *take = (int)bl;
+    *cut = "";
+    if (bl > REVIEW_BODY_MAX) {
+        *take = REVIEW_BODY_MAX;
+        *cut = "\n[正文已截断]";
+    }
+    return b;
+}
+
 int rv_prompt_t2(char *buf, size_t sz, const char *goal, const char *sigs,
                  const char *body, const char *json)
 {
     if (!buf || sz == 0)
         return -1;
-    const char *b = (body && body[0]) ? body : "(无)";
-    size_t bl = strlen(b);
-    int take = (int)bl;
-    const char *cut = "";
-    if (bl > REVIEW_BODY_MAX) {
-        take = REVIEW_BODY_MAX;
-        cut = "\n[正文已截断]";
-    }
+    int take = 0;
+    const char *cut = NULL;
+    const char *b = rv_body(body, &take, &cut);
     snprintf(buf, sz,
              "node_goal: %s\noutput_signatures: %s\noutput_body: %.*s%s\n"
              "output_json: %s",
@@ -90,14 +99,9 @@ int rv_prompt_t1f(char *buf, size_t sz, const char *gate, int drift,
 {
     if (!buf || sz == 0)
         return -1;
-    const char *b = (body && body[0]) ? body : "(无)";
-    size_t bl = strlen(b);
-    int take = (int)bl;
-    const char *cut = "";
-    if (bl > REVIEW_BODY_MAX) {
-        take = REVIEW_BODY_MAX;
-        cut = "\n[正文已截断]";
-    }
+    int take = 0;
+    const char *cut = NULL;
+    const char *b = rv_body(body, &take, &cut);
     snprintf(buf, sz,
              "gate_reason: %s\ndrift: %d\nnode_goal: %s\noutput_body: %.*s%s\n"
              "output_json: %s",
