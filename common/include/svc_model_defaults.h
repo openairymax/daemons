@@ -199,7 +199,7 @@ int svc_model_defaults_models0_from_yaml(const char *path, svc_model_llm_config_
  * @return 0 when at least one id was collected; AIRY_ERR_INVALID_PARAM /
  *         AIRY_ERR_IO / AIRY_ERR_NOT_FOUND otherwise
  */
-int svc_model_ids_from_yaml(const char *path, char ids[][SVC_MODEL_ID_MAX], size_t cap,
+int model_ids_from_yaml(const char *path, char ids[][SVC_MODEL_ID_MAX], size_t cap,
                             size_t *out_n);
 
 /**

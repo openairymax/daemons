@@ -381,7 +381,7 @@ int svc_model_defaults_models0_from_yaml(const char *path, svc_model_llm_config_
     return rc;
 }
 
-int svc_model_ids_from_yaml(const char *path, char ids[][SVC_MODEL_ID_MAX], size_t cap,
+int model_ids_from_yaml(const char *path, char ids[][SVC_MODEL_ID_MAX], size_t cap,
                             size_t *out_n)
 {
     if (!path || !path[0] || !ids || cap == 0 || !out_n)

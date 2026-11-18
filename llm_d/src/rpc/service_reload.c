@@ -119,7 +119,7 @@ int llm_service_reload(llm_service_t *svc)
         const char *v = svc_slot_get(&b.slots, i);
         if (!v || !v[0] || provider_registry_find(nreg, v))
             continue;
-        if (!llm_boot_allow_unknown()) {
+        if (!llm_boot_unknown()) {
             llm_boot_drop(&b);
             provider_registry_destroy(nreg);
             svc->reload_fail++;

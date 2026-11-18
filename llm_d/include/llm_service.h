@@ -54,7 +54,7 @@ char *llm_service_list_models(llm_service_t *svc);
  * @return JSON like {"slots":{"t2":{"declared","effective"},...},
  *         "degraded":bool}; NULL if svc is NULL or OOM
  */
-char *llm_service_slots_get(llm_service_t *svc);
+char *llm_slots_get(llm_service_t *svc);
 
 /**
  * @brief Bind one role slot to a registered model and persist it.
@@ -71,7 +71,7 @@ char *llm_service_slots_get(llm_service_t *svc);
  * @return 0 已落盘并生效；AIRY_ERR_INVALID_PARAM 校验失败；
  *         AIRY_ERR_IO 写盘失败；AIRY_ERR_STATE_ERROR 写盘成功但重载被拒
  */
-int llm_service_slots_set(llm_service_t *svc, const char *role, const char *model, char *err,
+int llm_slots_set(llm_service_t *svc, const char *role, const char *model, char *err,
                           size_t cap);
 
 

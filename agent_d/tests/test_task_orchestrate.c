@@ -37,7 +37,7 @@ static void expect_mode(const char *goal, const char *declared, const char *want
 {
     char mode[8] = {0};
     char reason[AGENT_TASK_REASON_LEN] = {0};
-    int rc = agent_task_decide_mode(goal, declared, mode, sizeof(mode), reason, sizeof(reason));
+    int rc = atk_decide_mode(goal, declared, mode, sizeof(mode), reason, sizeof(reason));
     CHECK(rc == 0, "decide_mode(%s) rc=%d", goal, rc);
     CHECK(strcmp(mode, want_mode) == 0, "%s: mode=%s want=%s", goal, mode, want_mode);
     CHECK(strcmp(reason, want_reason) == 0, "%s: reason=%s want=%s", goal, reason, want_reason);
@@ -237,7 +237,7 @@ static void test_criteria_from_plan(void)
     cJSON_AddItemToArray(post2, i1);
     cJSON_AddItemToArray(steps, s2);
 
-    char *derived = agent_task_criteria_from_plan(plan);
+    char *derived = criteria_from_plan(plan);
     CHECK(derived != NULL, "plan with typed postconditions must derive criteria");
     if (derived) {
         cJSON *arr = cJSON_Parse(derived);
@@ -255,11 +255,11 @@ static void test_criteria_from_plan(void)
     cJSON *p0 = cJSON_CreateObject();
     cJSON_AddStringToObject(p0, "postcondition", "确认服务已经启动");
     cJSON_AddItemToArray(psteps, p0);
-    CHECK(agent_task_criteria_from_plan(plain) == NULL,
+    CHECK(criteria_from_plan(plain) == NULL,
           "natural language postcondition must not be guessed into criteria");
     cJSON_Delete(plain);
 
-    CHECK(agent_task_criteria_from_plan(NULL) == NULL, "NULL plan must derive nothing");
+    CHECK(criteria_from_plan(NULL) == NULL, "NULL plan must derive nothing");
 }
 
 static void test_needs_criteria(void)
@@ -270,7 +270,7 @@ static void test_needs_criteria(void)
     snprintf(meta.mode, sizeof(meta.mode), "task");
     snprintf(meta.mode_reason, sizeof(meta.mode_reason), "%s", AGENT_TASK_REASON_EXPLICIT_TASK);
 
-    cJSON *out = agent_task_build_needs_criteria(&meta, NULL);
+    cJSON *out = need_criteria_of(&meta, NULL);
     CHECK(out != NULL, "build_needs_criteria");
     if (out) {
         cJSON *st = cJSON_GetObjectItem(out, "status");

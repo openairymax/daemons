@@ -122,7 +122,7 @@ typedef struct {
  * @param reason_size  reason 缓冲长度
  * @return 0 成功；负值参数非法
  */
-int agent_task_decide_mode(const char *goal, const char *declared_mode, char *mode, size_t mode_size,
+int atk_decide_mode(const char *goal, const char *declared_mode, char *mode, size_t mode_size,
                            char *reason, size_t reason_size);
 
 /**
@@ -193,10 +193,10 @@ bool agent_task_criteria_ok(const char *criteria);
  * @param plan think_d 计划对象
  * @return 判据 JSON 数组串（AIRY_MALLOC，调用方释放）；无可派生项返回 NULL
  */
-char *agent_task_criteria_from_plan(const cJSON *plan);
+char *criteria_from_plan(const cJSON *plan);
 
 /** @brief 组装 needs_criteria 结果（拒绝进入 task 的唯一出口，含补判据示例）。 */
-cJSON *agent_task_build_needs_criteria(const agent_run_task_meta_t *meta, const char *why);
+cJSON *need_criteria_of(const agent_run_task_meta_t *meta, const char *why);
 
 #ifdef __cplusplus
 }

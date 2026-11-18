@@ -284,7 +284,7 @@ void reg_each_name(tool_registry_t *reg, tool_name_fn fn, void *ud)
 
 char *tool_registry_list_json(tool_registry_t *reg)
 {
-    return tool_registry_catalog_json(reg, 0);
+    return tool_catalog_json(reg, 0);
 }
 
 /* C-16：可执行体可达性。POSIX 用 access(X_OK) 判定；Windows 不做该判定，
@@ -358,7 +358,7 @@ static void meta_put_json(cJSON *arr, const tool_metadata_t *m, const char *deni
     cJSON_AddItemToArray(arr, obj);
 }
 
-char *tool_registry_catalog_json(tool_registry_t *reg, int include_denied)
+char *tool_catalog_json(tool_registry_t *reg, int include_denied)
 {
     if (!reg)
         return AIRY_STRDUP("[]");

@@ -126,7 +126,7 @@ static void test_select(void)
     q.need_stream = 1;
     q.need_tools = 1;
     q.min_context = 4096;
-    p = provider_registry_select(reg, &q);
+    p = provider_select(reg, &q);
     CHECK(p && strcmp(p->name, "alpha") == 0);
 
     /* 组合二：显存下限 + 加速器。 */
@@ -134,14 +134,14 @@ static void test_select(void)
     q.model = "shared";
     q.require_accel = AIRY_ACCEL_NVIDIA;
     q.min_vram_bytes = 12ULL << 30;
-    p = provider_registry_select(reg, &q);
+    p = provider_select(reg, &q);
     CHECK(p && strcmp(p->name, "beta") == 0);
 
     /* 组合三：仅工具；beta 显式不支持，gamma 未知按保守可用。 */
     memset(&q, 0, sizeof(q));
     q.model = "shared";
     q.need_tools = 1;
-    p = provider_registry_select(reg, &q);
+    p = provider_select(reg, &q);
     CHECK(p && strcmp(p->name, "alpha") == 0);
 
     /* 显式不满足（无条件声明工具）的 provider 不得命中。 */
@@ -149,27 +149,27 @@ static void test_select(void)
     q.model = "shared";
     q.need_tools = 1;
     q.require_accel = AIRY_ACCEL_NVIDIA;
-    p = provider_registry_select(reg, &q);
+    p = provider_select(reg, &q);
     CHECK(p && strcmp(p->name, "gamma") == 0);
 
     /* 空要求：注册顺序第一个（旧行为）。 */
     memset(&q, 0, sizeof(q));
-    p = provider_registry_select(reg, &q);
+    p = provider_select(reg, &q);
     CHECK(p && strcmp(p->name, "alpha") == 0);
-    CHECK(provider_registry_select(reg, NULL) != NULL);
-    CHECK(strcmp(provider_registry_select(reg, NULL)->name, "alpha") == 0);
+    CHECK(provider_select(reg, NULL) != NULL);
+    CHECK(strcmp(provider_select(reg, NULL)->name, "alpha") == 0);
 
     /* 模型不在表内：无候选，返回 NULL 而非崩溃。 */
     memset(&q, 0, sizeof(q));
     q.model = "nope";
     q.need_stream = 1;
-    CHECK(provider_registry_select(reg, &q) == NULL);
+    CHECK(provider_select(reg, &q) == NULL);
 
     /* 显式无工具声明的模型专属 provider：工具要求下无候选。 */
     memset(&q, 0, sizeof(q));
     q.model = "nvidia-only";
     q.need_tools = 1;
-    CHECK(provider_registry_select(reg, &q) == NULL);
+    CHECK(provider_select(reg, &q) == NULL);
 
     /* 精确查找不受能力位影响（旧入口保持）。 */
     CHECK(provider_registry_find(reg, "nvidia-only") != NULL);

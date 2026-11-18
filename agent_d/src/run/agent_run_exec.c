@@ -777,7 +777,7 @@ static void run_criteria_prepare(run_ctx_t *c, const cJSON *plan)
     if (c->criteria && c->criteria[0])
         return;
     AIRY_FREE(c->criteria);
-    c->criteria = agent_task_criteria_from_plan(plan);
+    c->criteria = criteria_from_plan(plan);
 }
 
 /* D-10：失败载荷唯一装配点。code 原样保留，分层只补语义字段与建议动作。 */

@@ -505,7 +505,7 @@ static void test_registry_catalog_denied(void)
     tool_registry_filter(reg, deny_net, NULL);
 
     /* 可见集：三者都被过滤。 */
-    char *visible = tool_registry_catalog_json(reg, 0);
+    char *visible = tool_catalog_json(reg, 0);
     assert(visible != NULL);
     assert(strstr(visible, "\"id\":\"net_tool\"") == NULL);
     assert(strstr(visible, "\"id\":\"builtin_missing\"") == NULL);
@@ -513,7 +513,7 @@ static void test_registry_catalog_denied(void)
     free(visible);
 
     /* 全量目录：三条原因逐条可读。 */
-    char *all = tool_registry_catalog_json(reg, 1);
+    char *all = tool_catalog_json(reg, 1);
     assert(all != NULL);
     assert(strstr(all, "\"id\":\"net_tool\"") != NULL);
     assert(strstr(all, "\"denied_reason\":\"network\"") != NULL);
