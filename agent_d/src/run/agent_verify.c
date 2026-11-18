@@ -26,7 +26,9 @@
 #include <string.h>
 
 /* tool_d 端点名（AIRY_VERIFY_DAEMON="tool"）：socket 名由 daemon 目录约定
- * 固定为 <daemon>.sock，此处不新增第二权威，仅做字面量拼接之外的最短表达。 */
+ * 固定为 <daemon>.sock。路径必须经 airy_runtime_dir_socket 解析到运行目录：
+ * daemon_rpc_call 直接使用传入路径（不补目录），传裸名只在 cwd 恰为运行目录
+ * 时才能连通，会令 verifier 恒不可达。 */
 #define AV_SOCK "tool.sock"
 /* RPC 时限必须大于 verifier 自身预算，否则复核尚未完成就被调用方掐断。 */
 #define AV_RPC_MS (AIRY_VERIFY_DEFAULT_TIMEOUT_MS + 10000)
@@ -77,7 +79,8 @@ static cJSON *av_call_once(const cJSON *criteria)
         return NULL;
 
     char *resp = NULL;
-    int rc = daemon_rpc_call(AV_SOCK, AIRY_VERIFY_METHOD, req, &resp, AV_RPC_MS);
+    int rc = daemon_rpc_call(airy_runtime_dir_socket(AV_SOCK), AIRY_VERIFY_METHOD, req, &resp,
+                             AV_RPC_MS);
     AIRY_FREE(req);
     if (rc != AIRY_SUCCESS || !resp) {
         AIRY_FREE(resp);

@@ -144,14 +144,14 @@ static void test_orch_contract(void)
 }
 
 /* C-14：终态名是 run_end / 决策链 / result 三处的唯一映射点。任务级未收敛
- * （空输出、熔断、预算耗尽）一律落 paused，产物已移交、客户端可继续或放弃；
- * 只有用户取消才落 failed，rc=0 落 completed，禁止静默停留 Executing。 */
+ * 中空输出与预算耗尽落 paused（产物已移交、可续跑）；用户取消、工具熔断与
+ * 判据未过是确定性失败，落 failed；rc=0 落 completed，禁止静默停留 Executing。 */
 static void test_run_state(void)
 {
     CHECK(strcmp(run_state_name(0, 0), "completed") == 0, "state: rc=0 completed");
     CHECK(strcmp(run_state_name(0, 1), "failed") == 0, "state: cancel is failed");
     CHECK(strcmp(run_state_name(AGENT_RUN_RC_EMPTY, 0), "paused") == 0, "state: empty paused");
-    CHECK(strcmp(run_state_name(AGENT_RUN_RC_TOOL_FUSE, 0), "paused") == 0, "state: fuse paused");
+    CHECK(strcmp(run_state_name(AGENT_RUN_RC_TOOL_FUSE, 0), "failed") == 0, "state: fuse failed");
     CHECK(strcmp(run_state_name(AIRY_EBUDGET, 0), "paused") == 0, "state: ebudget paused");
 
     CHECK(run_rc_msg(0)[0] == '\0', "msg: success silent");
@@ -441,8 +441,9 @@ static struct {
     int rc;
 } g_fake;
 
-static int fake_exec(const char *name, const char *args, char **out, int *code)
+static int fake_exec(const char *name, const char *args, char **out, int *code, bool allow_dangerous)
 {
+    (void)allow_dangerous;
     g_fake.calls++;
     AIRY_STRNCPY_TERM(g_fake.tool, name, sizeof(g_fake.tool));
     AIRY_STRNCPY_TERM(g_fake.args, args, sizeof(g_fake.args));
