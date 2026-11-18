@@ -263,6 +263,57 @@ static void test_audit_record(void)
     airy_io_remove_dir_recursive(dir);
 }
 
+/* D-9：同步执行落账（tool.execute 路径）与后台作业共用同一实体。 */
+static void test_record(void)
+{
+    char dir[128];
+    job_dir(dir, sizeof(dir), "record");
+    tooljob_t *jobs = tooljob_new(dir, fake_run, NULL);
+    tool_result_t res;
+    char id[TOOL_JOB_ID_MAX];
+    tool_job_info_t info;
+
+    assert(jobs != NULL);
+    memset(&res, 0, sizeof(res));
+    res.exit_code = 0;
+    res.err_code = 0;
+    res.output = strdup("apt-get install -y curl: done");
+    snprintf(res.approval, sizeof(res.approval), "allow_dangerous");
+    snprintf(res.sandbox, sizeof(res.sandbox), "landlock");
+    assert(tooljob_record(jobs, "pkg_install", "agent-1",
+                          "{\"command\":\"apt-get install -y curl\",\"password\":\"p\"}", &res,
+                          1000, id, sizeof(id)) == 0);
+
+    assert(tooljob_poll(jobs, id, &info) == 0);
+    assert(strcmp(info.tool_id, "pkg_install") == 0);
+    assert(strcmp(info.agent_id, "agent-1") == 0);
+    assert(info.state == TOOL_JOB_DONE);
+    assert(info.created_ms == 1000);
+    assert(info.finished_ms >= info.created_ms);
+    assert(info.risk == 1); /* 包管理命令模式 → 高危 */
+    assert(strstr(info.params_sum, "\"p\"") == NULL);
+    assert(strstr(info.params_sum, "password") != NULL);
+    assert(strstr(info.params_sum, "apt-get") != NULL);
+    assert(strcmp(info.approval, "allow_dangerous") == 0);
+    assert(strcmp(info.sandbox, "landlock") == 0);
+    assert(info.output_sum && strstr(info.output_sum, "apt-get") != NULL);
+    tooljob_rel(&info);
+
+    assert(tooljob_record(jobs, NULL, "agent-1", "{}", &res, 0, id, sizeof(id)) ==
+           AIRY_ERR_INVALID_PARAM);
+    free(res.output);
+    tooljob_free(jobs);
+
+    /* 同步记录同样落盘，重启后仍可查。 */
+    jobs = tooljob_new(dir, fake_run, NULL);
+    assert(jobs != NULL);
+    assert(tooljob_poll(jobs, id, &info) == 0);
+    assert(strcmp(info.approval, "allow_dangerous") == 0);
+    tooljob_rel(&info);
+    tooljob_free(jobs);
+    airy_io_remove_dir_recursive(dir);
+}
+
 int main(void)
 {
     test_submit_poll();
@@ -270,6 +321,7 @@ int main(void)
     test_persist();
     test_errors();
     test_audit_record();
+    test_record();
     printf("test_tool_job: all passed\n");
     return 0;
 }
