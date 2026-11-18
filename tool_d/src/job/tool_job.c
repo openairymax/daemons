@@ -15,6 +15,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "io.h"
+#include "job/tool_audit.h"
 #include "platform_misc.h"
 #include "platform_paths.h"
 #include "platform_process.h"
@@ -32,6 +33,7 @@ struct job_entry {
     char *params;
     int cancel;      /* 协作取消：结果作废 */
     int thread_done;
+    int allow_dangerous; /* D-9：提交时声明的高危放行，透传给执行层 */
     airy_thread_t thread;
 };
 
@@ -175,6 +177,13 @@ static int job_parse(const char *text, tool_job_info_t *out)
     it = cJSON_GetObjectItemCaseSensitive(obj, "error");
     if (cJSON_IsString(it) && it->valuestring)
         out->error = job_dup(it->valuestring);
+    it = cJSON_GetObjectItemCaseSensitive(obj, "risk");
+    out->risk = cJSON_IsNumber(it) ? it->valueint : 0;
+    job_field(obj, "risk_reason", out->risk_reason, sizeof(out->risk_reason));
+    job_field(obj, "params_sum", out->params_sum, sizeof(out->params_sum));
+    job_field(obj, "output_sum", out->output_sum, sizeof(out->output_sum));
+    job_field(obj, "approval", out->approval, sizeof(out->approval));
+    job_field(obj, "sandbox", out->sandbox, sizeof(out->sandbox));
     rc = 0;
 done:
     cJSON_Delete(obj);
@@ -280,6 +289,11 @@ static void job_fill(tooljob_t *j, struct job_entry *e, int rc, tool_result_t *r
         e->info.exit_code = res->exit_code;
         e->info.output = job_dup(res->output);
         e->info.error = job_dup(res->error);
+        tool_audit_sum(res->output, e->info.output_sum, sizeof(e->info.output_sum));
+        if (res->approval[0])
+            snprintf(e->info.approval, sizeof(e->info.approval), "%s", res->approval);
+        if (res->sandbox[0])
+            snprintf(e->info.sandbox, sizeof(e->info.sandbox), "%s", res->sandbox);
         if (res->err_code == 0)
             e->info.state = TOOL_JOB_DONE;
         else if (res->err_code == AIRY_ETIMEDOUT || res->err_code == AIRY_ERR_TIMEOUT)
@@ -310,6 +324,7 @@ static void *job_worker(void *arg)
     req.params_json = e->params;
     req.agent_id = e->info.agent_id[0] ? e->info.agent_id : NULL;
     req.timeout_sec = e->info.timeout_sec;
+    req.allow_dangerous = e->allow_dangerous;
     rc = j->run(j->ctx, &req, &res);
     airy_mtx_lock(&j->lock);
     job_fill(j, e, rc, res);
@@ -374,6 +389,14 @@ int tooljob_submit(tooljob_t *jobs, const tool_execute_request_t *req, int timeo
     e->info.created_ms = airy_time_wall_ms();
     e->info.timeout_sec = tooljob_clamp(timeout_sec);
     e->params = job_dup(req->params_json ? req->params_json : "{}");
+    e->allow_dangerous = req->allow_dangerous;
+    /* D-9 提交即留痕：脱敏参数与风险判定先落盘，执行中断也可追溯。 */
+    e->info.risk = (int)tool_audit_risk(req->tool_id, e->params, e->info.risk_reason,
+                                        sizeof(e->info.risk_reason));
+    tool_audit_mask(e->params, e->info.params_sum, sizeof(e->info.params_sum));
+    snprintf(e->info.approval, sizeof(e->info.approval), "%s",
+             req->allow_dangerous ? "allow_dangerous" : "none");
+    snprintf(e->info.sandbox, sizeof(e->info.sandbox), "%s", tool_audit_sbox());
     jobs->count++;
     jobs->refs++;
     snprintf(job_id_out, cap, "%s", e->info.id);
@@ -519,6 +542,12 @@ cJSON *tooljob_json(const tool_job_info_t *info)
         cJSON_AddStringToObject(obj, "output", info->output);
     if (info->error)
         cJSON_AddStringToObject(obj, "error", info->error);
+    cJSON_AddNumberToObject(obj, "risk", info->risk);
+    cJSON_AddStringToObject(obj, "risk_reason", info->risk_reason);
+    cJSON_AddStringToObject(obj, "params_sum", info->params_sum);
+    cJSON_AddStringToObject(obj, "output_sum", info->output_sum);
+    cJSON_AddStringToObject(obj, "approval", info->approval);
+    cJSON_AddStringToObject(obj, "sandbox", info->sandbox);
     return obj;
 }
 

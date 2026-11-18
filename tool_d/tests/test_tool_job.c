@@ -221,12 +221,55 @@ static void test_errors(void)
     airy_io_remove_dir_recursive(dir);
 }
 
+/* D-9：提交即写脱敏参数与风险，收尾写输出摘要/审批/沙箱，重开可读回。 */
+static void test_audit_record(void)
+{
+    char dir[128];
+    job_dir(dir, sizeof(dir), "audit");
+    tooljob_t *jobs = tooljob_new(dir, fake_run, NULL);
+    tool_execute_request_t req = {0};
+    char id[TOOL_JOB_ID_MAX];
+    tool_job_info_t info;
+
+    assert(jobs != NULL);
+    g_delay_ms = 0;
+    req.tool_id = "shell_run";
+    req.params_json = "{\"command\":\"echo hi\",\"password\":\"s3cr3t\"}";
+    req.allow_dangerous = 1;
+    assert(tooljob_submit(jobs, &req, 20, id, sizeof(id)) == 0);
+    wait_state(jobs, id, TOOL_JOB_DONE);
+    assert(tooljob_poll(jobs, id, &info) == 0);
+    assert(info.risk == 1);
+    assert(strstr(info.risk_reason, "shell_run") != NULL);
+    assert(strstr(info.params_sum, "s3cr3t") == NULL);
+    assert(strstr(info.params_sum, "***") != NULL);
+    assert(strstr(info.params_sum, "echo hi") != NULL);
+    assert(info.output_sum && strcmp(info.output_sum, "hello") == 0);
+    assert(strcmp(info.approval, "allow_dangerous") == 0);
+    assert(info.sandbox[0] != '\0');
+    tooljob_rel(&info);
+    tooljob_free(jobs);
+
+    /* 审计字段必须随记录落盘，重启后仍可还原时间线。 */
+    jobs = tooljob_new(dir, fake_run, NULL);
+    assert(jobs != NULL);
+    assert(tooljob_poll(jobs, id, &info) == 0);
+    assert(info.risk == 1);
+    assert(strstr(info.params_sum, "s3cr3t") == NULL);
+    assert(strcmp(info.approval, "allow_dangerous") == 0);
+    assert(info.sandbox[0] != '\0');
+    tooljob_rel(&info);
+    tooljob_free(jobs);
+    airy_io_remove_dir_recursive(dir);
+}
+
 int main(void)
 {
     test_submit_poll();
     test_cancel();
     test_persist();
     test_errors();
+    test_audit_record();
     printf("test_tool_job: all passed\n");
     return 0;
 }
