@@ -101,12 +101,27 @@ typedef struct {
     char *reason;      /* 累计思考链（AIRY_* 分配，可 NULL） */
     char *resume_token;/* 预算耗尽时生成的续跑令牌（AIRY_* 分配，其余 NULL） */
     uint64_t tokens;   /* 累计 token */
+    uint64_t tokens_in;  /* 累计 prompt token（provider 实报，未报为 0） */
+    uint64_t tokens_out; /* 累计 completion token（provider 实报，未报为 0） */
     double cost;       /* 累计成本 */
     uint64_t llm_ms;   /* LLM 段累计耗时 */
     uint64_t tool_ms;  /* 工具段累计耗时 */
     int rounds_used;   /* 本轮实际消耗轮次 */
     int rounds_limit;  /* 本轮生效轮次上限 */
+    char fail_node[128]; /* 熔断工具 id（D-10 affected_node），无熔断为空 */
+    int fail_denied;     /* D-10：失败前出现过审批/策略拒绝 */
 } agent_run_loop_result_t;
+
+/** D-10 失败语义分类（纯函数，无分配）。 */
+typedef struct {
+    const char *origin;      /* AIRY_RS_ORIGIN_* */
+    const char *reason;      /* AIRY_RS_REASON_* */
+    int retryable;           /* 原样重试是否安全 */
+    const char *next_action; /* AIRY_RS_NEXT_* */
+} agent_fail_desc_t;
+
+/** @brief 按原始退出码分类失败（纯函数，无分配）。 */
+agent_fail_desc_t agent_fail_desc(int rc, int denied);
 
 /** @brief 轮次预算解析：请求 > 策略（AIRY_AGENT_TOOL_ROUNDS）> 缺省 8，夹取 [1,32]。 */
 int agent_run_rounds_resolve(int requested);
@@ -138,6 +153,8 @@ typedef struct {
     char *reason;      /* 思考链（无帧时为 NULL） */
     cJSON *tools;      /* tool_calls 数组（AIRY/cJSON 分配，无帧时为 NULL） */
     uint64_t tokens;   /* 'U' 帧用量 */
+    uint64_t prompt_tokens;     /* 'U' 帧 prompt 分量，未报为 0 */
+    uint64_t completion_tokens; /* 'U' 帧 completion 分量，未报为 0 */
     double cost;       /* 'U' 帧费用 */
     int error_code;    /* 'E' 帧错误码；0 表示无错误帧 */
     char error_msg[AGENT_STREAM_ERR_LEN];
@@ -164,6 +181,8 @@ typedef struct {
     int prev_rs;         /* 上一 payload 以裸 RS 结尾，判定挂起 */
     cJSON *tools;
     uint64_t tokens;
+    uint64_t prompt_tokens;
+    uint64_t completion_tokens;
     double cost;
     int error_code;
     char error_msg[AGENT_STREAM_ERR_LEN];

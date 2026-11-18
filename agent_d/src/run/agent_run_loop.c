@@ -52,6 +52,45 @@ int agent_run_rounds_resolve(int requested)
     return n;
 }
 
+/* D-10：按原始退出码分类失败。只描述语义，不改码；retryable 表示原样重发
+ * 是否安全，next_action 给出客户端下一步（重试/续跑/人工介入）。 */
+agent_fail_desc_t agent_fail_desc(int rc, int denied)
+{
+    agent_fail_desc_t d = {AIRY_RS_ORIGIN_AGENT, AIRY_RS_REASON_AGENT, 0,
+                           AIRY_RS_NEXT_INSPECT};
+    if (denied && rc == AGENT_RUN_RC_TOOL_FUSE) {
+        /* 熔断由拒绝引起时归因为审批，而非「工具坏了」。 */
+        d.origin = AIRY_RS_ORIGIN_TOOL;
+        d.reason = AIRY_RS_REASON_DENIED;
+        return d;
+    }
+    switch (rc) {
+    case AIRY_EBUDGET:
+        d.reason = AIRY_RS_REASON_BUDGET;
+        d.retryable = 1;
+        d.next_action = AIRY_RS_NEXT_RESUME;
+        break;
+    case AGENT_RUN_RC_TOOL_FUSE:
+        d.origin = AIRY_RS_ORIGIN_TOOL;
+        d.reason = AIRY_RS_REASON_TOOL;
+        break;
+    case AGENT_RUN_RC_EMPTY:
+        d.reason = AIRY_RS_REASON_EMPTY;
+        d.retryable = 1;
+        d.next_action = AIRY_RS_NEXT_RETRY;
+        break;
+    case -1:
+        d.origin = AIRY_RS_ORIGIN_PROVIDER;
+        d.reason = AIRY_RS_REASON_PROVIDER;
+        d.retryable = 1;
+        d.next_action = AIRY_RS_NEXT_RETRY;
+        break;
+    default:
+        break;
+    }
+    return d;
+}
+
 /* 构建 llm_d complete_stream 请求（透传本轮工具目录与常规生成参数）。
  * 不在此处写 max_tokens：输出上限的权威在配置面（model.yaml max_output），
  * 由 llm_d 的生成参数解析统一裁决；调用方写死一个数值会让该配置永久失效。
@@ -293,6 +332,7 @@ typedef struct {
     char fuse[256];
     uint64_t fail_sig; /* 上一次失败调用的签名（同调用换路判定） */
     int fail_repeat;   /* 同一签名的连败次数 */
+    int denied;        /* D-10：本轮出现过审批/策略拒绝（失败归因用） */
     /* C-16 工具目录协商：catalog 是本轮下发给模型的条目（live 快照或
      * 静态 bootstrap），cat_denied 是本轮不可用/会话内已证不可用的工具及
      * 原因（跨轮累积，撤销后不再回到可见集）。cat_hash 记录已发射目录的
@@ -514,6 +554,8 @@ static int run_llm_round(run_ctx_t *r, cJSON **tool_calls)
     }
 
     r->out->tokens += sr.tokens;
+    r->out->tokens_in += sr.prompt_tokens;
+    r->out->tokens_out += sr.completion_tokens;
     r->out->cost += sr.cost;
     if (sr.reason && sr.reason[0])
         run_reason_add(r, sr.reason);
@@ -1055,8 +1097,14 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
         r->out->tool_ms += airy_time_ms() - t0;
         /* 工具自报不可用（策略拒绝 / 无处理器）：撤销目录条目并记原因。
          * tool_create 的新工具不必在此追加，下一轮目录采样自然可见。 */
-        if (erc != 0 && code != 0)
+        if (erc != 0 && code != 0) {
+            /* D-10：审批/策略拒绝单独留痕，失败归因可区分「工具坏了」与
+             * 「人没批」。 */
+            if (code == AIRY_ERR_PERMISSION_DENIED || code == AIRY_EPERM ||
+                code == AIRY_EACCES)
+                r->denied = 1;
             run_cat_revoke(r, tname, code);
+        }
         /* C-25：失败且不属策略拒绝时，按等价表换路一次；开关关闭则保持
          * 旧语义（只计数）。无替代时把原因写进 switch_reason，复盘可见。 */
         if (erc != 0 && !run_alt_deny(code) && run_alt_enabled()) {
@@ -1211,6 +1259,17 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
         }
         more = 1;
     }
+
+    if (rc == AGENT_RUN_RC_TOOL_FUSE && r.fused) {
+        /* affected_node 只留工具 id；附带错误文本由 trace 承载。 */
+        const char *sep = strchr(r.fuse, ':');
+        size_t n = sep ? (size_t)(sep - r.fuse) : strlen(r.fuse);
+        if (n >= sizeof(out->fail_node))
+            n = sizeof(out->fail_node) - 1;
+        AIRY_MEMCPY(out->fail_node, r.fuse, n);
+        out->fail_node[n] = '\0';
+    }
+    out->fail_denied = r.denied;
 
     out->rounds_used = used;
     /* 轮次预算耗尽不是崩溃：模型仍在推进（每轮都在调用工具），只是未收敛。
