@@ -50,6 +50,19 @@ struct channel_service {
 /* 按 channel_id 查找通道条目（channel_book.c 定义，各域共用） */
 channel_entry_t *find_channel(channel_service_t *svc, const char *channel_id);
 
+/* ping 前导：加锁取条目，未命中时已解锁。POSIX 实探（channel_io.c）与
+ * Win32 固定 0ms（channel_win32.c）共用，锁序只此一处。 */
+static inline channel_entry_t *ping_target(channel_service_t *svc,
+                                           const char *channel_id)
+{
+    airy_mtx_lock(&svc->lock);
+    channel_entry_t *entry = find_channel(svc, channel_id);
+    if (!entry) {
+        airy_mtx_unlock(&svc->lock);
+    }
+    return entry;
+}
+
 /* 簿记释放：先回收平台资源（backend_entry_free）再释放接收缓冲。
  * channel_book.c 定义，stop/close/destroy 与 open 失败回滚共用。 */
 void channel_entry_free(channel_entry_t *entry);

@@ -319,6 +319,17 @@ static uint32_t brk_left(const brk_rec_t *rec)
     return used >= g_brk.cfg.open_ms ? 0u : (uint32_t)(g_brk.cfg.open_ms - used);
 }
 
+/* 加锁定位记录；未命中时已解锁。gate/stat 共用同一锁序。 */
+static brk_rec_t *brk_lock_find(const char *provider)
+{
+    airy_mtx_lock(&g_brk.lock);
+    brk_rec_t *rec = brk_find(provider);
+    if (!rec) {
+        airy_mtx_unlock(&g_brk.lock);
+    }
+    return rec;
+}
+
 int prov_brk_gate(const char *provider, prov_brk_gate_t *out)
 {
     if (!out)
@@ -326,12 +337,9 @@ int prov_brk_gate(const char *provider, prov_brk_gate_t *out)
     if (!brk_ready() || !provider || provider[0] == '\0')
         return -1;
 
-    airy_mtx_lock(&g_brk.lock);
-    brk_rec_t *rec = brk_find(provider);
-    if (!rec) {
-        airy_mtx_unlock(&g_brk.lock);
+    brk_rec_t *rec = brk_lock_find(provider);
+    if (!rec)
         return -1;
-    }
     brk_sync(rec);
     out->state = rec->st.state;
     out->open_left_ms = brk_left(rec);
@@ -349,12 +357,9 @@ int prov_brk_stat(const char *provider, prov_brk_stat_t *out)
     if (!brk_ready() || !provider || provider[0] == '\0')
         return -1;
 
-    airy_mtx_lock(&g_brk.lock);
-    brk_rec_t *rec = brk_find(provider);
-    if (!rec) {
-        airy_mtx_unlock(&g_brk.lock);
+    brk_rec_t *rec = brk_lock_find(provider);
+    if (!rec)
         return -1;
-    }
     brk_sync(rec);
     *out = rec->st;
     airy_mtx_unlock(&g_brk.lock);

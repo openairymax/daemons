@@ -327,12 +327,9 @@ int channel_service_ping(channel_service_t *svc, const char *channel_id, int64_t
     if (!svc || !channel_id || !out_latency_ms)
         return AIRY_ERR_INVALID_PARAM;
 
-    airy_mtx_lock(&svc->lock);
-    channel_entry_t *entry = find_channel(svc, channel_id);
-    if (!entry) {
-        airy_mtx_unlock(&svc->lock);
+    channel_entry_t *entry = ping_target(svc, channel_id);
+    if (!entry)
         return AIRY_ERR_NOT_FOUND;
-    }
 
     uint64_t start_ms = airy_time_ms();
     int rc = CHANNEL_OK;
