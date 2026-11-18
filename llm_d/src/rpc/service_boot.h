@@ -86,7 +86,7 @@ int llm_boot_attest(struct llm_service *svc);
  *
  * 启动自证与热重载共用同一判据：仅把「引用不闭合」降为告警，不放宽对账。
  */
-int llm_boot_allow_unknown(void);
+int llm_boot_unknown(void);
 
 #ifdef __cplusplus
 }

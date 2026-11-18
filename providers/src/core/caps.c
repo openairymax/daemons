@@ -6,7 +6,7 @@
  * @brief provider 能力位匹配（0.1.21 B-1 机制面）
  *
  * 只回答「该 provider 是否满足要求」，不做注册表遍历（见 registry.c 的
- * provider_registry_select）也不实现探测（B-3）。未知能力位一律按
+ * provider_select）也不实现探测（B-3）。未知能力位一律按
  * 保守可用处理：不否决、不宣称，由调用方按 EXACT/CONSERVATIVE 决定是否
  * 记录降级原因。
  */

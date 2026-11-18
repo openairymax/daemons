@@ -162,7 +162,7 @@ static void handle_slots_get(cJSON *params, int id, airy_sock_t fd)
         JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Service not ready", id);
         return;
     }
-    send_service_json(llm_service_slots_get(g_service), id, fd, "Out of memory",
+    send_service_json(llm_slots_get(g_service), id, fd, "Out of memory",
                       "Invalid slots result");
 }
 
@@ -176,12 +176,12 @@ static void handle_slots_set(cJSON *params, int id, airy_sock_t fd)
     const char *role = (cJSON_IsString(rj) && rj->valuestring) ? rj->valuestring : NULL;
     const char *model = (cJSON_IsString(mj) && mj->valuestring) ? mj->valuestring : NULL;
     char err[256];
-    int rc = llm_service_slots_set(g_service, role, model, err, sizeof(err));
+    int rc = llm_slots_set(g_service, role, model, err, sizeof(err));
     if (rc != 0) {
         JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, err[0] ? err : "slots_set failed", id);
         return;
     }
-    send_service_json(llm_service_slots_get(g_service), id, fd, "Out of memory",
+    send_service_json(llm_slots_get(g_service), id, fd, "Out of memory",
                       "Invalid slots result");
 }
 

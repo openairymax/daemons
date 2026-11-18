@@ -136,7 +136,7 @@ int main(void)
     }
 
     /* 1) 启动装载：declared/effective 同源，无降级。 */
-    char *js = llm_service_slots_get(svc);
+    char *js = llm_slots_get(svc);
     if (!js) {
         printf("    FAIL: slots_get returned NULL\n");
         return 1;
@@ -149,20 +149,20 @@ int main(void)
 
     /* 2) 非法 set：未注册模型明确拒绝并列出可选值。 */
     char err[512];
-    int rc = llm_service_slots_set(svc, "t1f", "nope", err, sizeof(err));
+    int rc = llm_slots_set(svc, "t1f", "nope", err, sizeof(err));
     check_int("bad.rc", rc == AIRY_ERR_INVALID_PARAM, 1);
     check_has("bad.reason", err, "not in registry");
     check_has("bad.choices_alpha", err, "alpha");
     check_has("bad.choices_mini", err, "mini");
-    rc = llm_service_slots_set(svc, "t9", "alpha", err, sizeof(err));
+    rc = llm_slots_set(svc, "t9", "alpha", err, sizeof(err));
     check_int("bad_role.rc", rc == AIRY_ERR_INVALID_PARAM, 1);
     check_has("bad_role.reason", err, "unknown slot");
 
     /* 3) 合法 set：落盘 + 重载，get 与文件一致，注释与他段保留。 */
-    rc = llm_service_slots_set(svc, "t1f", "mini", err, sizeof(err));
+    rc = llm_slots_set(svc, "t1f", "mini", err, sizeof(err));
     check_int("set.rc", rc, 0);
     check_str("set.mem", svc->slots.t1f, "mini");
-    js = llm_service_slots_get(svc);
+    js = llm_slots_get(svc);
     check_has("set.get_t1f", js ? js : "", "\"t1f\":{\"declared\":\"mini\",\"effective\":\"mini\"}");
     free(js);
     js = llm_service_list_models(svc);
@@ -176,9 +176,9 @@ int main(void)
     }
 
     /* 4) 清空槽位：degraded 显式暴露，effective 回落 default_model。 */
-    rc = llm_service_slots_set(svc, "t2", "", err, sizeof(err));
+    rc = llm_slots_set(svc, "t2", "", err, sizeof(err));
     check_int("clear.rc", rc, 0);
-    js = llm_service_slots_get(svc);
+    js = llm_slots_get(svc);
     check_has("clear.degraded_true", js ? js : "", "\"degraded\":true");
     check_has("clear.effective", js ? js : "",
               "\"t2\":{\"declared\":\"\",\"effective\":\"alpha\"}");

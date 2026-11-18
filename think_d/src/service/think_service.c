@@ -428,7 +428,7 @@ static int think_attest(const think_service_t *svc, const think_service_config_t
     if (cfg_dir) {
         int len = snprintf(path, sizeof(path), "%s/model.yaml", cfg_dir);
         if (len > 0 && len < (int)sizeof(path))
-            have_ids = (svc_model_ids_from_yaml(path, ids, THINK_ATTEST_IDS, &id_n) == 0);
+            have_ids = (model_ids_from_yaml(path, ids, THINK_ATTEST_IDS, &id_n) == 0);
     }
 
     char en_decl[2] = {(config && config->enabled) ? '1' : '0', '\0'};
@@ -751,7 +751,7 @@ static void think_slots_reload(think_service_t *svc)
                      "keeping previous slots");
         return;
     }
-    have_ids = (svc_model_ids_from_yaml(path, ids, THINK_ATTEST_IDS, &id_n) == 0);
+    have_ids = (model_ids_from_yaml(path, ids, THINK_ATTEST_IDS, &id_n) == 0);
     for (unsigned i = 0; i < SVC_SLOT_N; ++i) {
         char env[SVC_MODEL_ID_MAX];
         const char *v = svc_slot_get(&next, i);

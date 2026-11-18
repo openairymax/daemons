@@ -94,7 +94,7 @@ const provider_t *svc_select_prov(llm_service_t *svc, const char *model, bool ne
     sel.model = model;
     sel.need_stream = need_stream ? 1 : 0;
     airy_mtx_lock(&s->lock);
-    const provider_t *prov = provider_registry_select(s->registry, &sel);
+    const provider_t *prov = provider_select(s->registry, &sel);
     airy_mtx_unlock(&s->lock);
     return prov;
 }
@@ -185,7 +185,7 @@ typedef struct {
     const deg_tbl_t *deg;
 } router_reg_t;
 
-static void register_one_endpoint(router_reg_t *reg, const char *provider_name,
+static void reg_endpoint(router_reg_t *reg, const char *provider_name,
                                   const char *model_name, uint32_t context_window)
 {
     llm_endpoint_t ep;
@@ -219,7 +219,7 @@ static int register_endpoint_cb(const provider_t *prov, void *user_data)
     for (char **m = prov->models; *m; ++m) {
         if (!**m)
             continue;
-        register_one_endpoint(reg, prov->name, *m, cap);
+        reg_endpoint(reg, prov->name, *m, cap);
     }
     return 0;
 }
@@ -835,7 +835,7 @@ static int slots_name_cb(const char *prov, const char *model, void *ud)
     return 0;
 }
 
-char *llm_service_slots_get(llm_service_t *svc)
+char *llm_slots_get(llm_service_t *svc)
 {
     if (!svc)
         return NULL;
@@ -863,7 +863,7 @@ char *llm_service_slots_get(llm_service_t *svc)
     return json;
 }
 
-int llm_service_slots_set(llm_service_t *svc, const char *role, const char *model, char *err,
+int llm_slots_set(llm_service_t *svc, const char *role, const char *model, char *err,
                           size_t cap)
 {
     if (!svc || !err || cap == 0)

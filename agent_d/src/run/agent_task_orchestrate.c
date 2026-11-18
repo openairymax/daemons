@@ -68,7 +68,7 @@ static size_t goal_char_count(const char *s)
     return count;
 }
 
-int agent_task_decide_mode(const char *goal, const char *declared_mode, char *mode,
+int atk_decide_mode(const char *goal, const char *declared_mode, char *mode,
                            size_t mode_size, char *reason, size_t reason_size)
 {
     if (!goal || !mode || !reason || mode_size == 0 || reason_size == 0)
@@ -275,7 +275,7 @@ static void plan_post_append(cJSON *dst, const cJSON *post)
     }
 }
 
-char *agent_task_criteria_from_plan(const cJSON *plan)
+char *criteria_from_plan(const cJSON *plan)
 {
     const cJSON *steps =
         cJSON_IsObject(plan) ? cJSON_GetObjectItemCaseSensitive(plan, "steps") : plan;
@@ -299,7 +299,7 @@ char *agent_task_criteria_from_plan(const cJSON *plan)
     return out;
 }
 
-cJSON *agent_task_build_needs_criteria(const agent_run_task_meta_t *meta, const char *why)
+cJSON *need_criteria_of(const agent_run_task_meta_t *meta, const char *why)
 {
     cJSON *out = cJSON_CreateObject();
     if (!out)
