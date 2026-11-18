@@ -314,6 +314,46 @@ static void test_record(void)
     airy_io_remove_dir_recursive(dir);
 }
 
+/* D-9：作业历史列表（最新在前）与 limit 夹取。 */
+static void test_list(void)
+{
+    char dir[128];
+    job_dir(dir, sizeof(dir), "list");
+    tooljob_t *jobs = tooljob_new(dir, fake_run, NULL);
+    tool_result_t res;
+    char id[TOOL_JOB_ID_MAX];
+    cJSON *arr;
+    cJSON *item;
+    cJSON *tid;
+
+    assert(jobs != NULL);
+    memset(&res, 0, sizeof(res));
+    res.output = strdup("ok");
+    snprintf(res.approval, sizeof(res.approval), "acl");
+    assert(tooljob_record(jobs, "fs_read", "a", "{}", &res, 1000, id, sizeof(id)) == 0);
+    assert(tooljob_record(jobs, "fs_write", "a", "{}", &res, 3000, id, sizeof(id)) == 0);
+    assert(tooljob_record(jobs, "fs_list", "a", "{}", &res, 2000, id, sizeof(id)) == 0);
+    free(res.output);
+
+    arr = tooljob_list(jobs, 2);
+    assert(arr != NULL);
+    assert(cJSON_GetArraySize(arr) == 2);
+    item = cJSON_GetArrayItem(arr, 0);
+    tid = item ? cJSON_GetObjectItem(item, "tool_id") : NULL;
+    assert(tid && strcmp(tid->valuestring, "fs_write") == 0);
+    item = cJSON_GetArrayItem(arr, 1);
+    tid = item ? cJSON_GetObjectItem(item, "tool_id") : NULL;
+    assert(tid && strcmp(tid->valuestring, "fs_list") == 0);
+    cJSON_Delete(arr);
+
+    arr = tooljob_list(jobs, 10);
+    assert(arr != NULL && cJSON_GetArraySize(arr) == 3);
+    cJSON_Delete(arr);
+    assert(tooljob_list(jobs, 0) == NULL);
+    tooljob_free(jobs);
+    airy_io_remove_dir_recursive(dir);
+}
+
 int main(void)
 {
     test_submit_poll();
@@ -322,6 +362,7 @@ int main(void)
     test_errors();
     test_audit_record();
     test_record();
+    test_list();
     printf("test_tool_job: all passed\n");
     return 0;
 }

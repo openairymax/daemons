@@ -121,6 +121,13 @@ int tooljob_cancel(tooljob_t *jobs, const char *job_id);
 /** @brief 当前内存中的作业条目数（含终态）。 */
 int tooljob_count(const tooljob_t *jobs);
 
+/**
+ * @brief 列出作业快照数组（最新在前），最多 limit 条。
+ * @param limit 条数上限；<=0 或超容量时按容量夹取。
+ * @return cJSON 数组（调用方 cJSON_Delete）；参数非法或分配失败返回 NULL。
+ */
+cJSON *tooljob_list(tooljob_t *jobs, int limit);
+
 /** @brief 状态名（wire 值：running/done/failed/cancelled/timed_out）。 */
 const char *tooljob_state(tool_job_state_t state);
 

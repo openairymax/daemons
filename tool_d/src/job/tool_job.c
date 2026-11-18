@@ -534,6 +534,47 @@ int tooljob_count(const tooljob_t *jobs)
     return jobs ? jobs->count : 0;
 }
 
+cJSON *tooljob_list(tooljob_t *jobs, int limit)
+{
+    int idx[TOOL_JOB_SLOTS];
+    int n = 0;
+    cJSON *arr;
+
+    if (!jobs || limit <= 0)
+        return NULL;
+    if (limit > TOOL_JOB_SLOTS)
+        limit = TOOL_JOB_SLOTS;
+    arr = cJSON_CreateArray();
+    if (!arr)
+        return NULL;
+
+    airy_mtx_lock(&jobs->lock);
+    for (int i = 0; i < TOOL_JOB_SLOTS; i++) {
+        if (jobs->slots[i])
+            idx[n++] = i;
+    }
+    /* 按创建时间倒序（最新在前），槽位复用后索引序不可依赖。 */
+    for (int i = 1; i < n; i++) {
+        int cur = idx[i];
+        int j = i - 1;
+        while (j >= 0 && jobs->slots[idx[j]]->info.created_ms <
+                            jobs->slots[cur]->info.created_ms) {
+            idx[j + 1] = idx[j];
+            j--;
+        }
+        idx[j + 1] = cur;
+    }
+    if (n > limit)
+        n = limit;
+    for (int i = 0; i < n; i++) {
+        cJSON *obj = tooljob_json(&jobs->slots[idx[i]]->info);
+        if (obj)
+            cJSON_AddItemToArray(arr, obj);
+    }
+    airy_mtx_unlock(&jobs->lock);
+    return arr;
+}
+
 int tooljob_drain(tooljob_t *jobs, int timeout_ms)
 {
     int waited = 0;
