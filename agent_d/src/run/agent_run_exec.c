@@ -113,7 +113,7 @@ static void run_task_state(run_ctx_t *c, const char *state, const char *reason)
 {
     if (!c->task || !state || !state[0])
         return;
-    const char *key = agent_task_ledger_key(c->task, c->sess);
+    const char *key = ledger_key(c->task, c->sess);
 
     /* 终态落 result，过程态落 progress；paused 可续跑，不算终态。
      * 先落账再发帧：流式帧可能因断连丢失，账本不能。
@@ -125,11 +125,11 @@ static void run_task_state(run_ctx_t *c, const char *state, const char *reason)
                     strcmp(state, AGENT_TASK_STATE_FAILED) == 0 ||
                     strcmp(state, AGENT_TASK_STATE_UNVERIFIED) == 0;
     if (cancelled_state)
-        (void)agent_task_ledger_cancel(key, c->task->plan_id, c->cancel_by, c->cancel_at_ms);
+        (void)ledger_cancel(key, c->task->plan_id, c->cancel_by, c->cancel_at_ms);
     else if (terminal)
-        (void)agent_task_ledger_result(key, c->task->plan_id, state);
+        (void)ledger_result(key, c->task->plan_id, state);
     else
-        (void)agent_task_ledger_progress(key, c->task->plan_id, state, reason);
+        (void)ledger_progress(key, c->task->plan_id, state, reason);
 
     if (c->sink && c->sink->emit) {
         cJSON *d = cJSON_CreateObject();
@@ -459,7 +459,7 @@ static void run_announce(run_ctx_t *c)
     if (evt) {
         cJSON_AddStringToObject(evt, "event", "run_start");
         cJSON_AddStringToObject(evt, "prompt", pbuf);
-        agent_record_event(agent_task_ledger_key(c->task, c->sess), "chain", evt);
+        agent_record_event(ledger_key(c->task, c->sess), "chain", evt);
         cJSON_Delete(evt);
     }
 
@@ -485,7 +485,7 @@ static void run_announce(run_ctx_t *c)
     run_task_state(c, AGENT_TASK_STATE_SUBMITTED, NULL);
     /* 蓝图是回放的起点：goal 与成功判据在提交时冻结，后续只看事件不改写。 */
     if (c->task)
-        (void)agent_task_ledger_blueprint(agent_task_ledger_key(c->task, c->sess),
+        (void)ledger_plan(ledger_key(c->task, c->sess),
                                           c->task->plan_id, c->prompt,
                                           c->task->success_criteria);
 }
@@ -568,7 +568,7 @@ static void run_plan(run_ctx_t *c, const cJSON *plan)
         AIRY_STRNCPY_TERM(pbuf, plan_str, sizeof(pbuf));
         cJSON_AddStringToObject(evt, "event", "plan");
         cJSON_AddStringToObject(evt, "plan", pbuf);
-        agent_record_event(agent_task_ledger_key(c->task, c->sess), "chain", evt);
+        agent_record_event(ledger_key(c->task, c->sess), "chain", evt);
         cJSON_Delete(evt);
     }
 
@@ -715,7 +715,7 @@ static void run_tools_evt(run_ctx_t *c)
     }
     if (arr)
         cJSON_AddItemToObject(evt, "tools", arr);
-    agent_record_event(agent_task_ledger_key(c->task, c->sess), "chain", evt);
+    agent_record_event(ledger_key(c->task, c->sess), "chain", evt);
     cJSON_Delete(evt);
 }
 
@@ -738,7 +738,7 @@ static void run_chain(run_ctx_t *c)
     char buf[520];
     AIRY_STRNCPY_TERM(buf, c->text ? c->text : "", sizeof(buf));
     cJSON_AddStringToObject(evt, "text", buf);
-    const char *key = agent_task_ledger_key(c->task, c->sess);
+    const char *key = ledger_key(c->task, c->sess);
     agent_record_event(key, "result", evt);
     cJSON_Delete(evt);
 
@@ -746,13 +746,13 @@ static void run_chain(run_ctx_t *c)
      * 还要能判读字段级原因（rc + 引擎给出的可读说明）。 */
     if (c->task) {
         if (c->cancelled)
-            (void)agent_task_ledger_issue(key, c->rc, "cancelled");
+            (void)ledger_issue(key, c->rc, "cancelled");
         else if (c->rc == AGENT_RUN_RC_UNVERIFIED)
-            (void)agent_task_ledger_issue(key, c->rc, "unverified");
+            (void)ledger_issue(key, c->rc, "unverified");
         else if (c->rc != 0)
-            (void)agent_task_ledger_issue(key, c->rc, c->text);
+            (void)ledger_issue(key, c->rc, c->text);
         else
-            (void)agent_task_ledger_issue(key, 0, "ok"); /* 成功也留 issue 结论，回放三类齐全 */
+            (void)ledger_issue(key, 0, "ok"); /* 成功也留 issue 结论，回放三类齐全 */
     }
 }
 
@@ -1061,7 +1061,7 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
     /* D-13（E-20）：注销前取走取消追溯，终态落账与 task_state 帧共用。 */
     if (c.cancelled) {
         const char *by = NULL;
-        agent_run_cancel_meta(c.active, &by, &c.cancel_at_ms);
+        run_cancel_meta(c.active, &by, &c.cancel_at_ms);
         if (by && by[0])
             AIRY_STRNCPY_TERM(c.cancel_by, by, sizeof(c.cancel_by));
     }

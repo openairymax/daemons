@@ -31,7 +31,7 @@ static int ledger_write(const char *task_id, const char *category, cJSON *conten
     return rc == 0 ? 0 : -1;
 }
 
-const char *agent_task_ledger_key(const agent_run_task_meta_t *task, const char *session_id)
+const char *ledger_key(const agent_run_task_meta_t *task, const char *session_id)
 {
     if (task && task->task_id[0])
         return task->task_id;
@@ -59,7 +59,7 @@ static double ledger_progress_of(const char *state)
     return 0.0;
 }
 
-int agent_task_ledger_blueprint(const char *task_id, const char *plan_id, const char *goal,
+int ledger_plan(const char *task_id, const char *plan_id, const char *goal,
                                 const char *success_criteria)
 {
     cJSON *d = cJSON_CreateObject();
@@ -77,7 +77,7 @@ int agent_task_ledger_blueprint(const char *task_id, const char *plan_id, const 
     return rc;
 }
 
-int agent_task_ledger_progress(const char *task_id, const char *plan_id, const char *state,
+int ledger_progress(const char *task_id, const char *plan_id, const char *state,
                                const char *reason)
 {
     if (!state || !state[0])
@@ -98,7 +98,7 @@ int agent_task_ledger_progress(const char *task_id, const char *plan_id, const c
     return rc;
 }
 
-int agent_task_ledger_issue(const char *task_id, int rc, const char *reason)
+int ledger_issue(const char *task_id, int rc, const char *reason)
 {
     cJSON *d = cJSON_CreateObject();
     if (!d)
@@ -113,7 +113,7 @@ int agent_task_ledger_issue(const char *task_id, int rc, const char *reason)
     return wr;
 }
 
-int agent_task_ledger_result(const char *task_id, const char *plan_id, const char *state)
+int ledger_result(const char *task_id, const char *plan_id, const char *state)
 {
     if (!state || !state[0])
         return -1;
@@ -131,7 +131,7 @@ int agent_task_ledger_result(const char *task_id, const char *plan_id, const cha
     return rc;
 }
 
-int agent_task_ledger_cancel(const char *task_id, const char *plan_id, const char *by,
+int ledger_cancel(const char *task_id, const char *plan_id, const char *by,
                              uint64_t ts_ms)
 {
     cJSON *d = cJSON_CreateObject();

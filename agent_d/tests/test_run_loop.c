@@ -172,7 +172,7 @@ static void test_cancel_trace(void)
     memset(&fresh, 0, sizeof(fresh));
     const char *by = "stale";
     uint64_t ts = 4321;
-    agent_run_cancel_meta(&fresh, &by, &ts);
+    run_cancel_meta(&fresh, &by, &ts);
     CHECK(by && by[0] == '\0', "cancel meta: fresh session has empty initiator");
     CHECK(ts == 0, "cancel meta: fresh session has zero ts");
 
@@ -184,14 +184,14 @@ static void test_cancel_trace(void)
     CHECK(agent_run_is_cancelled(reg) != 0, "cancel: flag set");
 
     uint64_t t1 = 0;
-    agent_run_cancel_meta(reg, &by, &t1);
+    run_cancel_meta(reg, &by, &t1);
     CHECK(by && strcmp(by, "cli") == 0, "cancel: initiator recorded");
     CHECK(t1 > 0, "cancel: timestamp recorded");
 
     CHECK(agent_run_cancel_by_session("sess-cxl", "gateway") == AIRY_SUCCESS,
           "cancel: repeat hit still succeeds");
     const char *by2 = NULL;
-    agent_run_cancel_meta(reg, &by2, &ts);
+    run_cancel_meta(reg, &by2, &ts);
     CHECK(by2 && strcmp(by2, "cli") == 0, "cancel: first initiator wins");
     CHECK(ts == t1, "cancel: first timestamp preserved");
 

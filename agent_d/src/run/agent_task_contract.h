@@ -139,7 +139,7 @@ int atk_decide_mode(const char *goal, const char *declared_mode, char *mode, siz
  * @param missing_count 输出：缺失槽位数
  * @return 0 成功；负值解析失败（按未确认处理）
  */
-int agent_task_gccp_check(const cJSON *gccp_answers, bool *confirmed,
+int gccp_ok(const cJSON *gccp_answers, bool *confirmed,
                           agent_task_missing_slot_t *missing, size_t max_missing,
                           size_t *missing_count);
 
@@ -157,7 +157,7 @@ void agent_task_gen_id(const char *prefix, char *out, size_t size);
  * @param gccp_confirmed 用户是否已确认目标/计划
  * @return true 放行；false 需返回 needs_intent
  */
-bool agent_task_gate_allows(const char *mode, bool gccp_confirmed);
+bool gate_allows(const char *mode, bool gccp_confirmed);
 
 /**
  * @brief 组装 needs_intent 结果（confirmed=false 的唯一出口）。
@@ -165,7 +165,7 @@ bool agent_task_gate_allows(const char *mode, bool gccp_confirmed);
  * 返回对象含 status/mode/mode_reason/gccp_confirmed/gccp_missing 与
  * 别名 missing（兼容 285H 参考输出）；不执行任何工具。
  */
-cJSON *agent_task_build_needs_intent(const agent_run_task_meta_t *meta,
+cJSON *need_intent(const agent_run_task_meta_t *meta,
                                      agent_task_missing_slot_t *missing, size_t missing_count);
 
 /* ---- 完成判据（C-17）：校验、计划派生、needs_criteria 出口 ---- */
@@ -181,7 +181,7 @@ cJSON *agent_task_build_needs_intent(const agent_run_task_meta_t *meta,
  * file.path / service.port / rpc.daemon+method）。语义判定在 tool_d，此处
  * 只做「能否交给 verifier」的静态门禁。
  */
-bool agent_task_criteria_ok(const char *criteria);
+bool criteria_ok(const char *criteria);
 
 /**
  * @brief 由计划节点汇总生成判据串（用户未给判据时的唯一派生路径）。

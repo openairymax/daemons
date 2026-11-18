@@ -432,7 +432,7 @@ static int think_attest(const think_service_t *svc, const think_service_config_t
     }
 
     char en_decl[2] = {(config && config->enabled) ? '1' : '0', '\0'};
-    char en_eff[2] = {airy_cognition_get_grad_enabled(svc->engine) ? '1' : '0', '\0'};
+    char en_eff[2] = {cog_grad_on(svc->engine) ? '1' : '0', '\0'};
     airy_attest_item_t items[4] = {
         {.key = "think.enabled",
          .declared = en_decl,

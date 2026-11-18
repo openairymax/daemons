@@ -132,7 +132,7 @@ void agent_task_gen_id(const char *prefix, char *out, size_t size)
 /* GCCP 四槽：目标、上下文、约束、计划。答案以对象形态提交。 */
 static const char *const k_gccp_slots[] = {"goal", "context", "constraints", "plan", NULL};
 
-int agent_task_gccp_check(const cJSON *gccp_answers, bool *confirmed,
+int gccp_ok(const cJSON *gccp_answers, bool *confirmed,
                           agent_task_missing_slot_t *missing, size_t max_missing,
                           size_t *missing_count)
 {
@@ -162,7 +162,7 @@ int agent_task_gccp_check(const cJSON *gccp_answers, bool *confirmed,
     return 0;
 }
 
-cJSON *agent_task_build_needs_intent(const agent_run_task_meta_t *meta,
+cJSON *need_intent(const agent_run_task_meta_t *meta,
                                      agent_task_missing_slot_t *missing,
                                      size_t missing_count)
 {
@@ -192,7 +192,7 @@ cJSON *agent_task_build_needs_intent(const agent_run_task_meta_t *meta,
     return out;
 }
 
-bool agent_task_gate_allows(const char *mode, bool gccp_confirmed)
+bool gate_allows(const char *mode, bool gccp_confirmed)
 {
     /* 唯一门禁条件：未确认的 task 不放行；chat 与已确认任务一律放行。
      * 关闭时调用方必须在引擎之前返回 needs_intent（gate:lab）。 */
@@ -241,7 +241,7 @@ static const cJSON *criteria_array(const cJSON *root)
     return cJSON_IsArray(root) ? root : cJSON_GetObjectItemCaseSensitive(root, AIRY_VK_CRITERIA);
 }
 
-bool agent_task_criteria_ok(const char *criteria)
+bool criteria_ok(const char *criteria)
 {
     cJSON *root = (criteria && criteria[0]) ? cJSON_Parse(criteria) : NULL;
     if (!root)
