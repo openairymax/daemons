@@ -58,6 +58,9 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_alt.c
             # D-12: 工具边界检查点（run loop 调用 pend/done）
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_turn_ckpt.c
+            # C-17: exec 收尾依赖判据派生与复核入口
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_verify.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_task_orchestrate.c
         )
     endif()
 

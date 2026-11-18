@@ -304,6 +304,19 @@ int main(int argc, char **argv)
     CHECK(body && strstr(body, "\"progress\":1"), "failed terminal progress must be 1");
     free(body);
 
+    /* 5c. 取消终态（D-13 / E-20）：state=cancelled 且必须带发起者与
+     *     时间，回放才能区分用户取消与关机批量取消。 */
+    CHECK(agent_task_ledger_cancel("task-ledger-cxl", "plan-ledger-1", "cli", 1737000000123ULL) ==
+              0,
+          "cancel result write failed");
+    snprintf(dir, sizeof(dir), "%s/data/agentrt/hall/default/task-ledger-cxl/result", home);
+    body = read_event(dir);
+    CHECK(body && strstr(body, "\"state\":\"cancelled\""), "cancel state missing");
+    CHECK(body && strstr(body, "\"cancelled_by\":\"cli\""), "cancel initiator missing");
+    CHECK(body && strstr(body, "\"cancelled_at\":1737000000123"), "cancel timestamp missing");
+    CHECK(body && strstr(body, "\"progress\":1"), "cancel terminal progress must be 1");
+    free(body);
+
     /* 6. 空主键不产生无主目录。 */
     CHECK(agent_task_ledger_result(NULL, NULL, "failed") != 0, "empty key must be rejected");
     CHECK(agent_task_ledger_progress("", NULL, "executing", NULL) != 0,
