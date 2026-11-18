@@ -125,6 +125,10 @@ static void run_take_usage(agent_stream_t *st)
     }
     if (total > 0)
         st->tokens = total;
+    if (cJSON_IsNumber(pt) && pt->valuedouble > 0)
+        st->prompt_tokens = (uint64_t)pt->valuedouble;
+    if (cJSON_IsNumber(ct) && ct->valuedouble > 0)
+        st->completion_tokens = (uint64_t)ct->valuedouble;
     if (cJSON_IsNumber(cost))
         st->cost = cost->valuedouble;
     cJSON_Delete(u);
@@ -356,6 +360,8 @@ void agent_stream_take(agent_stream_t *st, agent_stream_result_t *out)
     out->tools = st->tools;
     st->tools = NULL;
     out->tokens = st->tokens;
+    out->prompt_tokens = st->prompt_tokens;
+    out->completion_tokens = st->completion_tokens;
     out->cost = st->cost;
     out->error_code = st->error_code;
     AIRY_STRNCPY_TERM(out->error_msg, st->error_msg, sizeof(out->error_msg));

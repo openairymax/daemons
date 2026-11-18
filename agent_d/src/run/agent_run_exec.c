@@ -68,6 +68,10 @@ typedef struct {
     char *reason;
     uint64_t tokens;
     double cost;
+    uint64_t tokens_in;   /* D-11：prompt 分量（provider 实报） */
+    uint64_t tokens_out;  /* D-11：completion 分量（provider 实报） */
+    char fail_node[128];  /* D-10：熔断工具 id（affected_node） */
+    int fail_denied;      /* D-10：失败前出现过审批/策略拒绝 */
     uint64_t think_ms;
     uint64_t llm_ms;
     uint64_t tool_ms;
@@ -263,15 +267,42 @@ static const char *yaml_role_value(const char *buf)
     return NULL;
 }
 
+/* agent_file 定位（D-11）：绝对路径原样使用；含 '/' 的相对路径以 AIRY_HOME
+ * 为基准（守护进程 cwd 与客户端不同，按 cwd 解析会跨进程静默失效）；裸
+ * agent id 解析为 $AIRY_HOME/agents/<id>.json。返回 0 表示路径可用。 */
+static int agent_file_resolve(const char *in, char *out, size_t cap)
+{
+    const char *home = getenv("AIRY_HOME");
+    int n;
+
+    if (!in || !in[0] || !out || cap == 0)
+        return -1;
+    if (in[0] == '/')
+        n = snprintf(out, cap, "%s", in);
+    else if (!home || !home[0])
+        return -1;
+    else if (strchr(in, '/'))
+        n = snprintf(out, cap, "%s/%s", home, in);
+    else
+        n = snprintf(out, cap, "%s/agents/%s.json", home, in);
+    return (n > 0 && (size_t)n < cap) ? 0 : -1;
+}
+
 /* 从 agent_file 路径解析 agent spec（JSON / 简单 YAML / 纯文本首行）。 */
 static cJSON *agent_spec_from_file(const char *path)
 {
-    if (!path || !path[0])
-        return NULL;
+    char real[AGENT_RUN_SOCK_BUF];
+    FILE *f;
+    cJSON *spec;
 
-    FILE *f = fopen(path, "rb");
+    if (agent_file_resolve(path, real, sizeof(real)) != 0) {
+        SVC_LOG_ERROR("agent.run: agent_file unresolvable (AIRY_HOME unset or path too long): %s",
+                      path ? path : "(null)");
+        return NULL;
+    }
+    f = fopen(real, "rb");
     if (!f) {
-        SVC_LOG_WARN("agent.run: agent_file unreadable: %s", path);
+        SVC_LOG_ERROR("agent.run: agent_file unreadable: %s (input=%s)", real, path);
         return NULL;
     }
     char *buf = (char *)AIRY_MALLOC(AGENT_RUN_AGENT_FILE_MAX + 1);
@@ -306,7 +337,7 @@ static cJSON *agent_spec_from_file(const char *path)
                            src[end - 1] == '\''))
         end--;
 
-    cJSON *spec = NULL;
+    spec = NULL;
     if (end > start) {
         spec = cJSON_CreateObject();
         if (spec) {
@@ -316,10 +347,10 @@ static cJSON *agent_spec_from_file(const char *path)
             role[rlen] = '\0';
             cJSON_AddStringToObject(spec, "role", role);
             SVC_LOG_INFO("agent.run: agent spec built from agent_file (role=%s, file=%s)", role,
-                         path);
+                         real);
         }
     } else {
-        SVC_LOG_WARN("agent.run: agent_file contains no usable role: %s", path);
+        SVC_LOG_ERROR("agent.run: agent_file contains no usable role: %s", real);
     }
     AIRY_FREE(buf);
     return spec;
@@ -350,6 +381,10 @@ static void run_loop(run_ctx_t *c, const cJSON *history)
     c->rounds_limit = lr.rounds_limit;
     c->tokens = lr.tokens;
     c->cost = lr.cost;
+    c->tokens_in = lr.tokens_in;
+    c->tokens_out = lr.tokens_out;
+    AIRY_STRNCPY_TERM(c->fail_node, lr.fail_node, sizeof(c->fail_node));
+    c->fail_denied = lr.fail_denied;
 }
 
 /* 会话槽位 + 模型解析：调用方给定合法 sess_ ID 时沿用，否则生成新 ID。
@@ -689,6 +724,57 @@ static void run_chain(run_ctx_t *c)
     }
 }
 
+/* D-10：失败载荷唯一装配点。code 原样保留，分层只补语义字段与建议动作。 */
+static cJSON *run_fail_obj(const run_ctx_t *c)
+{
+    agent_fail_desc_t d = agent_fail_desc(c->rc, c->fail_denied);
+    cJSON *f = cJSON_CreateObject();
+    const cJSON *id = c->spec_owned ? cJSON_GetObjectItem(c->spec_owned, "id") : NULL;
+    const char *node = c->fail_node[0] ? c->fail_node : "agent_d";
+
+    if (!f)
+        return NULL;
+    if (!c->fail_node[0] && cJSON_IsString(id) && id->valuestring[0])
+        node = id->valuestring;
+    cJSON_AddStringToObject(f, AIRY_RS_K_ORIGIN, d.origin);
+    cJSON_AddNumberToObject(f, AIRY_RS_K_CODE, c->rc);
+    cJSON_AddStringToObject(f, AIRY_RS_K_REASON, d.reason);
+    cJSON_AddBoolToObject(f, AIRY_RS_K_RETRYABLE, d.retryable);
+    cJSON_AddNumberToObject(f, AIRY_RS_K_BUDGET_USED, c->rounds_used);
+    cJSON_AddNumberToObject(f, AIRY_RS_K_BUDGET_TOTAL, c->rounds_limit);
+    cJSON_AddStringToObject(f, AIRY_RS_K_NODE, node);
+    cJSON_AddStringToObject(f, AIRY_RS_K_NEXT_ACTION, d.next_action);
+    return f;
+}
+
+/* D-11：usage 结构化。provider 实报优先；无实报按字符数估算并标注来源，
+ * 避免客户端把缺失计量误读成零消耗。 */
+static cJSON *run_usage_obj(const run_ctx_t *c)
+{
+    uint64_t total = c->tokens;
+    uint64_t pin = c->tokens_in;
+    uint64_t pout = c->tokens_out;
+    const char *src = AIRY_RS_USAGE_PROVIDER;
+    cJSON *u;
+
+    if (total == 0) {
+        pin = (uint64_t)((c->prompt ? strlen(c->prompt) : 0) / 4);
+        pout = (uint64_t)((c->text ? strlen(c->text) : 0) / 4);
+        total = pin + pout;
+        src = AIRY_RS_USAGE_ESTIMATE;
+    } else if (pin + pout == 0) {
+        pin = total;
+    }
+    u = cJSON_CreateObject();
+    if (!u)
+        return NULL;
+    cJSON_AddNumberToObject(u, AIRY_RS_K_USAGE_PROMPT, (double)pin);
+    cJSON_AddNumberToObject(u, AIRY_RS_K_USAGE_COMP, (double)pout);
+    cJSON_AddNumberToObject(u, AIRY_RS_K_USAGE_TOTAL, (double)total);
+    cJSON_AddStringToObject(u, AIRY_RS_K_USAGE_SRC, src);
+    return u;
+}
+
 /* 组装 result：字段契约与旧 gateway 一致（CLI/TUI/SDK 兼容）。 */
 static cJSON *run_fill(run_ctx_t *c)
 {
@@ -715,8 +801,18 @@ static cJSON *run_fill(run_ctx_t *c)
      * error_code 保留原始码供排障；Paused 时 resume_token 随结果下发，
      * 客户端凭它续跑而不必重发全量历史。 */
     cJSON_AddStringToObject(result, "status", run_state_name(c->rc, c->cancelled));
-    if (c->rc != 0)
+    if (c->rc != 0) {
         cJSON_AddNumberToObject(result, "error_code", c->rc);
+        /* D-10：非取消失败随结果带结构化载荷，CLI/离线调用方无需再解析文案。 */
+        if (!c->cancelled) {
+            cJSON *fail = run_fail_obj(c);
+            if (fail)
+                cJSON_AddItemToObject(result, AIRY_RS_K_FAILURE, fail);
+        }
+    }
+    cJSON *usage = run_usage_obj(c);
+    if (usage)
+        cJSON_AddItemToObject(result, AIRY_RS_K_USAGE, usage);
     cJSON_AddNumberToObject(result, AIRY_RS_K_ROUNDS_USED, c->rounds_used);
     cJSON_AddNumberToObject(result, AIRY_RS_K_ROUNDS_LIMIT, c->rounds_limit);
     if (c->resume_out) {
@@ -797,6 +893,15 @@ static void run_tail(run_ctx_t *c, const cJSON *res)
         cJSON_AddNumberToObject(end, AIRY_RS_K_ROUNDS_LIMIT, c->rounds_limit);
         if (resumable)
             cJSON_AddStringToObject(end, AIRY_RS_K_RESUME_TOKEN, rt->valuestring);
+        /* D-10/D-11：终态帧与 result 同源，失败载荷与 usage 一处装配两处下发。 */
+        if (c->rc != 0 && !c->cancelled) {
+            cJSON *fail = run_fail_obj(c);
+            if (fail)
+                cJSON_AddItemToObject(end, AIRY_RS_K_FAILURE, fail);
+        }
+        cJSON *usage = run_usage_obj(c);
+        if (usage)
+            cJSON_AddItemToObject(end, AIRY_RS_K_USAGE, usage);
         const cJSON *tr = res ? cJSON_GetObjectItem(res, AIRY_RS_K_TOOL_TRACE) : NULL;
         if (cJSON_IsArray(tr) && cJSON_GetArraySize(tr) > 0)
             cJSON_AddItemToObject(end, AIRY_RS_K_TOOL_TRACE, cJSON_Duplicate(tr, 1));
@@ -815,6 +920,9 @@ static void run_tail(run_ctx_t *c, const cJSON *res)
             cJSON_AddNumberToObject(err, AIRY_RS_K_ROUNDS_LIMIT, c->rounds_limit);
             if (resumable)
                 cJSON_AddStringToObject(err, AIRY_RS_K_RESUME_TOKEN, rt->valuestring);
+            cJSON *fail = run_fail_obj(c);
+            if (fail)
+                cJSON_AddItemToObject(err, AIRY_RS_K_FAILURE, fail);
             agent_run_emit_event(c->sink, &c->seq, c->run_id, c->sess, AIRY_RS_TYPE_ERROR, err);
         }
     }
@@ -832,6 +940,7 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
         return -1;
 
     run_ctx_t c = {0};
+    int spec_bad = 0;
     c.prompt = prompt;
     c.model = model;
     c.history = history;
@@ -851,9 +960,16 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
     run_announce(&c);
     if (!c.agent_spec && c.agent_file) {
         c.spec_owned = agent_spec_from_file(c.agent_file);
-        c.agent_spec = c.spec_owned;
+        /* D-11：显式给出 agent_file 却解析不了，必须失败而非按默认 spec
+         * 继续——静默降级会让调用方以为指定了角色，实际跑的是别的角色。 */
+        if (!c.spec_owned)
+            spec_bad = 1;
+        else
+            c.agent_spec = c.spec_owned;
     }
-    if (c.agent_spec)
+    if (spec_bad)
+        c.rc = AIRY_ENOENT;
+    else if (c.agent_spec)
         run_orch(&c);
     else
         run_think(&c);
