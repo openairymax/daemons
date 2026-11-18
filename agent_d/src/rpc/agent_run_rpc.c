@@ -142,6 +142,30 @@ static void handle_run_stream(cJSON *params, int id, airy_sock_t client_fd)
 
 DAEMON_RPC_SHELL(run_stream, handle_run_stream)
 
+/* D-10：失败面唯一出口。把引擎 result 的 failure 载荷挂到 error.data，
+ * 客户端无需解析文案即可知道原因与下一步；无载荷时才退回 err_detail。
+ * 协议层保持 error（以 result 返回会让调用方按成功路径继续）。 */
+static void run_send_fail(airy_sock_t fd, int id, const char *detail, const cJSON *failure)
+{
+    const char *msg = (detail && detail[0]) ? detail : "agent.run failed";
+    cJSON *data = failure ? cJSON_Duplicate((cJSON *)failure, 1) : cJSON_CreateObject();
+    cJSON *rid = cJSON_CreateNumber(id);
+    char *resp = NULL;
+
+    if (data && !failure && detail && detail[0])
+        cJSON_AddStringToObject(data, AIRY_RS_K_DETAIL, detail);
+    if (rid)
+        resp = jsonrpc_create_error_response(rid, JSONRPC_INTERNAL_ERROR, msg, data);
+    cJSON_Delete(rid);
+    if (!resp) {
+        /* 构包失败时 data 已随 error_response 释放，统一走无 data 兜底。 */
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, msg, id);
+        return;
+    }
+    (void)jsonrpc_route_response(fd, resp, strlen(resp));
+    AIRY_FREE(resp);
+}
+
 /* agent.run 请求处理：解析 params -> 引擎 -> 组装响应。 */
 static void handle_run(cJSON *params, int id, airy_sock_t client_fd)
 {
@@ -161,17 +185,17 @@ static void handle_run(cJSON *params, int id, airy_sock_t client_fd)
     /* 预算耗尽不是失败：result 携带 status=paused、error_code 与 resume_token，
      * 客户端据此三选（继续/放弃/看失败步骤），因此按成功帧下发。 */
     if ((rc != 0 && rc != AIRY_EBUDGET) || !result) {
-        /* 失败原因可判读：引擎把原因写入 response（如工具连败熔断说明）。 */
+        /* 失败原因可判读：引擎把原因写入 response（如工具连败熔断说明），
+         * D-10 另带结构化 failure，客户端无需再解析文案。 */
         const char *detail = NULL;
+        const cJSON *failure = NULL;
         if (result) {
             cJSON *resp = cJSON_GetObjectItem(result, "response");
             if (cJSON_IsString(resp) && resp->valuestring && resp->valuestring[0])
                 detail = resp->valuestring;
+            failure = cJSON_GetObjectItem(result, AIRY_RS_K_FAILURE);
         }
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
-                           detail ? detail :
-                                     "agent.run failed: tool loop exhausted or LLM service error",
-                           id);
+        run_send_fail(client_fd, id, detail, failure);
         if (result)
             cJSON_Delete(result);
         return;
@@ -340,15 +364,14 @@ static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
     }
     if ((rc != 0 && rc != AIRY_EBUDGET) || !result) {
         const char *detail = NULL;
+        const cJSON *failure = NULL;
         if (result) {
             cJSON *resp = cJSON_GetObjectItem(result, "response");
             if (cJSON_IsString(resp) && resp->valuestring && resp->valuestring[0])
                 detail = resp->valuestring;
+            failure = cJSON_GetObjectItem(result, AIRY_RS_K_FAILURE);
         }
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR,
-                           detail ? detail : "task.submit failed: tool loop exhausted or "
-                                             "LLM service error",
-                           id);
+        run_send_fail(fd, id, detail, failure);
         if (result)
             cJSON_Delete(result);
         return;
