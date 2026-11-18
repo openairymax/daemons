@@ -164,6 +164,56 @@ static void test_run_state(void)
     CHECK(AGENT_RUN_RC_EMPTY == 6, "rc: empty code is 6");
 }
 
+/* D-10：失败语义四类必须彼此可区分（预算/工具/审批/上游），且 retryable
+ * 与 next_action 一致；分层只补字段不改原始码。 */
+static void test_fail_desc(void)
+{
+    agent_fail_desc_t d = agent_fail_desc(AIRY_EBUDGET, 0);
+    CHECK(strcmp(d.origin, AIRY_RS_ORIGIN_AGENT) == 0 &&
+              strcmp(d.reason, AIRY_RS_REASON_BUDGET) == 0,
+          "desc: budget named on agent");
+    CHECK(d.retryable == 1 && strcmp(d.next_action, AIRY_RS_NEXT_RESUME) == 0,
+          "desc: budget resumes, not resends");
+
+    d = agent_fail_desc(AGENT_RUN_RC_TOOL_FUSE, 0);
+    CHECK(strcmp(d.origin, AIRY_RS_ORIGIN_TOOL) == 0 &&
+              strcmp(d.reason, AIRY_RS_REASON_TOOL) == 0,
+          "desc: fuse attributed to tool");
+    CHECK(d.retryable == 0 && strcmp(d.next_action, AIRY_RS_NEXT_INSPECT) == 0,
+          "desc: fuse needs inspection");
+
+    d = agent_fail_desc(AGENT_RUN_RC_TOOL_FUSE, 1);
+    CHECK(strcmp(d.reason, AIRY_RS_REASON_DENIED) == 0, "desc: denial overrides fuse reason");
+
+    d = agent_fail_desc(AGENT_RUN_RC_EMPTY, 0);
+    CHECK(strcmp(d.reason, AIRY_RS_REASON_EMPTY) == 0 && d.retryable == 1 &&
+              strcmp(d.next_action, AIRY_RS_NEXT_RETRY) == 0,
+          "desc: empty result is safely retryable");
+
+    d = agent_fail_desc(-1, 0);
+    CHECK(strcmp(d.origin, AIRY_RS_ORIGIN_PROVIDER) == 0 &&
+              strcmp(d.reason, AIRY_RS_REASON_PROVIDER) == 0 && d.retryable == 1,
+          "desc: upstream failure is provider retryable");
+
+    d = agent_fail_desc(AGENT_RUN_RC_SUBAGENT_FAIL, 0);
+    CHECK(strcmp(d.origin, AIRY_RS_ORIGIN_AGENT) == 0 &&
+              strcmp(d.reason, AIRY_RS_REASON_AGENT) == 0 && d.retryable == 0 &&
+              strcmp(d.next_action, AIRY_RS_NEXT_INSPECT) == 0,
+          "desc: unknown failure defaults to agent inspect");
+}
+
+/* D-10：审批拒绝在熔断路径上留痕，失败载荷据此与普通工具故障区分。 */
+static void test_denied_flag(void)
+{
+    run_ctx_t r;
+    AIRY_MEMSET(&r, 0, sizeof(r));
+    CHECK(r.denied == 0, "denied: initial state clear");
+    r.denied = 1;
+    CHECK(strcmp(agent_fail_desc(AGENT_RUN_RC_TOOL_FUSE, r.denied).reason,
+                 AIRY_RS_REASON_DENIED) == 0,
+          "denied: fuse carries denial attribution");
+}
+
 /* C-14：同工具同参数连败达到阈值即强制换路——闸门必须在第二次相同失败后
  * 关闭，换参数/换工具则重新开口；任一成功清零，避免误伤后续重试。 */
 static void test_switch_gate(void)
@@ -476,6 +526,8 @@ int main(void)
     test_stream_result_free();
     test_orch_contract();
     test_run_state();
+    test_fail_desc();
+    test_denied_flag();
     test_switch_gate();
     test_resume_token();
     test_resume_roundtrip();
