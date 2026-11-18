@@ -222,6 +222,7 @@ typedef struct {
     const char *client;
     int rounds;
     bool gccp_confirmed;
+    bool allow_dangerous; /* 高危工具放行声明（透传到 tool_d 审批门） */
 } task_args_t;
 
 static int parse_task_args(cJSON *params, int id, airy_sock_t fd, task_args_t *out)
@@ -258,6 +259,7 @@ static int parse_task_args(cJSON *params, int id, airy_sock_t fd, task_args_t *o
             rounds = cJSON_GetObjectItem(budget, "rounds");
     }
     cJSON *conf = cJSON_GetObjectItem(params, "gccp_confirmed");
+    cJSON *ad = cJSON_GetObjectItem(params, "allow_dangerous");
     out->goal = goal;
     out->model = json_str(params, "model");
     out->history = m0 ? messages : NULL;
@@ -280,6 +282,7 @@ static int parse_task_args(cJSON *params, int id, airy_sock_t fd, task_args_t *o
     out->client = json_str(params, "client");
     out->rounds = cJSON_IsNumber(rounds) ? rounds->valueint : 0;
     out->gccp_confirmed = cJSON_IsBool(conf) && cJSON_IsTrue(conf);
+    out->allow_dangerous = cJSON_IsBool(ad) && cJSON_IsTrue(ad);
 
     /* gccp_answers 兼容字符串与对象两种线形态：字符串供 think_d 直接消费，
      * 对象需序列化后才能作为引擎入参。 */
@@ -333,6 +336,7 @@ static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
     meta.client = a.client;
     meta.budget_rounds = a.rounds;
     meta.gccp_confirmed = a.gccp_confirmed;
+    meta.allow_dangerous = a.allow_dangerous;
 
     if (agent_task_decide_mode(a.goal, a.declared_mode, meta.mode, sizeof(meta.mode),
                                meta.mode_reason, sizeof(meta.mode_reason)) != 0) {

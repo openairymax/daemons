@@ -99,6 +99,7 @@ typedef struct {
     char mode[8];                      /* chat / task（裁决结果） */
     char mode_reason[AGENT_TASK_REASON_LEN];
     bool gccp_confirmed;               /* goal 是否已确认；false 不得执行工具 */
+    bool allow_dangerous;              /* 调用方显式接受高危工具风险（审计留痕） */
     const char *success_criteria;      /* 可 NULL；计划/验收的判定依据 */
     const char *client;                /* cli / tui / sdk（审计用，可 NULL） */
     int budget_rounds;                 /* 已夹取到 [1,32] */

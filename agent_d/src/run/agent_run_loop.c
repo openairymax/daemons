@@ -199,7 +199,7 @@ static char *run_fail_text(int rc)
  * EPERM/EACCES（策略拒绝）与 ENOTSUP（无处理器），据此撤销目录条目；
  * 传输层失败不填码，避免把「服务不可达」误判成策略拒绝。 */
 static int run_execute_tool(const char *name, const char *args_json, char **out_text,
-                            int *out_code)
+                            int *out_code, bool allow_dangerous)
 {
     *out_text = NULL;
     *out_code = 0;
@@ -207,6 +207,7 @@ static int run_execute_tool(const char *name, const char *args_json, char **out_
     if (!params)
         return -1;
     cJSON_AddStringToObject(params, "tool_id", name);
+    cJSON_AddBoolToObject(params, "allow_dangerous", allow_dangerous);
     cJSON *pargs = cJSON_Parse(args_json && args_json[0] ? args_json : "{}");
     if (!pargs)
         pargs = cJSON_CreateObject();
@@ -988,7 +989,8 @@ static char *run_resume_emit(const run_ctx_t *r)
  * 执行时长并入同一次 tool_ms，连败/熔断仍按一次失败记账；每步至多换一次，
  * 替代工具失败后不再连锁换路（避免把一次失败放大成一次搜索）。策略拒绝类
  * 错误码由调用方过滤，替代工具必须在当前目录内才执行。 */
-typedef int (*run_exec_fn)(const char *name, const char *args, char **out, int *code);
+typedef int (*run_exec_fn)(const char *name, const char *args, char **out, int *code,
+                           bool allow_dangerous);
 
 static int run_alt_try(run_ctx_t *r, run_alt_t *alt, run_exec_fn exec, char **out, cJSON **fbev)
 {
@@ -1005,7 +1007,7 @@ static int run_alt_try(run_ctx_t *r, run_alt_t *alt, run_exec_fn exec, char **ou
     char *res = NULL;
     int code = 0;
     uint64_t t0 = airy_time_ms();
-    int rc = exec(alt->tool, alt->args, &res, &code);
+    int rc = exec(alt->tool, alt->args, &res, &code, r->args->allow_dangerous);
     r->out->tool_ms += airy_time_ms() - t0;
     if (rc != 0 && code != 0)
         run_cat_revoke(r, alt->tool, code);
@@ -1106,7 +1108,7 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
     } else {
         int code = 0;
         uint64_t t0 = airy_time_ms();
-        erc = run_execute_tool(tname, targs, &res, &code);
+        erc = run_execute_tool(tname, targs, &res, &code, r->args->allow_dangerous);
         r->out->tool_ms += airy_time_ms() - t0;
         /* 工具自报不可用（策略拒绝 / 无处理器）：撤销目录条目并记原因。
          * tool_create 的新工具不必在此追加，下一轮目录采样自然可见。 */
@@ -1240,6 +1242,7 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
     run_ctx_t r = {0};
     int rc = -1;
     int more = 0;
+    int cancelled = 0;
     if (!args || !out)
         return -1;
     AIRY_MEMSET(out, 0, sizeof(*out));
@@ -1271,6 +1274,7 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
         if (agent_run_is_cancelled(args->session)) {
             SVC_LOG_INFO("agent.run: cancelled by user (session=%s)", r.sess ? r.sess : "?");
             rc = 1;
+            cancelled = 1;
             more = 0;
             break;
         }
@@ -1311,11 +1315,18 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
         out->resume_token = run_resume_emit(&r);
     }
 
-    /* D-12：终态收口。预算暂停保留可续跑条目（写入含待续正文的最终令牌）；
-     * 其余终态删除条目。退出排水期由检查点模块保留为 paused。 */
+    /* D-12：终态收口。暂停（含预算耗尽与可重试的 provider 故障）保留可续跑
+     * 条目并写入含已执行步骤的令牌；其余终态删除条目。退出排水期由检查点
+     * 模块保留为 paused。 */
     const char *ck_key = r.run_id ? r.run_id : r.sess;
     if (ck_key && ck_key[0]) {
-        if (rc == AIRY_EBUDGET && out->resume_token) {
+        bool paused = !cancelled && rc != 0 && rc != AGENT_RUN_RC_UNMET &&
+                      rc != AGENT_RUN_RC_TOOL_FUSE && rc != AGENT_RUN_RC_UNVERIFIED;
+        if (paused && !out->resume_token) {
+            /* 故障暂停同样要能把最后一个工具边界交还客户端，否则只能重跑。 */
+            out->resume_token = run_resume_emit(&r);
+        }
+        if (paused && out->resume_token) {
             agent_ckpt_save(ck_key, r.sess, out->rounds_used, out->rounds_limit,
                             cJSON_GetArraySize(r.trace), "", out->resume_token);
             agent_ckpt_pend(ck_key);
