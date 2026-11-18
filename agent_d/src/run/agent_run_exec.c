@@ -390,7 +390,8 @@ static void run_loop(run_ctx_t *c, const cJSON *history)
                                   .session = c->active,
                                   .sink = c->sink,
                                   .rounds = c->rounds,
-                                  .resume_token = c->resume_token};
+                                  .resume_token = c->resume_token,
+                                  .allow_dangerous = c->task && c->task->allow_dangerous};
     agent_run_loop_result_t lr = {0};
 
     c->rc = agent_run_tool_loop(&args, &lr);
@@ -750,6 +751,8 @@ static void run_chain(run_ctx_t *c)
             (void)agent_task_ledger_issue(key, c->rc, "unverified");
         else if (c->rc != 0)
             (void)agent_task_ledger_issue(key, c->rc, c->text);
+        else
+            (void)agent_task_ledger_issue(key, 0, "ok"); /* 成功也留 issue 结论，回放三类齐全 */
     }
 }
 

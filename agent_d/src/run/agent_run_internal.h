@@ -92,6 +92,7 @@ typedef struct {
     const agent_run_event_sink_t *sink;      /* run_stream 事件推送 sink（可 NULL） */
     int rounds;                              /* 请求轮次预算（<=0 走策略缺省，夹取 [1,32]） */
     const char *resume_token;                /* 续跑令牌（可 NULL；非空时不重放全量历史） */
+    bool allow_dangerous;                    /* 高危工具放行声明（透传 tool_d 审批门） */
 } agent_run_loop_args_t;
 
 /** 工具循环产物（成功/熔断/预算耗尽时所有权移交调用方）。 */

@@ -133,12 +133,13 @@ void agent_run_cancel_meta(const agent_run_session_t *s, const char **by, uint64
 
 const char *run_state_name(int rc, int cancelled)
 {
-    /* 任务级未收敛一律 Paused：产物已移交，客户端可继续/放弃；只有用户
-     * 取消、判据未过（C-17 确定性失败）才进 Failed，禁止再以 Executing
-     * 静默停留。verifier 无法取证时记 unverified，不得冒充 completed。 */
+    /* 任务级未收敛一律 Paused：产物已移交，客户端可继续/放弃；用户取消、
+     * 判据未过与工具熔断（均为确定性失败，failure.retryable=false）进
+     * Failed，禁止再以 Executing 静默停留。verifier 无法取证时记
+     * unverified，不得冒充 completed。 */
     if (cancelled)
         return "failed";
-    if (rc == AGENT_RUN_RC_UNMET)
+    if (rc == AGENT_RUN_RC_UNMET || rc == AGENT_RUN_RC_TOOL_FUSE)
         return "failed";
     if (rc == AGENT_RUN_RC_UNVERIFIED)
         return AIRY_RS_STATE_UNVERIFIED;
