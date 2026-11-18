@@ -102,6 +102,17 @@ int tooljob_submit(tooljob_t *jobs, const tool_execute_request_t *req, int timeo
 int tooljob_poll(tooljob_t *jobs, const char *job_id, tool_job_info_t *out);
 
 /**
+ * @brief 同步执行落账：把一次已完成的 tool.execute 写成终态作业记录。
+ *
+ * D-9 要求 tool.execute 与 tool.submit 共用同一任务实体；同步路径没有
+ * 后台线程，故直接写入终态（含参数摘要/风险/审批/沙箱），并返回 job_id
+ * 供响应与 jobs show 关联。res 为 NULL 时返回参数错误。
+ */
+int tooljob_record(tooljob_t *jobs, const char *tool_id, const char *agent_id,
+                   const char *params_json, const tool_result_t *res, uint64_t start_ms,
+                   char *job_id_out, size_t cap);
+
+/**
  * @brief 取消作业（协作式）：运行中标记为 cancelled 并作废结果；
  *        已结束作业返回 AIRY_ERR_INVALID_STATE。执行进程仍受 timeout 预算约束。
  */
