@@ -14,6 +14,7 @@
 #include "agent_run_internal.h"
 
 #include "agent_run_alt.h"
+#include "agent_turn_ckpt.h"
 #include "airy_memory.h"
 #include "airy_run_stream.h"
 #include "airy_tool_schema.h"
@@ -1175,6 +1176,19 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
     if (fbev)
         cJSON_AddItemToObject(tr, "fallback", fbev);
     cJSON_AddItemToArray(r->trace, tr);
+
+    /* D-12：工具边界即检查点。令牌只含边界前的步骤摘要，守护重启后客户端
+     * 凭 agent.turns 取回令牌续跑，不会重复执行已完成的工具。 */
+    if (r->out->rounds_used > 0) {
+        char *tok = run_resume_emit(r);
+        if (tok) {
+            const char *key = r->run_id ? r->run_id : r->sess;
+            if (key && key[0])
+                agent_ckpt_save(key, r->sess, r->out->rounds_used, r->out->rounds_limit,
+                                cJSON_GetArraySize(r->trace), tname, tok);
+            AIRY_FREE(tok);
+        }
+    }
     AIRY_FREE(content);
     AIRY_FREE(res);
     return r->fused;
@@ -1240,6 +1254,8 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
     int used = 0;
     for (int i = 0; i < limit; i++) {
         used = i + 1;
+        /* 边界检查点与令牌复用同一轮次口径：先更新产物再进轮。 */
+        out->rounds_used = used;
         if (agent_run_is_cancelled(args->session)) {
             SVC_LOG_INFO("agent.run: cancelled by user (session=%s)", r.sess ? r.sess : "?");
             rc = 1;
@@ -1281,6 +1297,19 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
             r.text = AIRY_STRDUP("Tool round budget exhausted; resume with the returned token");
         /* 暂停即可续跑：令牌自包含已执行步骤与待续目标，客户端不必重发历史。 */
         out->resume_token = run_resume_emit(&r);
+    }
+
+    /* D-12：终态收口。预算暂停保留可续跑条目（写入含待续正文的最终令牌）；
+     * 其余终态删除条目。退出排水期由检查点模块保留为 paused。 */
+    const char *ck_key = r.run_id ? r.run_id : r.sess;
+    if (ck_key && ck_key[0]) {
+        if (rc == AIRY_EBUDGET && out->resume_token) {
+            agent_ckpt_save(ck_key, r.sess, out->rounds_used, out->rounds_limit,
+                            cJSON_GetArraySize(r.trace), "", out->resume_token);
+            agent_ckpt_pend(ck_key);
+        } else {
+            agent_ckpt_done(ck_key);
+        }
     }
 
     agent_ledger_free(&r.lg);

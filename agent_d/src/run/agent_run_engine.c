@@ -170,6 +170,32 @@ int agent_run_cancel_by_session(const char *session_id)
     return found ? AIRY_SUCCESS : AIRY_ERR_NOT_FOUND;
 }
 
+size_t agent_run_active_count(void)
+{
+    size_t n = 0;
+    run_lock_init();
+    airy_mtx_lock(&g_run_lock);
+    for (const agent_run_session_t *s = g_run_sessions; s; s = s->next)
+        n++;
+    airy_mtx_unlock(&g_run_lock);
+    return n;
+}
+
+int agent_run_cancel_all(void)
+{
+    int n = 0;
+    run_lock_init();
+    airy_mtx_lock(&g_run_lock);
+    for (agent_run_session_t *s = g_run_sessions; s; s = s->next) {
+        if (!s->cancelled) {
+            s->cancelled = 1;
+            n++;
+        }
+    }
+    airy_mtx_unlock(&g_run_lock);
+    return n;
+}
+
 /* ID 生成：时间戳与单调序号混洗后取 16+4 位十六进制，前缀区分 sess/run。 */
 static void run_gen_id(char *out, size_t out_size, const char *pfx)
 {

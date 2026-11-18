@@ -220,6 +220,12 @@ void agent_run_gen_session_id(char *out, size_t out_size);
 /** @brief 生成运行 ID（run_<16hex>_<4hex>）。 */
 void agent_run_gen_run_id(char *out, size_t out_size);
 
+/** @brief 在途回合数（D-12 退出排水观测：注册表条目在 run 结束才注销）。 */
+size_t agent_run_active_count(void);
+
+/** @brief 排水兜底：全部在途会话置取消，返回受影响数。 */
+int agent_run_cancel_all(void);
+
 /* ---- 编排域（agent_run_engine.c） ---- */
 
 /**
