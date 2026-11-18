@@ -164,6 +164,43 @@ static void test_run_state(void)
     CHECK(AGENT_RUN_RC_EMPTY == 6, "rc: empty code is 6");
 }
 
+/* D-13（E-20）：取消追溯。首个取消者为准，重复取消不得覆盖发起者与时间；
+ * 未取消的会话 by 为空、ts=0；注销后按 id 取消必须落空。 */
+static void test_cancel_trace(void)
+{
+    agent_run_session_t fresh;
+    memset(&fresh, 0, sizeof(fresh));
+    const char *by = "stale";
+    uint64_t ts = 4321;
+    agent_run_cancel_meta(&fresh, &by, &ts);
+    CHECK(by && by[0] == '\0', "cancel meta: fresh session has empty initiator");
+    CHECK(ts == 0, "cancel meta: fresh session has zero ts");
+
+    agent_run_session_t *reg = agent_run_register("sess-cxl");
+    CHECK(reg != NULL, "cancel trace: register session");
+    if (!reg)
+        return;
+    CHECK(agent_run_cancel_by_session("sess-cxl", "cli") == AIRY_SUCCESS, "cancel: first hit");
+    CHECK(agent_run_is_cancelled(reg) != 0, "cancel: flag set");
+
+    uint64_t t1 = 0;
+    agent_run_cancel_meta(reg, &by, &t1);
+    CHECK(by && strcmp(by, "cli") == 0, "cancel: initiator recorded");
+    CHECK(t1 > 0, "cancel: timestamp recorded");
+
+    CHECK(agent_run_cancel_by_session("sess-cxl", "gateway") == AIRY_SUCCESS,
+          "cancel: repeat hit still succeeds");
+    const char *by2 = NULL;
+    agent_run_cancel_meta(reg, &by2, &ts);
+    CHECK(by2 && strcmp(by2, "cli") == 0, "cancel: first initiator wins");
+    CHECK(ts == t1, "cancel: first timestamp preserved");
+
+    agent_run_unregister(reg);
+    CHECK(agent_run_cancel_by_session("sess-cxl", "cli") != AIRY_SUCCESS,
+          "cancel: miss after unregister");
+    CHECK(agent_run_cancel_by_session(NULL, "cli") != AIRY_SUCCESS, "cancel: null session rejected");
+}
+
 /* D-10：失败语义四类必须彼此可区分（预算/工具/审批/上游），且 retryable
  * 与 next_action 一致；分层只补字段不改原始码。 */
 static void test_fail_desc(void)
@@ -526,6 +563,7 @@ int main(void)
     test_stream_result_free();
     test_orch_contract();
     test_run_state();
+    test_cancel_trace();
     test_fail_desc();
     test_denied_flag();
     test_switch_gate();
