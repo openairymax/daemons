@@ -77,8 +77,10 @@ int ledger_plan(const char *task_id, const char *plan_id, const char *goal,
     return rc;
 }
 
-int ledger_progress(const char *task_id, const char *plan_id, const char *state,
-                               const char *reason)
+/* 状态事件公共体：progress/result 的字段装配一致，仅消费端事件名不同。 */
+static int ledger_state_ev(const char *task_id, const char *plan_id,
+                           const char *state, const char *reason,
+                           const char *ev)
 {
     if (!state || !state[0])
         return -1;
@@ -93,9 +95,15 @@ int ledger_progress(const char *task_id, const char *plan_id, const char *state,
     cJSON_AddNumberToObject(d, "progress", ledger_progress_of(state));
     if (reason && reason[0])
         cJSON_AddStringToObject(d, "reason", reason);
-    int rc = ledger_write(task_id, "progress", d);
+    int rc = ledger_write(task_id, ev, d);
     cJSON_Delete(d);
     return rc;
+}
+
+int ledger_progress(const char *task_id, const char *plan_id, const char *state,
+                               const char *reason)
+{
+    return ledger_state_ev(task_id, plan_id, state, reason, "progress");
 }
 
 int ledger_issue(const char *task_id, int rc, const char *reason)
@@ -115,20 +123,7 @@ int ledger_issue(const char *task_id, int rc, const char *reason)
 
 int ledger_result(const char *task_id, const char *plan_id, const char *state)
 {
-    if (!state || !state[0])
-        return -1;
-    cJSON *d = cJSON_CreateObject();
-    if (!d)
-        return -1;
-    cJSON_AddStringToObject(d, "event", "task_state");
-    cJSON_AddStringToObject(d, "task_id", task_id ? task_id : "");
-    if (plan_id && plan_id[0])
-        cJSON_AddStringToObject(d, "plan_id", plan_id);
-    cJSON_AddStringToObject(d, "state", state);
-    cJSON_AddNumberToObject(d, "progress", ledger_progress_of(state));
-    int rc = ledger_write(task_id, "result", d);
-    cJSON_Delete(d);
-    return rc;
+    return ledger_state_ev(task_id, plan_id, state, NULL, "result");
 }
 
 int ledger_cancel(const char *task_id, const char *plan_id, const char *by,
