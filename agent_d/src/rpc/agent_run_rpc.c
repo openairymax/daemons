@@ -434,17 +434,24 @@ static void handle_cancel(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *sid = cJSON_GetObjectItem(params, "session_id");
     JSONRPC_REQUIRE(cJSON_IsString(sid) && sid->valuestring && *sid->valuestring, client_fd,
                     "Invalid params: missing session_id", id);
-    int rc = agent_run_cancel_by_session(sid->valuestring);
+    /* D-13（E-20）：by 为可选发起者自报（多客户端/多入口并存时用于追溯）；
+     * 缺省记 client，关机批量取消由引擎记 shutdown。 */
+    cJSON *by = cJSON_GetObjectItem(params, "by");
+    const char *who = (cJSON_IsString(by) && by->valuestring && by->valuestring[0])
+                          ? by->valuestring
+                          : "client";
+    int rc = agent_run_cancel_by_session(sid->valuestring, who);
     if (rc != AIRY_SUCCESS) {
         SVC_LOG_DEBUG("agent.cancel miss (session=%s, 请求已完成或不存在)", sid->valuestring);
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND,
                            "No active request with given session_id", id);
         return;
     }
-    SVC_LOG_INFO("agent.cancel set (session=%s)", sid->valuestring);
+    SVC_LOG_INFO("agent.cancel set (session=%s, by=%s)", sid->valuestring, who);
     cJSON *result = cJSON_CreateObject();
     cJSON_AddStringToObject(result, "status", "cancelling");
     cJSON_AddStringToObject(result, "session_id", sid->valuestring);
+    cJSON_AddStringToObject(result, "by", who);
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 

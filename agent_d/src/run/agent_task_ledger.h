@@ -24,6 +24,8 @@
 #ifndef AIRY_RT_DAEMON_AGENT_TASK_LEDGER_H
 #define AIRY_RT_DAEMON_AGENT_TASK_LEDGER_H
 
+#include <stdint.h>
+
 #include "agent_task_contract.h"
 
 #ifdef __cplusplus
@@ -60,6 +62,18 @@ int agent_task_ledger_issue(const char *task_id, int rc, const char *reason);
  * @brief 写 result 事件（终态：completed/failed/cancelled）。
  */
 int agent_task_ledger_result(const char *task_id, const char *plan_id, const char *state);
+
+/**
+ * @brief 写取消终态（result 桶，state=cancelled + 发起者 + 时间）。
+ *
+ * D-13（E-20）：取消与失败同属终态但语义不同，必须能回答「谁在何时
+ * 取消的」。发起者取首个取消请求，关机批量取消记 shutdown。
+ *
+ * @param by    发起者标识（可 NULL，空则不带该字段）
+ * @param ts_ms 取消发生时间（毫秒，0 则不带该字段）
+ */
+int agent_task_ledger_cancel(const char *task_id, const char *plan_id, const char *by,
+                             uint64_t ts_ms);
 
 #ifdef __cplusplus
 }

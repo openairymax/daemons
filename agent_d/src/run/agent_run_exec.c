@@ -78,6 +78,9 @@ typedef struct {
     uint64_t tool_ms;
     int rc;
     bool cancelled;
+    /* D-13（E-20）：取消追溯在会话注销前捕获，终态落账与发帧共用。 */
+    char cancel_by[64];
+    uint64_t cancel_at_ms;
     char run_id[AGENT_RUN_SESSION_ID_LEN];
     cJSON *verify;        /* C-17：tool_d verifier 逐项证据（可 NULL） */
     char *criteria;       /* C-17：生效判据串（任务自带或计划派生，自持有） */
@@ -113,11 +116,17 @@ static void run_task_state(run_ctx_t *c, const char *state, const char *reason)
     const char *key = agent_task_ledger_key(c->task, c->sess);
 
     /* 终态落 result，过程态落 progress；paused 可续跑，不算终态。
-     * 先落账再发帧：流式帧可能因断连丢失，账本不能。 */
-    bool terminal = strcmp(state, AGENT_TASK_STATE_COMPLETED) == 0 ||
+     * 先落账再发帧：流式帧可能因断连丢失，账本不能。
+     * D-13（E-20）：取消终态额外记录发起者与时间，replay 才能区分
+     * 用户取消与关机取消。 */
+    bool cancelled_state = strcmp(state, AGENT_TASK_STATE_CANCELLED) == 0;
+    bool terminal = cancelled_state ||
+                    strcmp(state, AGENT_TASK_STATE_COMPLETED) == 0 ||
                     strcmp(state, AGENT_TASK_STATE_FAILED) == 0 ||
-                    strcmp(state, AGENT_TASK_STATE_CANCELLED) == 0;
-    if (terminal)
+                    strcmp(state, AGENT_TASK_STATE_UNVERIFIED) == 0;
+    if (cancelled_state)
+        (void)agent_task_ledger_cancel(key, c->task->plan_id, c->cancel_by, c->cancel_at_ms);
+    else if (terminal)
         (void)agent_task_ledger_result(key, c->task->plan_id, state);
     else
         (void)agent_task_ledger_progress(key, c->task->plan_id, state, reason);
@@ -132,6 +141,12 @@ static void run_task_state(run_ctx_t *c, const char *state, const char *reason)
         cJSON_AddStringToObject(d, AIRY_RS_K_STATE, state);
         if (reason && reason[0])
             cJSON_AddStringToObject(d, AIRY_RS_K_REASON, reason);
+        if (cancelled_state) {
+            if (c->cancel_by[0])
+                cJSON_AddStringToObject(d, AIRY_RS_K_CANCELLED_BY, c->cancel_by);
+            if (c->cancel_at_ms)
+                cJSON_AddNumberToObject(d, AIRY_RS_K_CANCELLED_AT, (double)c->cancel_at_ms);
+        }
         const char *rid = c->run_id[0] ? c->run_id
                                        : (c->active ? c->active->run_id : c->task->task_id);
         agent_run_emit_event(c->sink, &c->seq, rid, c->sess, AIRY_RS_TYPE_TASK_STATE, d);
@@ -731,6 +746,8 @@ static void run_chain(run_ctx_t *c)
     if (c->task) {
         if (c->cancelled)
             (void)agent_task_ledger_issue(key, c->rc, "cancelled");
+        else if (c->rc == AGENT_RUN_RC_UNVERIFIED)
+            (void)agent_task_ledger_issue(key, c->rc, "unverified");
         else if (c->rc != 0)
             (void)agent_task_ledger_issue(key, c->rc, c->text);
     }
@@ -893,8 +910,17 @@ static cJSON *run_fill(run_ctx_t *c)
  * 终态帧按需深拷贝一份，流式客户端才能看到参数与结果正文。 */
 static void run_tail(run_ctx_t *c, const cJSON *res)
 {
-    if (!c->sink || !c->sink->emit)
+    /* D-13：终态落账与流式发帧解耦。同步 task.submit 没有 sink，旧实现
+     * 直接返回，决策链只留 run_result，看板与回放永远停在 running，与
+     * 流式路径形成两套口径。落账无条件，发帧由 run_task_state 自行判断。 */
+    if (!c->sink || !c->sink->emit) {
+        if (c->task && !c->gccp_round) {
+            const char *ts = c->cancelled ? AGENT_TASK_STATE_CANCELLED
+                                          : run_state_name(c->rc, c->cancelled);
+            run_task_state(c, ts, NULL);
+        }
         return;
+    }
 
     /* 续跑令牌已在 run_fill 移交 result，终态帧从那里取同一份文本：
      * run_end 与 error 都必须带，客户端才知道暂停后凭何继续。 */
@@ -1029,6 +1055,13 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
         run_think(&c);
 
     c.cancelled = agent_run_is_cancelled(c.active);
+    /* D-13（E-20）：注销前取走取消追溯，终态落账与 task_state 帧共用。 */
+    if (c.cancelled) {
+        const char *by = NULL;
+        agent_run_cancel_meta(c.active, &by, &c.cancel_at_ms);
+        if (by && by[0])
+            AIRY_STRNCPY_TERM(c.cancel_by, by, sizeof(c.cancel_by));
+    }
     /* 无输出终态（0.1.21 L-9）：编排成功但终局正文为空，不是「成功但空白」。
      * GCCP 交互轮以问题集为产物、取消轮由取消语义覆盖，二者不判空。 */
     if (c.rc == 0 && !c.cancelled && !c.gccp_round && (!c.text || !c.text[0]))

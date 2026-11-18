@@ -76,6 +76,9 @@ extern "C" {
 #define AGENT_TASK_STATE_PAUSED "paused"
 #define AGENT_TASK_STATE_FAILED "failed"
 #define AGENT_TASK_STATE_CANCELLED "cancelled"
+/* C-17 / D-13：判据无法取证——内容可交付但明确不是已完成，属终态之一
+ * （看板与回放必须与 completed 区分，不能显示成功）。 */
+#define AGENT_TASK_STATE_UNVERIFIED "unverified"
 
 /* task.submit_stream 的 SSE 请求体方法名（gateway 白名单既有 agent.run_stream） */
 #define AGENT_TASK_METHOD_SUBMIT "task.submit"

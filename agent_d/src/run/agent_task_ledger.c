@@ -13,6 +13,7 @@
 #include "agent_task_ledger.h"
 
 #include "airy_memory.h"
+#include "airy_run_stream.h"
 #include "hall_event.h"
 
 #include <string.h>
@@ -125,6 +126,27 @@ int agent_task_ledger_result(const char *task_id, const char *plan_id, const cha
         cJSON_AddStringToObject(d, "plan_id", plan_id);
     cJSON_AddStringToObject(d, "state", state);
     cJSON_AddNumberToObject(d, "progress", ledger_progress_of(state));
+    int rc = ledger_write(task_id, "result", d);
+    cJSON_Delete(d);
+    return rc;
+}
+
+int agent_task_ledger_cancel(const char *task_id, const char *plan_id, const char *by,
+                             uint64_t ts_ms)
+{
+    cJSON *d = cJSON_CreateObject();
+    if (!d)
+        return -1;
+    cJSON_AddStringToObject(d, "event", "task_state");
+    cJSON_AddStringToObject(d, "task_id", task_id ? task_id : "");
+    if (plan_id && plan_id[0])
+        cJSON_AddStringToObject(d, "plan_id", plan_id);
+    cJSON_AddStringToObject(d, "state", AGENT_TASK_STATE_CANCELLED);
+    cJSON_AddNumberToObject(d, "progress", ledger_progress_of(AGENT_TASK_STATE_CANCELLED));
+    if (by && by[0])
+        cJSON_AddStringToObject(d, AIRY_RS_K_CANCELLED_BY, by);
+    if (ts_ms)
+        cJSON_AddNumberToObject(d, AIRY_RS_K_CANCELLED_AT, (double)ts_ms);
     int rc = ledger_write(task_id, "result", d);
     cJSON_Delete(d);
     return rc;

@@ -123,6 +123,14 @@ bool agent_run_is_cancelled(const agent_run_session_t *s)
     return s && s->cancelled != 0;
 }
 
+void agent_run_cancel_meta(const agent_run_session_t *s, const char **by, uint64_t *ts_ms)
+{
+    if (by)
+        *by = (s && s->cancel_by[0]) ? s->cancel_by : "";
+    if (ts_ms)
+        *ts_ms = s ? s->cancel_at_ms : 0;
+}
+
 const char *run_state_name(int rc, int cancelled)
 {
     /* 任务级未收敛一律 Paused：产物已移交，客户端可继续/放弃；只有用户
@@ -161,7 +169,7 @@ const char *run_rc_msg(int rc)
     }
 }
 
-int agent_run_cancel_by_session(const char *session_id)
+int agent_run_cancel_by_session(const char *session_id, const char *by)
 {
     if (!session_id || !session_id[0])
         return AIRY_ERR_NOT_FOUND;
@@ -170,7 +178,14 @@ int agent_run_cancel_by_session(const char *session_id)
     int found = 0;
     for (agent_run_session_t *s = g_run_sessions; s; s = s->next) {
         if (strcmp(s->session_id, session_id) == 0) {
-            s->cancelled = 1;
+            /* D-13：首个取消者为准。重复取消不得改写发起者与时间，
+             * 否则追溯链被后来的请求覆盖，事后无法定位真实触发方。 */
+            if (!s->cancelled) {
+                s->cancelled = 1;
+                AIRY_STRNCPY_TERM(s->cancel_by, (by && by[0]) ? by : "client",
+                                  sizeof(s->cancel_by));
+                s->cancel_at_ms = airy_time_ms();
+            }
             found = 1;
             break;
         }
@@ -193,11 +208,16 @@ size_t agent_run_active_count(void)
 int agent_run_cancel_all(void)
 {
     int n = 0;
+    uint64_t now = airy_time_ms();
     run_lock_init();
     airy_mtx_lock(&g_run_lock);
     for (agent_run_session_t *s = g_run_sessions; s; s = s->next) {
         if (!s->cancelled) {
             s->cancelled = 1;
+            /* 关机/退出是另一类取消发起者：与用户主动取消必须可区分，
+             * 否则回放里全是 cancelled，看不到停机导致的批量中断。 */
+            AIRY_STRNCPY_TERM(s->cancel_by, "shutdown", sizeof(s->cancel_by));
+            s->cancel_at_ms = now;
             n++;
         }
     }
