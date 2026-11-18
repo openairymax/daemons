@@ -55,6 +55,8 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/job/tool_job.c
     # D-9 审计留痕：风险分级 / 参数脱敏 / 输出摘要 / 沙箱标记
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/job/tool_audit.c
+    # C-17 完成判据复核器：只读取证（cmd/file/service/rpc）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/verify/tool_verify.c
 )
 
 set(TOOL_TEST_SOURCES
@@ -91,6 +93,8 @@ set(TOOL_TEST_SOURCES
     test_tool_job.c
     # D-9: 审计留痕（风险分级/参数脱敏/输出摘要/沙箱标记）
     test_tool_audit.c
+    # C-17: 完成判据复核（四类判据正负例 / 入口防御 / 只读白名单）
+    test_verify.c
 )
 # os_sandbox 测试依赖 Landlock/seccomp/unshare/mount 等 Linux-only 能力，
 # macOS/BSD 上 os_sandbox.c 为空实现（OS_SANDBOX_MODE_OFF），该测试不适用。

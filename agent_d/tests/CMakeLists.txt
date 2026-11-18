@@ -61,10 +61,12 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
         )
     endif()
 
-    # 裁决/身份单测同编编排源（不含 RPC/引擎，保持纯判定可测）。
+    # 裁决/身份单测同编编排源（不含 RPC/引擎，保持纯判定可测）；
+    # C-17 判据归因同编复核入口（判据缺失路径不触达 RPC）。
     if(TEST_NAME STREQUAL "test_task_orchestrate")
         target_sources(test_agent_${TEST_NAME} PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_task_orchestrate.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_verify.c
         )
     endif()
 

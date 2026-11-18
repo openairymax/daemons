@@ -63,6 +63,9 @@ extern "C" {
 
 #define AGENT_TASK_STATUS_OK "ok"
 #define AGENT_TASK_STATUS_NEEDS_INTENT "needs_intent"
+/* C-17：显式声明 task 却未给出任何可执行判据——拒绝进入并回示例，
+ * 客户端补齐 success_criteria 后重提。 */
+#define AGENT_TASK_STATUS_NEEDS_CRITERIA "needs_criteria"
 
 /* ---- task_state 事件的 state 取值 ---- */
 
@@ -160,6 +163,36 @@ bool agent_task_gate_allows(const char *mode, bool gccp_confirmed);
  */
 cJSON *agent_task_build_needs_intent(const agent_run_task_meta_t *meta,
                                      agent_task_missing_slot_t *missing, size_t missing_count);
+
+/* ---- 完成判据（C-17）：校验、计划派生、needs_criteria 出口 ---- */
+
+/* 单次复核的判据条数上界，与 tool_d verifier 的 AIRY_VERIFY_MAX_ITEMS 一致；
+ * 只在契约层夹取，超限即视为非法（fail-closed）。 */
+#define AGENT_TASK_CRITERIA_MAX 16
+
+/**
+ * @brief 判据是否可用：数组（或 {"criteria":[...]}）且每条 1..MAX 项合法。
+ *
+ * 合法性 = type ∈ {cmd,file,service,rpc} 且该类型必需字段齐全（cmd.cmd /
+ * file.path / service.port / rpc.daemon+method）。语义判定在 tool_d，此处
+ * 只做「能否交给 verifier」的静态门禁。
+ */
+bool agent_task_criteria_ok(const char *criteria);
+
+/**
+ * @brief 由计划节点汇总生成判据串（用户未给判据时的唯一派生路径）。
+ *
+ * 读取 plan.steps[].postcondition（对象/数组形态，字段同 success_criteria
+ * 条目）；不含显式 type 的文本型 postcondition 一律忽略——不得把自然语言
+ * 说明猜成 shell 命令，否则会制造假失败。
+ *
+ * @param plan think_d 计划对象
+ * @return 判据 JSON 数组串（AIRY_MALLOC，调用方释放）；无可派生项返回 NULL
+ */
+char *agent_task_criteria_from_plan(const cJSON *plan);
+
+/** @brief 组装 needs_criteria 结果（拒绝进入 task 的唯一出口，含补判据示例）。 */
+cJSON *agent_task_build_needs_criteria(const agent_run_task_meta_t *meta, const char *why);
 
 #ifdef __cplusplus
 }

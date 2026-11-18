@@ -10,10 +10,14 @@
  */
 
 #include "run/agent_task_contract.h"
+#include "run/agent_verify.h"
+
+#include "run/agent_run_engine.h"
 
 #include <cjson/cJSON.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int g_failures;
@@ -137,12 +141,181 @@ static void test_gate_decision(void)
     CHECK(agent_task_gate_allows(NULL, false), "unknown mode defaults to pass");
 }
 
+/* 判据静态门禁：只有「能交给 verifier 复核」的形态才算合法。 */
+static void test_criteria_gate(void)
+{
+    CHECK(!agent_task_criteria_ok(NULL), "NULL criteria must be rejected");
+    CHECK(!agent_task_criteria_ok(""), "empty criteria must be rejected");
+    CHECK(!agent_task_criteria_ok("[]"), "empty array must be rejected");
+    CHECK(!agent_task_criteria_ok("{\"criteria\":[]}"), "empty wrapped array must be rejected");
+    CHECK(!agent_task_criteria_ok("\"done\""), "bare string must be rejected");
+
+    /* 四类合法判据各一条。 */
+    CHECK(agent_task_criteria_ok("[{\"type\":\"file\",\"path\":\"out/a.txt\"}]"),
+          "file criteria must pass");
+    CHECK(agent_task_criteria_ok("[{\"type\":\"cmd\",\"cmd\":\"true\"}]"), "cmd criteria must pass");
+    CHECK(agent_task_criteria_ok("[{\"type\":\"service\",\"port\":2027}]"),
+          "service criteria must pass");
+    CHECK(agent_task_criteria_ok(
+              "[{\"type\":\"rpc\",\"daemon\":\"tool\",\"method\":\"list_tools\"}]"),
+          "rpc criteria must pass");
+    CHECK(agent_task_criteria_ok("{\"criteria\":[{\"type\":\"cmd\",\"cmd\":\"true\"}]}"),
+          "wrapped object must be accepted");
+
+    /* 必需字段缺失 / 类型未知 / 端口越界：一律 fail-closed。 */
+    CHECK(!agent_task_criteria_ok("[{\"type\":\"file\"}]"), "file without path must fail");
+    CHECK(!agent_task_criteria_ok("[{\"type\":\"cmd\"}]"), "cmd without cmd must fail");
+    CHECK(!agent_task_criteria_ok("[{\"type\":\"service\",\"port\":0}]"),
+          "service port 0 must fail");
+    CHECK(!agent_task_criteria_ok("[{\"type\":\"service\",\"port\":70000}]"),
+          "service port 70000 must fail");
+    CHECK(!agent_task_criteria_ok("[{\"type\":\"rpc\",\"daemon\":\"tool\"}]"),
+          "rpc without method must fail");
+    CHECK(!agent_task_criteria_ok("[{\"type\":\"shell\",\"cmd\":\"true\"}]"),
+          "unknown type must fail");
+    CHECK(!agent_task_criteria_ok("[{\"cmd\":\"true\"}]"), "missing type must fail");
+}
+
+static void test_criteria_count(void)
+{
+    /* 超过 verifier 上限（16）即非法：禁止把判据当脚本宿主使用。 */
+    cJSON *arr = cJSON_CreateArray();
+    for (int i = 0; i < AGENT_TASK_CRITERIA_MAX + 1; i++) {
+        cJSON *it = cJSON_CreateObject();
+        cJSON_AddStringToObject(it, "type", "cmd");
+        cJSON_AddStringToObject(it, "cmd", "true");
+        cJSON_AddItemToArray(arr, it);
+    }
+    char *s = cJSON_PrintUnformatted(arr);
+    cJSON_Delete(arr);
+    CHECK(s != NULL, "serialize 17 criteria");
+    if (s) {
+        CHECK(!agent_task_criteria_ok(s), "17 criteria must exceed the cap");
+        free(s);
+    }
+
+    /* 恰好 16 条仍合法，边界不提前收紧。 */
+    arr = cJSON_CreateArray();
+    for (int i = 0; i < AGENT_TASK_CRITERIA_MAX; i++) {
+        cJSON *it = cJSON_CreateObject();
+        cJSON_AddStringToObject(it, "type", "cmd");
+        cJSON_AddStringToObject(it, "cmd", "true");
+        cJSON_AddItemToArray(arr, it);
+    }
+    s = cJSON_PrintUnformatted(arr);
+    cJSON_Delete(arr);
+    CHECK(s != NULL, "serialize 16 criteria");
+    if (s) {
+        CHECK(agent_task_criteria_ok(s), "16 criteria must stay within the cap");
+        free(s);
+    }
+}
+
+static void test_criteria_from_plan(void)
+{
+    /* 计划派生只采纳显式对象判据；自然语言 postcondition 一律忽略，
+     * 否则会把说明文字猜成命令，制造假失败。 */
+    cJSON *plan = cJSON_CreateObject();
+    cJSON *steps = cJSON_AddArrayToObject(plan, "steps");
+    cJSON *s0 = cJSON_CreateObject();
+    cJSON *post0 = cJSON_AddObjectToObject(s0, "postcondition");
+    cJSON_AddStringToObject(post0, "type", "file");
+    cJSON_AddStringToObject(post0, "path", "out/result.txt");
+    cJSON_AddItemToArray(steps, s0);
+    cJSON *s1 = cJSON_CreateObject();
+    cJSON_AddStringToObject(s1, "postcondition", "确认服务已经启动");
+    cJSON_AddItemToArray(steps, s1);
+    cJSON *s2 = cJSON_CreateObject();
+    cJSON *post2 = cJSON_AddArrayToObject(s2, "postcondition");
+    cJSON *i0 = cJSON_CreateObject();
+    cJSON_AddStringToObject(i0, "type", "cmd");
+    cJSON_AddStringToObject(i0, "cmd", "test -f out/result.txt");
+    cJSON_AddItemToArray(post2, i0);
+    cJSON *i1 = cJSON_CreateObject();
+    cJSON_AddStringToObject(i1, "type", "file");
+    cJSON_AddStringToObject(i1, "path", "out/log.txt");
+    cJSON_AddItemToArray(post2, i1);
+    cJSON_AddItemToArray(steps, s2);
+
+    char *derived = agent_task_criteria_from_plan(plan);
+    CHECK(derived != NULL, "plan with typed postconditions must derive criteria");
+    if (derived) {
+        cJSON *arr = cJSON_Parse(derived);
+        CHECK(cJSON_IsArray(arr) && cJSON_GetArraySize(arr) == 3,
+              "derived criteria count must be 3");
+        CHECK(agent_task_criteria_ok(derived), "derived criteria must be verifier-ready");
+        cJSON_Delete(arr);
+        free(derived);
+    }
+    cJSON_Delete(plan);
+
+    /* 只有自然语言：派生不出任何判据，必须返回 NULL（上层记 unverified）。 */
+    cJSON *plain = cJSON_CreateObject();
+    cJSON *psteps = cJSON_AddArrayToObject(plain, "steps");
+    cJSON *p0 = cJSON_CreateObject();
+    cJSON_AddStringToObject(p0, "postcondition", "确认服务已经启动");
+    cJSON_AddItemToArray(psteps, p0);
+    CHECK(agent_task_criteria_from_plan(plain) == NULL,
+          "natural language postcondition must not be guessed into criteria");
+    cJSON_Delete(plain);
+
+    CHECK(agent_task_criteria_from_plan(NULL) == NULL, "NULL plan must derive nothing");
+}
+
+static void test_needs_criteria(void)
+{
+    agent_run_task_meta_t meta;
+    memset(&meta, 0, sizeof(meta));
+    snprintf(meta.task_id, sizeof(meta.task_id), "task-1-1");
+    snprintf(meta.mode, sizeof(meta.mode), "task");
+    snprintf(meta.mode_reason, sizeof(meta.mode_reason), "%s", AGENT_TASK_REASON_EXPLICIT_TASK);
+
+    cJSON *out = agent_task_build_needs_criteria(&meta, NULL);
+    CHECK(out != NULL, "build_needs_criteria");
+    if (out) {
+        cJSON *st = cJSON_GetObjectItem(out, "status");
+        cJSON *tid = cJSON_GetObjectItem(out, "task_id");
+        cJSON *ex = cJSON_GetObjectItem(out, "example");
+        cJSON *arr = ex ? cJSON_GetObjectItem(ex, "criteria") : NULL;
+        CHECK(cJSON_IsString(st) &&
+                  strcmp(st->valuestring, AGENT_TASK_STATUS_NEEDS_CRITERIA) == 0,
+              "needs_criteria status");
+        CHECK(cJSON_IsString(tid) && strcmp(tid->valuestring, "task-1-1") == 0,
+              "needs_criteria task_id");
+        CHECK(cJSON_IsArray(arr) && cJSON_GetArraySize(arr) >= 1,
+              "needs_criteria example.criteria must be a non-empty array");
+        cJSON_Delete(out);
+    }
+}
+
+/* 判据缺失/不可解析时不得猜测通过：归因为「无法取证」，且不产生结果对象。 */
+static void test_verify_unverified(void)
+{
+    cJSON *v = (cJSON *)1;
+    CHECK(agent_verify_apply(NULL, &v) == AGENT_RUN_RC_UNVERIFIED,
+          "NULL criteria must be unverified");
+    CHECK(v == NULL, "unverified must not fabricate verification payload");
+
+    v = (cJSON *)1;
+    CHECK(agent_verify_apply("[]", &v) == AGENT_RUN_RC_UNVERIFIED,
+          "empty criteria must be unverified");
+    CHECK(v == NULL, "unverified must leave verification NULL");
+
+    CHECK(agent_verify_apply(NULL, NULL) == AGENT_RUN_RC_UNVERIFIED,
+          "NULL out pointer must still be unverified");
+}
+
 int main(void)
 {
     test_mode_rules();
     test_task_id();
     test_gccp_gate();
     test_gate_decision();
+    test_criteria_gate();
+    test_criteria_count();
+    test_criteria_from_plan();
+    test_needs_criteria();
+    test_verify_unverified();
     if (g_failures) {
         printf("test_task_orchestrate: %d failure(s)\n", g_failures);
         return 1;

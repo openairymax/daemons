@@ -126,9 +126,14 @@ bool agent_run_is_cancelled(const agent_run_session_t *s)
 const char *run_state_name(int rc, int cancelled)
 {
     /* 任务级未收敛一律 Paused：产物已移交，客户端可继续/放弃；只有用户
-     * 取消或被判定失败才进 Failed，禁止再以 Executing 静默停留。 */
+     * 取消、判据未过（C-17 确定性失败）才进 Failed，禁止再以 Executing
+     * 静默停留。verifier 无法取证时记 unverified，不得冒充 completed。 */
     if (cancelled)
         return "failed";
+    if (rc == AGENT_RUN_RC_UNMET)
+        return "failed";
+    if (rc == AGENT_RUN_RC_UNVERIFIED)
+        return AIRY_RS_STATE_UNVERIFIED;
     if (rc == 0)
         return "completed";
     return "paused";
@@ -147,6 +152,10 @@ const char *run_rc_msg(int rc)
         return "agent.run paused: round budget exhausted, resume_token issued";
     case AGENT_RUN_RC_EMPTY:
         return "agent.run finished without output";
+    case AGENT_RUN_RC_UNMET:
+        return "agent.run failed: success criteria not met (see verification)";
+    case AGENT_RUN_RC_UNVERIFIED:
+        return "agent.run unverified: criteria check unavailable (verifier down)";
     default:
         return "agent.run failed: tool loop exhausted or LLM service error";
     }
