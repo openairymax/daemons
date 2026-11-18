@@ -56,6 +56,11 @@ set(TOOL_SERVICE_SOURCES
     src/builtin/builtin_fs_glob.c
     src/builtin/builtin_fs_grep.c
     src/builtin/builtin_net.c
+    # 0.1.21 归位：网络通信族自 commons 迁入，唯一消费者是 builtin_net
+    src/net/network_common.c
+    src/net/network_http.c
+    src/net/network_pool.c
+    src/net/network_dns.c
     src/builtin/builtin_git.c
     src/builtin/builtin_maths.c
     # 会话内自制工具：脚本落盘 + 注册表登记（tool_create meta 工具）
@@ -104,6 +109,7 @@ endif()
 # 内部头仅自用：src 区不对外传播（0.1.19 F4 收敛）
 target_include_directories(airy_tool_service PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/net
 )
 
 target_include_directories(airy_tool_service PUBLIC
@@ -121,7 +127,6 @@ target_include_directories(airy_tool_service PUBLIC
     ${COMMONS_INCLUDE_DIR}/utils/compat
     # Cupolas SafetyGuard 头文件路径
     ${CUPOLAS_SRC_DIR}/include
-    ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     # sandbox 公共 API（airy_sandbox.h）和 syscall 号（syscalls.h）
     ${CMAKE_CURRENT_SOURCE_DIR}/../../atoms/syscall/include
@@ -212,7 +217,6 @@ target_include_directories(tool_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/cache
     ${COMMONS_INCLUDE_DIR}/utils/compat
     ${CUPOLAS_SRC_DIR}/include
-    ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${CJSON_INCLUDE_DIRS}
 )

@@ -34,6 +34,11 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_fs_glob.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_fs_grep.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_net.c
+    # 0.1.21 归位：网络通信族随 builtin_net 迁入 tool_d
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/net/network_common.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/net/network_http.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/net/network_pool.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/net/network_dns.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_git.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_maths.c
     # 会话内自制工具（tool_create）：脚本落盘 + 运行期登记/替换
@@ -95,6 +100,8 @@ set(TOOL_TEST_SOURCES
     test_tool_audit.c
     # C-17: 完成判据复核（四类判据正负例 / 入口防御 / 只读白名单）
     test_verify.c
+    # 网络通信（连接/HTTP/连接池/DNS）：随实现迁入 tool_d
+    test_net.c
 )
 # os_sandbox 测试依赖 Landlock/seccomp/unshare/mount 等 Linux-only 能力，
 # macOS/BSD 上 os_sandbox.c 为空实现（OS_SANDBOX_MODE_OFF），该测试不适用。
@@ -113,8 +120,11 @@ endif()
 set(TOOL_COMMON_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/net
     ${COMMONS_DIR}
     ${COMMONS_DIR}/include
+    # 测试框架与 network 同源：框架仍是 commons 测试基建
+    ${COMMONS_DIR}/tests/utils
     ${COMMONS_DIR}/platform/include
     ${COMMONS_DIR}/utils/error
     ${COMMONS_DIR}/utils/logging

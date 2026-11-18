@@ -75,7 +75,6 @@ target_include_directories(airy_mem_service PUBLIC
     ${COMMONS_INCLUDE_DIR}/utils/sync
     ${COMMONS_INCLUDE_DIR}/utils/cache
     ${COMMONS_INCLUDE_DIR}/utils/compat
-    ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${COMMONS_INCLUDE_DIR}/utils/token
     ${COMMONS_INCLUDE_DIR}/utils/ds
@@ -161,7 +160,6 @@ target_include_directories(mem_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/sync
     ${COMMONS_INCLUDE_DIR}/utils/cache
     ${COMMONS_INCLUDE_DIR}/utils/compat
-    ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${COMMONS_INCLUDE_DIR}/utils/token
     ${COMMONS_INCLUDE_DIR}/utils/ds

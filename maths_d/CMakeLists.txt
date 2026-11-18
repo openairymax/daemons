@@ -44,7 +44,6 @@ target_include_directories(maths_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/memory
     ${COMMONS_INCLUDE_DIR}/utils/string
     ${COMMONS_INCLUDE_DIR}/utils/sync
-    ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${COMMONS_INCLUDE_DIR}/utils/compat
 )
