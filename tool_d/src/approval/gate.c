@@ -10,6 +10,7 @@
  */
 
 #include "core/approval_gate.h"
+#include "job/tool_audit.h"
 #include "tool_approval.h"
 #include "safety_guard_bridge.h"
 #include "tool_interactive_approval.h"
@@ -19,7 +20,9 @@
 #include "airy_memory.h"
 #include "error.h"
 
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 struct approval_gate {
     tool_approval_ctx_t *ctx;
@@ -165,26 +168,91 @@ static interactive_step_t ask_via_interactive(approval_gate_t *gate, const char 
     return INTERACTIVE_DENIED;
 }
 
+/* D-9 高危回退档：warn 只降级为告警（不得作为发版默认），require 为默认。 */
+static int risk_warn_mode(void)
+{
+    const char *mode = getenv("AIRY_TOOL_RISK_APPROVAL_MODE");
+    return mode && strcmp(mode, "warn") == 0;
+}
+
+static void approval_set(char *approval, size_t cap, const char *value)
+{
+    if (approval && cap)
+        snprintf(approval, cap, "%s", value);
+}
+
 approval_gate_verdict_t gate_ask(approval_gate_t *gate, const char *agent_id,
                                           const tool_metadata_t *meta,
                                           const char *params_json, char **out_reason)
 {
+    return gate_ask_ex(gate, agent_id, meta, params_json, 0, NULL, 0, out_reason);
+}
+
+approval_gate_verdict_t gate_ask_ex(approval_gate_t *gate, const char *agent_id,
+                                    const tool_metadata_t *meta, const char *params_json,
+                                    int allow_dangerous, char *approval, size_t cap,
+                                    char **out_reason)
+{
+    char risk_reason[64];
+    tool_audit_risk_t risk;
+
     if (out_reason) {
         *out_reason = NULL;
     }
+    approval_set(approval, cap, "none");
     if (!gate || !gate->ctx || !meta) {
         return APPROVAL_GATE_DENIED;
     }
 
+    risk = tool_audit_risk(meta->id, params_json, risk_reason, sizeof(risk_reason));
+
     tool_approval_detail_t detail;
     int rc = tool_approval_check_for_agent(gate->ctx, agent_id, meta, params_json, &detail);
-    if (rc == 0) {
+    int acl_ok = (rc == 0);
+
+    /* D-9：高危调用必须逐次审批；显式 allow_dangerous 或 warn 回退档除外。 */
+    if (risk == TOOL_AUDIT_RISK_HIGH && !allow_dangerous && !risk_warn_mode()) {
+        switch (ask_via_interactive(gate, agent_id, meta, params_json, out_reason)) {
+        case INTERACTIVE_ALLOWED:
+            approval_set(approval, cap, "interactive");
+            log_approved(meta, &detail);
+            return APPROVAL_GATE_ALLOWED;
+        case INTERACTIVE_DENIED:
+            return APPROVAL_GATE_DENIED;
+        case INTERACTIVE_CONTINUE:
+        default:
+            SVC_LOG_ERROR("High-risk tool '%s' denied (fail-closed): %s; pass allow_dangerous "
+                          "or set AIRY_TOOL_RISK_APPROVAL_MODE=warn",
+                          meta->id ? meta->id : "?", risk_reason[0] ? risk_reason : "policy");
+            if (out_reason) {
+                char msg[256];
+                snprintf(msg, sizeof(msg),
+                         "High-risk tool '%s' requires approval (%s); pass allow_dangerous",
+                         meta->id ? meta->id : "?",
+                         risk_reason[0] ? risk_reason : "policy");
+                *out_reason = AIRY_STRDUP(msg);
+            }
+            return APPROVAL_GATE_DENIED;
+        }
+    }
+    if (risk == TOOL_AUDIT_RISK_HIGH)
+        SVC_LOG_WARN("High-risk tool '%s' allowed without per-call approval (%s): %s",
+                     meta->id ? meta->id : "?",
+                     allow_dangerous ? "allow_dangerous" : "mode=warn",
+                     risk_reason[0] ? risk_reason : "policy");
+
+    if (acl_ok) {
+        approval_set(approval, cap,
+                     risk == TOOL_AUDIT_RISK_HIGH
+                         ? (allow_dangerous ? "allow_dangerous" : "warn")
+                         : "acl");
         log_approved(meta, &detail);
         return APPROVAL_GATE_ALLOWED;
     }
 
     switch (ask_via_interactive(gate, agent_id, meta, params_json, out_reason)) {
     case INTERACTIVE_ALLOWED:
+        approval_set(approval, cap, "interactive");
         log_approved(meta, &detail);
         return APPROVAL_GATE_ALLOWED;
     case INTERACTIVE_DENIED:

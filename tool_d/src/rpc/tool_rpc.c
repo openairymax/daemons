@@ -218,6 +218,9 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
      * subject; when absent, fall back to the "tool_d" default (existing
      * behavior unchanged). */
     const char *agent_id = get_string_field(params, "agent_id", NULL);
+    /* D-9：高危工具（shell_run/tool_create/包管理类命令）需逐次审批；
+     * 调用方可显式 allow_dangerous 声明接受风险（仍写审计留痕）。 */
+    int allow_dangerous = get_bool_field(params, "allow_dangerous", false);
 
     JSONRPC_REQUIRE(tid && jparams, client_fd,
                     "Invalid execute params: tool_id and params required", id);
@@ -233,7 +236,8 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
     tool_execute_request_t req = {.tool_id = tid,
                                   .params_json = params_json,
                                   .stream = 0,
-                                  .agent_id = agent_id};
+                                  .agent_id = agent_id,
+                                  .allow_dangerous = allow_dangerous};
 
     tool_result_t *res = NULL;
     int ret = tool_service_execute(g_service, &req, &res);
@@ -270,6 +274,10 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
         cJSON_AddNumberToObject(result, "exit_code", res->exit_code);
         cJSON_AddNumberToObject(result, "err_code", (double)res->err_code);
         cJSON_AddNumberToObject(result, "error_code", (double)ecode);
+        if (res->approval[0])
+            cJSON_AddStringToObject(result, "approval", res->approval);
+        if (res->sandbox[0])
+            cJSON_AddStringToObject(result, "sandbox", res->sandbox);
         if (!ok) {
             put_tool_err(result, ecode, res->error ? res->error : airy_err_str(ecode), tid);
             SVC_LOG_ERROR("Tool execution failed: %s (err_code=%d)", tid, (int)res->err_code);
@@ -323,6 +331,7 @@ static void handle_submit(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *jparams = jsonrpc_get_object_param(params, "params");
     const char *agent_id = get_string_field(params, "agent_id", NULL);
     int timeout = get_int_field(params, "timeout_sec", 0);
+    int allow_dangerous = get_bool_field(params, "allow_dangerous", false);
     char job_id[TOOL_JOB_ID_MAX];
     char *params_json;
     int ret;
@@ -342,7 +351,8 @@ static void handle_submit(cJSON *params, int id, airy_sock_t client_fd)
                                   .params_json = params_json,
                                   .stream = 0,
                                   .agent_id = agent_id,
-                                  .timeout_sec = timeout};
+                                  .timeout_sec = timeout,
+                                  .allow_dangerous = allow_dangerous};
     ret = tooljob_submit(g_jobs, &req, timeout, job_id, sizeof(job_id));
     AIRY_FREE((void *)params_json);
     if (ret != 0) {
