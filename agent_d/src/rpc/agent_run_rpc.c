@@ -457,6 +457,8 @@ static void handle_cancel(cJSON *params, int id, airy_sock_t client_fd)
 
 DAEMON_RPC_SHELL(run, handle_run)
 DAEMON_RPC_SHELL(run_cancel, handle_cancel)
-/* task.* 对外方法由 gateway 映射为无点方法名（方法分派按首个 '.' 截断）。 */
+/* task.* 对外方法由 gateway 映射为无点方法名（方法分派按首个 '.' 截断）；
+ * task.cancel 在 gateway 侧归入 agent.cancel 的同一中止实现（run_cancel），
+ * 不另设守护进程入口。 */
 DAEMON_RPC_SHELL(task_submit, handle_task_submit)
 DAEMON_RPC_SHELL(task_submit_stream, handle_task_submit_stream)
