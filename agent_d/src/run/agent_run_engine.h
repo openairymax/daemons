@@ -108,7 +108,7 @@ typedef struct agent_run_session_s {
 bool agent_run_is_cancelled(const agent_run_session_t *s);
 
 /** @brief 读取取消追溯信息（未取消时 by 为空、ts 为 0）。 */
-void agent_run_cancel_meta(const agent_run_session_t *s, const char **by, uint64_t *ts_ms);
+void run_cancel_meta(const agent_run_session_t *s, const char **by, uint64_t *ts_ms);
 
 /** @brief 按 session_id 请求取消（agent.cancel 入口，返回 0 命中）。
  *  @param by 发起者标识（客户端/调用方自报，可 NULL → "client"）。 */

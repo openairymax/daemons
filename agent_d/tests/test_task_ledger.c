@@ -193,7 +193,7 @@ static void replay_check(const char *home)
     }
 
     /* 重启后续写：seq/gseq 必须从磁盘水位线继续，不能从 1 重新计数。 */
-    CHECK(agent_task_ledger_progress("task-ledger-1", "plan-ledger-1", "resumed", NULL) == 0,
+    CHECK(ledger_progress("task-ledger-1", "plan-ledger-1", "resumed", NULL) == 0,
           "post-restart progress write failed");
     char dir[400];
     snprintf(dir, sizeof(dir), "%s/progress", base);
@@ -239,11 +239,11 @@ int main(int argc, char **argv)
     snprintf(meta.plan_id, sizeof(meta.plan_id), "plan-ledger-1");
 
     /* 1. 主键选择：task_id 优先，chat 回退 session，双空返回 NULL。 */
-    CHECK(agent_task_ledger_key(&meta, "sess-x") == meta.task_id, "key must prefer task_id");
-    CHECK(agent_task_ledger_key(NULL, "sess-x") != NULL &&
-              strcmp(agent_task_ledger_key(NULL, "sess-x"), "sess-x") == 0,
+    CHECK(ledger_key(&meta, "sess-x") == meta.task_id, "key must prefer task_id");
+    CHECK(ledger_key(NULL, "sess-x") != NULL &&
+              strcmp(ledger_key(NULL, "sess-x"), "sess-x") == 0,
           "key must fall back to session_id");
-    CHECK(agent_task_ledger_key(NULL, NULL) == NULL, "empty key must be NULL");
+    CHECK(ledger_key(NULL, NULL) == NULL, "empty key must be NULL");
 
     char base[320];
     snprintf(base, sizeof(base), "%s/data/agentrt/hall/default/task-ledger-1", home);
@@ -251,7 +251,7 @@ int main(int argc, char **argv)
     char *body;
 
     /* 2. blueprint：目标与成功判据在提交时冻结。 */
-    CHECK(agent_task_ledger_blueprint(meta.task_id, meta.plan_id, "build the hall",
+    CHECK(ledger_plan(meta.task_id, meta.plan_id, "build the hall",
                                       "board shows terminal") == 0,
           "blueprint write failed");
     snprintf(dir, sizeof(dir), "%s/blueprint", base);
@@ -262,11 +262,11 @@ int main(int argc, char **argv)
     free(body);
 
     /* 3. progress：过程态落 progress，终态落 result。 */
-    CHECK(agent_task_ledger_progress(meta.task_id, meta.plan_id, "submitted", NULL) == 0,
+    CHECK(ledger_progress(meta.task_id, meta.plan_id, "submitted", NULL) == 0,
           "progress(submitted) failed");
-    CHECK(agent_task_ledger_progress(meta.task_id, meta.plan_id, "planned", NULL) == 0,
+    CHECK(ledger_progress(meta.task_id, meta.plan_id, "planned", NULL) == 0,
           "progress(planned) failed");
-    CHECK(agent_task_ledger_progress(meta.task_id, meta.plan_id, "executing", NULL) == 0,
+    CHECK(ledger_progress(meta.task_id, meta.plan_id, "executing", NULL) == 0,
           "progress(executing) failed");
     snprintf(dir, sizeof(dir), "%s/progress", base);
     CHECK(count_events(dir) == 3, "progress count=%d want=3", count_events(dir));
@@ -276,7 +276,7 @@ int main(int argc, char **argv)
     free(body);
 
     /* 4. issue：失败/取消必须留下 rc + reason。 */
-    CHECK(agent_task_ledger_issue(meta.task_id, -5, "tool loop exhausted") == 0,
+    CHECK(ledger_issue(meta.task_id, -5, "tool loop exhausted") == 0,
           "issue write failed");
     snprintf(dir, sizeof(dir), "%s/issue", base);
     body = read_event(dir);
@@ -286,7 +286,7 @@ int main(int argc, char **argv)
     free(body);
 
     /* 5. result：终态事件在原目录同源落盘。 */
-    CHECK(agent_task_ledger_result(meta.task_id, meta.plan_id, "completed") == 0,
+    CHECK(ledger_result(meta.task_id, meta.plan_id, "completed") == 0,
           "result write failed");
     snprintf(dir, sizeof(dir), "%s/result", base);
     body = read_event(dir);
@@ -296,7 +296,7 @@ int main(int argc, char **argv)
 
     /* 5b. 失败/取消同属终态：progress 必须是 1，不能回退到 0——
      *     看板按最新事件覆盖，回退会把已失败任务显示成未开始。 */
-    CHECK(agent_task_ledger_result("task-ledger-fail", "plan-ledger-1", "failed") == 0,
+    CHECK(ledger_result("task-ledger-fail", "plan-ledger-1", "failed") == 0,
           "failed result write failed");
     snprintf(dir, sizeof(dir), "%s/data/agentrt/hall/default/task-ledger-fail/result", home);
     body = read_event(dir);
@@ -306,7 +306,7 @@ int main(int argc, char **argv)
 
     /* 5c. 取消终态（D-13 / E-20）：state=cancelled 且必须带发起者与
      *     时间，回放才能区分用户取消与关机批量取消。 */
-    CHECK(agent_task_ledger_cancel("task-ledger-cxl", "plan-ledger-1", "cli", 1737000000123ULL) ==
+    CHECK(ledger_cancel("task-ledger-cxl", "plan-ledger-1", "cli", 1737000000123ULL) ==
               0,
           "cancel result write failed");
     snprintf(dir, sizeof(dir), "%s/data/agentrt/hall/default/task-ledger-cxl/result", home);
@@ -318,8 +318,8 @@ int main(int argc, char **argv)
     free(body);
 
     /* 6. 空主键不产生无主目录。 */
-    CHECK(agent_task_ledger_result(NULL, NULL, "failed") != 0, "empty key must be rejected");
-    CHECK(agent_task_ledger_progress("", NULL, "executing", NULL) != 0,
+    CHECK(ledger_result(NULL, NULL, "failed") != 0, "empty key must be rejected");
+    CHECK(ledger_progress("", NULL, "executing", NULL) != 0,
           "empty key must be rejected");
 
     /* 7. 重启回放：exec 自身为新进程（内存态清零），只凭磁盘账本还原
