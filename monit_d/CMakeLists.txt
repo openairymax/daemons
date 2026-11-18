@@ -75,7 +75,6 @@ target_include_directories(airy_monit_service PUBLIC
     ${COMMONS_INCLUDE_DIR}/utils/sync
     ${COMMONS_INCLUDE_DIR}/utils/cache
     ${COMMONS_INCLUDE_DIR}/utils/compat
-    ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
 )
 
@@ -144,7 +143,6 @@ target_include_directories(monit_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/sync
     ${COMMONS_INCLUDE_DIR}/utils/cache
     ${COMMONS_INCLUDE_DIR}/utils/compat
-    ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${CJSON_INCLUDE_DIRS}
 )

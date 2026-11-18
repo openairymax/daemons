@@ -191,7 +191,6 @@ target_include_directories(svc_common PUBLIC
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/types>
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/cache>
     # 新增网络和IPC模块
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/network>
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/ipc>
     # P0.17 阶段 1: daemon_defaults.h 重导出 airy_defaults.h（位于 commons/include）
     $<BUILD_INTERFACE:${COMMONS_DIR}/include>

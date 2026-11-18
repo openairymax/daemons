@@ -180,7 +180,6 @@ target_include_directories(airy_gateway_service PUBLIC
     ${COMMONS_INCLUDE_DIR}/utils/cache
     ${COMMONS_INCLUDE_DIR}/utils/compat
     # 网络和IPC模块
-    ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     # 协议栈（契约头 + MCP client transport）
     ${PROTOCOLS_INCLUDE_DIR}
@@ -451,7 +450,6 @@ target_include_directories(gateway_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/sync
     ${COMMONS_INCLUDE_DIR}/utils/cache
     ${COMMONS_INCLUDE_DIR}/utils/compat
-    ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${PROTOCOLS_INCLUDE_DIR}
     ${PROTOCOLS_COMMON_INCLUDE_DIR}
