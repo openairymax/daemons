@@ -60,13 +60,13 @@ static void test_scan(void)
     c = cfg_make(1, AIRY_ACCEL_INTEL, "http://127.0.0.1:8080/v1");
     prov_be_scan(&c, &be);
     CHECK(be.ready == 1);
-    CHECK(be.kind == PROVIDER_BACKEND_KIND_OPENAI);
+    CHECK(be.kind == PROVIDER_BACKEND_KIND_STDAPI);
 
     /* 声明具体加速器但缺地址：未配置，原因串必须非空。 */
     c = cfg_make(1, AIRY_ACCEL_INTEL, NULL);
     prov_be_scan(&c, &be);
     CHECK(be.ready == 0);
-    CHECK(be.kind == PROVIDER_BACKEND_KIND_OPENAI);
+    CHECK(be.kind == PROVIDER_BACKEND_KIND_STDAPI);
     CHECK(be.reason[0] != '\0');
 
     /* 空串与 NULL 同义。 */
