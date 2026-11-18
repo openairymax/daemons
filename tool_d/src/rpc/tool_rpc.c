@@ -37,6 +37,7 @@ static void handle_approve(cJSON *params, int id, airy_sock_t fd);
 static void handle_submit(cJSON *params, int id, airy_sock_t fd);
 static void handle_poll(cJSON *params, int id, airy_sock_t fd);
 static void handle_cancel(cJSON *params, int id, airy_sock_t fd);
+static void handle_jobs(cJSON *params, int id, airy_sock_t fd);
 
 /* g_service 未就绪是全部 tool.* 方法共有的失败前置，收敛为单一出口。 */
 #define TOOLRPC_REQUIRE_SERVICE(fd, id)                                        \
@@ -74,6 +75,11 @@ DAEMON_RPC_SHELL(approve, handle_approve)
 DAEMON_RPC_SHELL(submit, handle_submit)
 DAEMON_RPC_SHELL(poll, handle_poll)
 DAEMON_RPC_SHELL(cancel, handle_cancel)
+
+/* D-9：作业历史查询。tool.jobs = 列表（最新在前），tool.job = 单条
+ * （与 poll 同形，按 job_id 取快照）。 */
+DAEMON_RPC_SHELL(jobs, handle_jobs)
+DAEMON_RPC_SHELL(job, handle_poll)
 
 static void handle_register(cJSON *params, int id, airy_sock_t client_fd)
 {
@@ -439,6 +445,37 @@ static void handle_cancel(cJSON *params, int id, airy_sock_t client_fd)
     }
     cJSON_AddStringToObject(result, "job_id", job_id);
     cJSON_AddStringToObject(result, "state", "cancelled");
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+/* D-9：作业历史列表。limit 缺省 20，越界夹取到存储容量。 */
+static void handle_jobs(cJSON *params, int id, airy_sock_t client_fd)
+{
+    int limit = params ? get_int_field(params, "limit", 20) : 20;
+    cJSON *arr;
+    cJSON *result;
+
+    TOOLRPC_REQUIRE_JOBS(client_fd, id);
+
+    if (limit <= 0)
+        limit = 20;
+    if (limit > TOOL_JOB_SLOTS)
+        limit = TOOL_JOB_SLOTS;
+
+    arr = tooljob_list(g_jobs, limit);
+    if (!arr) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "List jobs failed", id);
+        return;
+    }
+
+    result = cJSON_CreateObject();
+    if (!result) {
+        cJSON_Delete(arr);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
+    cJSON_AddNumberToObject(result, "count", cJSON_GetArraySize(arr));
+    cJSON_AddItemToObject(result, "jobs", arr);
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
