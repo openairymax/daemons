@@ -50,6 +50,7 @@ typedef struct pool_job {
     int done;
     int detached;
     int started; /* worker 已出队取走（等待方据以报告 queued/running） */
+    int allow_dangerous; /* D-9：高危放行标记随 job 深拷贝 */
     uint64_t enqueue_ms; /* 入队时刻（排队/等座可见化的时长基准） */
 } pool_job_t;
 
@@ -76,7 +77,7 @@ static char *dup_str(const char *s)
 }
 
 static pool_job_t *job_new(const tool_metadata_t *meta, const char *params_json,
-                           const char *agent_id)
+                           const char *agent_id, int allow_dangerous)
 {
     pool_job_t *job = (pool_job_t *)AIRY_CALLOC(1, sizeof(pool_job_t));
     if (!job)
@@ -87,6 +88,7 @@ static pool_job_t *job_new(const tool_metadata_t *meta, const char *params_json,
     }
     job->params_json = dup_str(params_json);
     job->agent_id = dup_str(agent_id);
+    job->allow_dangerous = allow_dangerous;
     return job;
 }
 
@@ -168,7 +170,8 @@ static void *pool_worker(void *arg)
                          qleft);
 
         tool_result_t *res = NULL;
-        int ret = tool_executor_run(p->exec, &job->meta, job->params_json, job->agent_id, &res);
+        int ret = tool_executor_run_ex(p->exec, &job->meta, job->params_json, job->agent_id,
+                                       job->allow_dangerous, &res);
 
         airy_mtx_lock(&p->lock);
         job->ret = ret;
@@ -289,12 +292,19 @@ void executor_pool_free(executor_pool_t *p)
 int executor_pool_run(executor_pool_t *p, const tool_metadata_t *meta, const char *params_json,
                       const char *agent_id, tool_result_t **out_result)
 {
+    return executor_pool_run_ex(p, meta, params_json, agent_id, 0, out_result);
+}
+
+int executor_pool_run_ex(executor_pool_t *p, const tool_metadata_t *meta,
+                         const char *params_json, const char *agent_id, int allow_dangerous,
+                         tool_result_t **out_result)
+{
     if (!p || !meta || !out_result)
         return AIRY_ERR_INVALID_PARAM;
     *out_result = NULL;
 
     uint64_t budget = wait_budget_ms(p, meta);
-    pool_job_t *job = job_new(meta, params_json, agent_id);
+    pool_job_t *job = job_new(meta, params_json, agent_id, allow_dangerous);
     if (!job)
         return AIRY_ERR_OUT_OF_MEMORY;
 

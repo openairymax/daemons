@@ -69,6 +69,7 @@ typedef struct {
     tool_service_t *svc;
     const char *tool_id;
     const char *params_json;
+    int allow_dangerous;
     tool_result_t *res;
     int ret;
     long long start_ms;
@@ -83,6 +84,7 @@ static void *slow_thread_fn(void *argp)
     req.tool_id = arg->tool_id;
     req.params_json = arg->params_json;
     req.agent_id = "tool_d";
+    req.allow_dangerous = arg->allow_dangerous;
 
     arg->start_ms = now_ms();
     arg->res = NULL;
@@ -126,6 +128,8 @@ int main(void)
     slow.svc = svc;
     slow.tool_id = "shell_run";
     slow.params_json = "{\"command\":\"sleep 2\"}";
+    /* D-9：shell_run 为高危工具，用例显式接受风险。 */
+    slow.allow_dangerous = 1;
 
     pthread_t th;
     CHECK(pthread_create(&th, NULL, slow_thread_fn, &slow) == 0);

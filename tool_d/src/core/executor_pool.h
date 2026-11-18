@@ -80,6 +80,11 @@ int executor_pool_run(executor_pool_t *pool, const tool_metadata_t *meta,
                       const char *params_json, const char *agent_id,
                       tool_result_t **out_result);
 
+/* D-9：透传 allow_dangerous 到审批门；旧签名等价于 allow_dangerous=0。 */
+int executor_pool_run_ex(executor_pool_t *pool, const tool_metadata_t *meta,
+                         const char *params_json, const char *agent_id, int allow_dangerous,
+                         tool_result_t **out_result);
+
 #ifdef __cplusplus
 }
 #endif

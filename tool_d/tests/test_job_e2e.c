@@ -77,6 +77,8 @@ static int submit(tooljob_t *jobs, const char *cmd, int timeout_sec, char *id, s
     req.tool_id = "shell_run";
     req.params_json = params;
     req.agent_id = "tool_d";
+    /* D-9：shell_run 为高危工具，端到端用例显式接受风险（审计仍留痕）。 */
+    req.allow_dangerous = 1;
     return tooljob_submit(jobs, &req, timeout_sec, id, cap);
 }
 

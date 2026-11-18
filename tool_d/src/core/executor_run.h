@@ -29,6 +29,13 @@ typedef struct tool_executor tool_executor_t;
 int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const char *params_json,
                       const char *agent_id, tool_result_t **out_result);
 
+/* D-9 审计通道：allow_dangerous 透传到审批门，高危工具未审批时拒绝；
+ * 结果携带 approval/sandbox 供作业记录留痕。旧签名等价于
+ * allow_dangerous=0（默认强制审批语义）。 */
+int tool_executor_run_ex(tool_executor_t *exec, const tool_metadata_t *meta,
+                         const char *params_json, const char *agent_id, int allow_dangerous,
+                         tool_result_t **out_result);
+
 typedef void (*tool_execute_callback_t)(tool_result_t *result, void *user_data);
 int tool_executor_run_async(tool_executor_t *exec, const tool_metadata_t *meta,
                             const char *params_json, const char *agent_id,

@@ -18,6 +18,7 @@
 #include "tool_service_types.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -41,6 +42,15 @@ void gate_destroy(approval_gate_t *gate);
 approval_gate_verdict_t gate_ask(approval_gate_t *gate, const char *agent_id,
                                  const tool_metadata_t *meta,
                                  const char *params_json, char **out_reason);
+
+/* D-9 审计通道：在 gate_ask 基础上附带 allow_dangerous 与审批来源输出。
+ * 高危工具（shell_run/tool_create/包管理类命令）默认逐次审批，显式
+ * allow_dangerous 或回退档 AIRY_TOOL_RISK_APPROVAL_MODE=warn 才放行；
+ * approval 写入 none/acl/interactive/allow_dangerous/warn 供作业记录留痕。 */
+approval_gate_verdict_t gate_ask_ex(approval_gate_t *gate, const char *agent_id,
+                                    const tool_metadata_t *meta, const char *params_json,
+                                    int allow_dangerous, char *approval, size_t cap,
+                                    char **out_reason);
 
 /* 交互审批查询与透传（池预算与 RPC tool.approve 路径） */
 uint64_t gate_int_budget_ms(const approval_gate_t *gate);
