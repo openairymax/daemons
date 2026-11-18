@@ -10,6 +10,7 @@ set(AGENT_D_SOURCES
     src/svc.c
     src/rpc/agent_d_rpc.c
     src/rpc/agent_run_rpc.c
+    src/rpc/agent_turn_rpc.c
     src/monitor/agent_d_monitor.c
     src/run/agent_run_alt.c
     src/run/agent_run_engine.c
@@ -19,4 +20,5 @@ set(AGENT_D_SOURCES
     src/run/agent_run_stream.c
     src/run/agent_task_ledger.c
     src/run/agent_task_orchestrate.c
+    src/run/agent_turn_ckpt.c
 )

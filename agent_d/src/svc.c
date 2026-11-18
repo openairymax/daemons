@@ -15,6 +15,8 @@
 #include "svc_agent_d.h"
 
 #include "agent_d_internal.h"
+#include "run/agent_run_internal.h"
+#include "run/agent_turn_ckpt.h"
 #include "airy_budget.h"
 #include "daemon_cfg_file.h"
 #include "platform.h"
@@ -71,6 +73,9 @@ int svc_prepare(const char *config_path)
 int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 {
     (void)bsd;
+    /* D-12：上次进程遗留的 running 回合一律迁为 paused，客户端可凭
+     * agent.turns 取回令牌续跑；必须在开始受理 RPC 前完成。 */
+    agent_ckpt_boot();
 #if AIRY_PLATFORM_POSIX
     idle_reaper_start();
     perf_monitor_start(driver);
@@ -82,6 +87,16 @@ int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 
 void svc_teardown(void)
 {
+    /* D-12：回合级排水。先置排水标记并把在途回合迁为 paused（此后终态
+     * 不再删除检查点），再给 2s 自然收尾窗口；未收尾的统一取消，最后
+     * 一个工具边界的令牌留待重启后客户端续跑。 */
+    int npend = agent_ckpt_drain();
+    for (int i = 0; i < 20 && agent_run_active_count() > 0; i++)
+        airy_sleep_ms(100);
+    int nruns = agent_run_cancel_all();
+    if (npend > 0 || nruns > 0)
+        SVC_LOG_WARN("Shutdown: %d turn(s) kept paused, %d run(s) canceled", npend, nruns);
+
     /* 优雅排水：事件循环停止后在途 invoke worker 仍阻塞读子进程（至
      * invoke 超时）；线程池 join 会等满该超时（SIGTERM 挂死），且
      * runner 子进程向已关闭管道写响应。按 agent.cancel 同一请求级

@@ -20,14 +20,15 @@
       "spawn", "terminate", "invoke", "cancel", "list", "count",
       "run", "run_cancel", "run_stream",
       "task_submit", "task_submit_stream", "health_check",
-      "get_stats", "vocab"
+      "get_stats", "vocab", "turns"
     ]
   },
   "deps": {"required": [], "optional": []},
   "modules": [
     {"name": "rpc", "sources": [
       "rpc/agent_d_rpc.c",
-      "rpc/agent_run_rpc.c"
+      "rpc/agent_run_rpc.c",
+      "rpc/agent_turn_rpc.c"
     ]},
     {"name": "monitor", "sources": [
       "monitor/agent_d_monitor.c"
@@ -40,7 +41,8 @@
       "run/agent_run_loop.c",
       "run/agent_run_stream.c",
       "run/agent_task_ledger.c",
-      "run/agent_task_orchestrate.c"
+      "run/agent_task_orchestrate.c",
+      "run/agent_turn_ckpt.c"
     ]}
   ]
 }
