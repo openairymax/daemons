@@ -177,6 +177,14 @@ static void t_epoch_parse(void)
 
 static void t_fallback_acl(void)
 {
+    /* 配置根隔离：真实用户的 $AIRY_HOME/config/cupolas/permission_rules.yaml
+     * 会给 external 预置 shell_run=allow，令下面「未登记即拒绝」的断言随
+     * 宿主机环境漂移。路径系统首次解析后缓存，故必须在 dome_init 之前把
+     * AIRY_HOME 指到空临时根，让 ACL 从空表起步（fail-closed 基线）。 */
+    char home[] = "/tmp/airy-pep-test-XXXXXX";
+    assert(mkdtemp(home) != NULL);
+    assert(setenv("AIRY_HOME", home, 1) == 0);
+
     /* PDP 不可达（无 socket 路径）→ 降级本地 ACL */
     assert(daemon_dome_init_pep("pep_test") == AIRY_OK);
     daemon_security_add_acl_rule(GW_EXTERNAL_AGENT_ID, "fs_read", true);
