@@ -184,8 +184,14 @@ int daemon_boot(int argc, char **argv, const daemon_boot_t *boot)
     else
         SVC_LOG_WARN("corekern init failed (%d), degraded (badge=0)", core_ret);
 
-    if (boot->sec_init)
-        boot->sec_init(boot->daemon);
+    /* 安全引导失败必须拒启：带着半初始化的安全层继续监听，会把
+     * 「无凭据/无策略」的故障推迟到首个特权请求才暴露。 */
+    if (boot->sec_init && boot->sec_init(boot->daemon) != AIRY_OK) {
+        SVC_LOG_ERROR("%s: security dome init failed — refusing to start (fail-closed)",
+                      boot->daemon);
+        airy_sock_cleanup();
+        return EXIT_FAILURE;
+    }
     for (size_t i = 0; i < boot->ops_count; i++)
         boot->ops[i].init(boot->daemon);
 

@@ -41,8 +41,9 @@ void gw_acl_register_defaults(void);
  */
 
 /** @brief 平台启动：corekern 首启链接 + PEP/IPC/heapstore 平台服务发布；
- *        corekern 失败降级为平台回退（非致命）。须在服务装配之前调用。 */
-void gw_plat_boot(void);
+ *        corekern 失败降级为平台回退（非致命），安全穹顶失败返回 -1。
+ *        须在服务装配之前调用，非 0 应终止进程。 */
+int gw_plat_boot(void);
 
 /** @brief L2 <ns>.shutdown 停机回调：原子清 @p user_data 指向的存活旗标
  *        （主循环在 1s poll 内退出，与信号路径同语义）。 */
