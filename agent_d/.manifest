@@ -34,6 +34,7 @@
       "monitor/agent_d_monitor.c"
     ]},
     {"name": "run", "sources": [
+      "run/agent_review.c",
       "run/agent_run_alt.c",
       "run/agent_run_engine.c",
       "run/agent_run_exec.c",

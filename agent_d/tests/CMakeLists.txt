@@ -20,6 +20,7 @@ set(AGENT_TEST_SOURCES
     test_task_orchestrate.c
     test_task_ledger.c
     test_turn_ckpt.c
+    test_agent_review.c
 )
 
 # 引擎闭环符号：white-box include 的测试已自带被包含单元，其余单元在此同编。
@@ -36,12 +37,17 @@ set(AGENT_RUN_CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_turn_ckpt.c
     # C-17: exec 收尾依赖判据派生与复核入口
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_verify.c
+    # R16: exec 收尾的语义复核挂载点
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_review.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_task_orchestrate.c
 )
 
 set(AGENT_COMMON_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/run
+    # R16: 复核管线契约（execution_review.h）
+    ${ATOMIC_DIR}/coreloopthree/include
     ${COMMONS_DIR}
     ${COMMONS_DIR}/include
     ${COMMONS_DIR}/platform/include
@@ -105,11 +111,20 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
         )
     endif()
 
+    # R16 语义复核挂载点直测：只同编挂载点，不起引擎闭环。
+    if(TEST_NAME STREQUAL "test_agent_review")
+        target_sources(test_agent_${TEST_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_review.c
+        )
+    endif()
+
     target_include_directories(test_agent_${TEST_NAME} PRIVATE ${AGENT_COMMON_INCLUDES})
 
-    # 链接 airy_agent_service 静态库（已含 service.c）
+    # 链接 airy_agent_service 静态库（已含 service.c）；R16 复核管线在
+    # airy_coreloopthree。
     target_link_libraries(test_agent_${TEST_NAME} PRIVATE
         airy_agent_service
+        airy_coreloopthree
         svc_common
         airy_common
         Threads::Threads
