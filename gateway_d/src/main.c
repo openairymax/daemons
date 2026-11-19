@@ -69,7 +69,10 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    gw_plat_boot();
+    if (gw_plat_boot() != 0) {
+        airy_sock_cleanup();
+        return EXIT_FAILURE;
+    }
 
     SVC_LOG_INFO("Gateway service starting...");
 

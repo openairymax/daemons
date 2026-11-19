@@ -43,7 +43,10 @@ int main(void)
         }
     }
 
-    daemon_dome_init_pep("notify_d");
+    if (daemon_dome_init_pep("notify_d") != AIRY_OK) {
+        SVC_LOG_ERROR("notify_d: security dome init failed — refusing to start");
+        return EXIT_FAILURE;
+    }
     /* IPC/RPC/SD ops table for atoms call sites; init failure is
      * non-fatal: atoms callers degrade gracefully. */
     daemon_ipc_ops_init("notify_d");

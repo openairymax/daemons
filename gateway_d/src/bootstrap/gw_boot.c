@@ -115,7 +115,7 @@ void gw_rpc_stop(void *user_data)
         atomic_store_explicit(running, 0, memory_order_seq_cst);
 }
 
-void gw_plat_boot(void)
+int gw_plat_boot(void)
 {
     /* WS-8 stage 4 (8.4.1): corekern first boot link; idempotent,
      * failure degrades to platform fallbacks (non-fatal, badge=0). */
@@ -126,10 +126,16 @@ void gw_plat_boot(void)
         SVC_LOG_WARN("corekern init failed (%d) - running degraded (badge=0)", core_ret);
     }
 
-    daemon_dome_init_pep("gateway_d");
+    /* 安全穹顶不可用即拒启：网关是所有 RPC 的入口，绕过策略面运行
+     * 等于把整条链路暴露在无鉴权状态。 */
+    if (daemon_dome_init_pep("gateway_d") != AIRY_OK) {
+        SVC_LOG_ERROR("gateway_d: security dome init failed — refusing to start");
+        return -1;
+    }
     /* IPC/RPC/SD ops 表进程级幂等发布，init 失败非致命。 */
     daemon_ipc_ops_init("gateway_d");
     daemon_heapstore_init("gateway_d");
+    return 0;
 }
 
 #ifdef AIRY_HAS_PROTOCOLS
