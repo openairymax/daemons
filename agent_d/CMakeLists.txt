@@ -144,6 +144,8 @@ target_include_directories(agent_d PRIVATE
 target_link_libraries(agent_d PRIVATE
     airy_agent_service
     airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
+    # R16: 执行中复核管线（execution_review 门禁 → t2 → t1-f）
+    airy_coreloopthree
     airy_common
     Threads::Threads
     airy_platform_libs

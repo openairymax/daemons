@@ -15,6 +15,7 @@
  * run_free() 释放；result 挂载的节点在挂载后立即移交（源置空）。
  */
 
+#include "agent_review.h"
 #include "agent_run_engine.h"
 #include "agent_run_internal.h"
 #include "agent_task_ledger.h"
@@ -786,6 +787,48 @@ static void run_verify(run_ctx_t *c)
         c->rc = vrc;
 }
 
+/* R16 / C-4：判据复核通过后再做一次语义复核（t2 语义审查 + t1-f 终裁）。
+ * 语义判断在 think_d（think.review），管线与降级链在 coreloopthree；think_d
+ * 不可达或无模型时降级 SKIP，既有结果不变。终裁拒绝按未达判据收尾。 */
+static void run_review(run_ctx_t *c)
+{
+    cJSON *art = cJSON_CreateObject();
+    if (!art)
+        return;
+    cJSON_AddStringToObject(art, "text", c->text);
+    if (c->verify)
+        cJSON_AddItemToObject(art, "verification", cJSON_Duplicate(c->verify, 1));
+    char *art_json = cJSON_PrintUnformatted(art);
+    cJSON_Delete(art);
+    char *facts = c->verify ? cJSON_PrintUnformatted(c->verify) : NULL;
+    if (!art_json) {
+        AIRY_FREE(facts);
+        return;
+    }
+
+    agent_review_result_t rv;
+    int arc = agent_rev_apply(c->prompt, c->text, art_json, facts, &rv);
+    AIRY_FREE(facts);
+    AIRY_FREE(art_json);
+    if (arc != 0 || rv.verdict == AIRY_REVIEW_SKIP)
+        return;
+
+    const char *key = c->task ? ledger_key(c->task, c->sess) : c->sess;
+    cJSON *evt = cJSON_CreateObject();
+    if (evt) {
+        cJSON_AddStringToObject(evt, "event", "review");
+        cJSON_AddNumberToObject(evt, "verdict", rv.verdict);
+        cJSON_AddStringToObject(evt, "reason", rv.reason);
+        agent_record_event(key, "review", evt);
+        cJSON_Delete(evt);
+    }
+    if (rv.verdict != AIRY_REVIEW_REJECT)
+        return;
+    AIRY_FREE(c->reason);
+    c->reason = rv.reason[0] ? AIRY_STRDUP(rv.reason) : NULL;
+    c->rc = AGENT_RUN_RC_UNMET;
+}
+
 /* 判据来源二选一：请求自带优先；task 模式缺失时由计划节点 postcondition
  * 汇总派生（用户未给判据的唯一补全路径）。chat 轮不复核。 */
 static void run_criteria_prepare(run_ctx_t *c, const cJSON *plan)
@@ -1116,6 +1159,11 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
         c.rc = AGENT_RUN_RC_UNVERIFIED;
     if (c.rc == 0 && !c.cancelled && !c.gccp_round && c.criteria && c.criteria[0])
         run_verify(&c);
+
+    /* R16：判据取证通过后再做语义复核（产物 vs 目标），判定作为执行事件
+     * 落链；终裁拒绝按未达判据收尾。 */
+    if (c.rc == 0 && !c.cancelled && !c.gccp_round && c.criteria && c.criteria[0])
+        run_review(&c);
 
     /* 终态必写决策链（0.1.21 L-9）：旧行为只在成功时写 run_result，失败与
      * 取消在链上无终局，看板与回放永远停在 running，只能靠日志猜结果。
