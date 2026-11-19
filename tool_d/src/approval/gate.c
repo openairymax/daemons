@@ -188,72 +188,59 @@ approval_gate_verdict_t gate_ask(approval_gate_t *gate, const char *agent_id,
     return gate_ask_ex(gate, agent_id, meta, params_json, 0, NULL, 0, out_reason);
 }
 
-approval_gate_verdict_t gate_ask_ex(approval_gate_t *gate, const char *agent_id,
-                                    const tool_metadata_t *meta, const char *params_json,
-                                    int allow_dangerous, char *approval, size_t cap,
-                                    char **out_reason)
+/* 静态审批通过：回填 approval 来源，高危需区分显式放行与 warn 档。 */
+static approval_gate_verdict_t gate_acl_ok(const tool_metadata_t *meta,
+                                           const tool_approval_detail_t *detail, char *approval,
+                                           size_t cap, tool_audit_risk_t risk, int allow_dangerous)
 {
-    char risk_reason[64];
-    tool_audit_risk_t risk;
+    int high = (risk == TOOL_AUDIT_RISK_HIGH);
+    approval_set(approval, cap, high ? (allow_dangerous ? "allow_dangerous" : "warn") : "acl");
+    log_approved(meta, detail);
+    return APPROVAL_GATE_ALLOWED;
+}
 
-    if (out_reason) {
-        *out_reason = NULL;
-    }
-    approval_set(approval, cap, "none");
-    if (!gate || !gate->ctx || !meta) {
-        return APPROVAL_GATE_DENIED;
-    }
-
-    risk = tool_audit_risk(meta->id, params_json, risk_reason, sizeof(risk_reason));
-
-    tool_approval_detail_t detail;
-    int rc = tool_approval_check_for_agent(gate->ctx, agent_id, meta, params_json, &detail);
-    int acl_ok = (rc == 0);
-
-    /* D-9：高危调用必须逐次审批；显式 allow_dangerous 或 warn 回退档除外。 */
-    if (risk == TOOL_AUDIT_RISK_HIGH && !allow_dangerous && !risk_warn_mode()) {
-        switch (ask_via_interactive(gate, agent_id, meta, params_json, out_reason)) {
-        case INTERACTIVE_ALLOWED:
-            approval_set(approval, cap, "interactive");
-            log_approved(meta, &detail);
-            return APPROVAL_GATE_ALLOWED;
-        case INTERACTIVE_DENIED:
-            return APPROVAL_GATE_DENIED;
-        case INTERACTIVE_CONTINUE:
-        default:
-            SVC_LOG_ERROR("High-risk tool '%s' denied (fail-closed): %s; pass allow_dangerous "
-                          "or set AIRY_TOOL_RISK_APPROVAL_MODE=warn",
-                          meta->id ? meta->id : "?", risk_reason[0] ? risk_reason : "policy");
-            if (out_reason) {
-                char msg[256];
-                snprintf(msg, sizeof(msg),
-                         "High-risk tool '%s' requires approval (%s); pass allow_dangerous",
-                         meta->id ? meta->id : "?",
-                         risk_reason[0] ? risk_reason : "policy");
-                *out_reason = AIRY_STRDUP(msg);
-            }
-            return APPROVAL_GATE_DENIED;
-        }
-    }
-    if (risk == TOOL_AUDIT_RISK_HIGH)
-        SVC_LOG_WARN("High-risk tool '%s' allowed without per-call approval (%s): %s",
-                     meta->id ? meta->id : "?",
-                     allow_dangerous ? "allow_dangerous" : "mode=warn",
-                     risk_reason[0] ? risk_reason : "policy");
-
-    if (acl_ok) {
-        approval_set(approval, cap,
-                     risk == TOOL_AUDIT_RISK_HIGH
-                         ? (allow_dangerous ? "allow_dangerous" : "warn")
-                         : "acl");
-        log_approved(meta, &detail);
-        return APPROVAL_GATE_ALLOWED;
-    }
-
+/* D-9 高危逐次审批：未显式放行且非 warn 档时必须交互确认，否则 fail-closed。 */
+static approval_gate_verdict_t gate_risk_high(approval_gate_t *gate, const char *agent_id,
+                                              const tool_metadata_t *meta,
+                                              const char *params_json, char *approval, size_t cap,
+                                              const char *risk_reason,
+                                              const tool_approval_detail_t *detail,
+                                              char **out_reason)
+{
     switch (ask_via_interactive(gate, agent_id, meta, params_json, out_reason)) {
     case INTERACTIVE_ALLOWED:
         approval_set(approval, cap, "interactive");
-        log_approved(meta, &detail);
+        log_approved(meta, detail);
+        return APPROVAL_GATE_ALLOWED;
+    case INTERACTIVE_DENIED:
+        return APPROVAL_GATE_DENIED;
+    case INTERACTIVE_CONTINUE:
+    default:
+        SVC_LOG_ERROR("High-risk tool '%s' denied (fail-closed): %s; pass allow_dangerous "
+                      "or set AIRY_TOOL_RISK_APPROVAL_MODE=warn",
+                      meta->id ? meta->id : "?", risk_reason[0] ? risk_reason : "policy");
+        if (out_reason) {
+            char msg[256];
+            snprintf(msg, sizeof(msg),
+                     "High-risk tool '%s' requires approval (%s); pass allow_dangerous",
+                     meta->id ? meta->id : "?", risk_reason[0] ? risk_reason : "policy");
+            *out_reason = AIRY_STRDUP(msg);
+        }
+        return APPROVAL_GATE_DENIED;
+    }
+}
+
+/* 静态审批拒绝：交互审批开启时给用户一次放行机会，否则按拒绝理由收尾。 */
+static approval_gate_verdict_t gate_acl_deny(approval_gate_t *gate, const char *agent_id,
+                                             const tool_metadata_t *meta, const char *params_json,
+                                             char *approval, size_t cap,
+                                             const tool_approval_detail_t *detail,
+                                             char **out_reason)
+{
+    switch (ask_via_interactive(gate, agent_id, meta, params_json, out_reason)) {
+    case INTERACTIVE_ALLOWED:
+        approval_set(approval, cap, "interactive");
+        log_approved(meta, detail);
         return APPROVAL_GATE_ALLOWED;
     case INTERACTIVE_DENIED:
         return APPROVAL_GATE_DENIED;
@@ -263,11 +250,41 @@ approval_gate_verdict_t gate_ask_ex(approval_gate_t *gate, const char *agent_id,
     }
 
     SVC_LOG_ERROR("Tool approval denied for '%s': %s", meta->name ? meta->name : "?",
-                  detail.reason);
-    if (out_reason && detail.reason[0]) {
-        *out_reason = AIRY_STRDUP(detail.reason);
-    }
+                  detail->reason);
+    if (out_reason && detail->reason[0])
+        *out_reason = AIRY_STRDUP(detail->reason);
     return APPROVAL_GATE_DENIED;
+}
+
+approval_gate_verdict_t gate_ask_ex(approval_gate_t *gate, const char *agent_id,
+                                    const tool_metadata_t *meta, const char *params_json,
+                                    int allow_dangerous, char *approval, size_t cap,
+                                    char **out_reason)
+{
+    char risk_reason[64];
+
+    if (out_reason)
+        *out_reason = NULL;
+    approval_set(approval, cap, "none");
+    if (!gate || !gate->ctx || !meta)
+        return APPROVAL_GATE_DENIED;
+
+    tool_audit_risk_t risk = tool_audit_risk(meta->id, params_json, risk_reason,
+                                             sizeof(risk_reason));
+    tool_approval_detail_t detail;
+    int rc = tool_approval_check_for_agent(gate->ctx, agent_id, meta, params_json, &detail);
+
+    if (risk == TOOL_AUDIT_RISK_HIGH && !allow_dangerous && !risk_warn_mode())
+        return gate_risk_high(gate, agent_id, meta, params_json, approval, cap, risk_reason,
+                              &detail, out_reason);
+    if (risk == TOOL_AUDIT_RISK_HIGH)
+        SVC_LOG_WARN("High-risk tool '%s' allowed without per-call approval (%s): %s",
+                     meta->id ? meta->id : "?",
+                     allow_dangerous ? "allow_dangerous" : "mode=warn",
+                     risk_reason[0] ? risk_reason : "policy");
+    if (rc == 0)
+        return gate_acl_ok(meta, &detail, approval, cap, risk, allow_dangerous);
+    return gate_acl_deny(gate, agent_id, meta, params_json, approval, cap, &detail, out_reason);
 }
 
 uint64_t gate_int_budget_ms(const approval_gate_t *gate)
