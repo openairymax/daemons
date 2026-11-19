@@ -225,14 +225,9 @@ typedef struct {
     bool allow_dangerous; /* 高危工具放行声明（透传到 tool_d 审批门） */
 } task_args_t;
 
-static int parse_task_args(cJSON *params, int id, airy_sock_t fd, task_args_t *out)
+/* goal 三形态（goal / messages[0].content / prompt）+ resume_token 兜底校验。 */
+static int parse_goal(cJSON *params, task_args_t *out, int id, airy_sock_t fd)
 {
-    AIRY_MEMSET(out, 0, sizeof(*out));
-    if (!params) {
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "Missing params", id);
-        return -1;
-    }
-
     cJSON *p = cJSON_GetObjectItem(params, "goal");
     const char *goal = cJSON_IsString(p) ? p->valuestring : NULL;
     cJSON *messages = cJSON_GetObjectItem(params, "messages");
@@ -249,7 +244,15 @@ static int parse_task_args(cJSON *params, int id, airy_sock_t fd, task_args_t *o
                            "Invalid params: missing goal or resume_token", id);
         return -1;
     }
+    out->goal = goal;
+    out->resume_token = resume;
+    out->history = m0 ? messages : NULL;
+    return 0;
+}
 
+/* 轮次：顶层 rounds 兼容 budget.rounds。 */
+static int parse_rounds(cJSON *params)
+{
     cJSON *rounds = cJSON_GetObjectItem(params, "rounds");
     if (!cJSON_IsNumber(rounds)) {
         /* 线协议以 budget{rounds,tokens,seconds} 为主形态；顶层 rounds 保留
@@ -258,41 +261,66 @@ static int parse_task_args(cJSON *params, int id, airy_sock_t fd, task_args_t *o
         if (cJSON_IsObject(budget))
             rounds = cJSON_GetObjectItem(budget, "rounds");
     }
-    cJSON *conf = cJSON_GetObjectItem(params, "gccp_confirmed");
-    cJSON *ad = cJSON_GetObjectItem(params, "allow_dangerous");
-    out->goal = goal;
-    out->model = json_str(params, "model");
-    out->history = m0 ? messages : NULL;
-    out->session_id = json_str(params, "session_id");
-    out->resume_token = resume;
-    /* "auto" 与缺省同义：交给服务端规则裁决，客户端不自行推断模式。 */
-    out->declared_mode = json_str(params, "mode");
-    if (out->declared_mode && strcmp(out->declared_mode, AGENT_TASK_MODE_AUTO) == 0)
-        out->declared_mode = NULL;
-    out->mode_declared = out->declared_mode != NULL;
-    /* C-17 判据：字符串与原生数组两种线形态都接受；数组序列化后交给引擎，
-     * 避免引擎层反复解析两种形态。 */
+    return cJSON_IsNumber(rounds) ? rounds->valueint : 0;
+}
+
+/* "auto" 与缺省同义：交给服务端规则裁决，客户端不自行推断模式。 */
+static const char *parse_mode(cJSON *params, bool *declared)
+{
+    const char *mode = json_str(params, "mode");
+    if (mode && strcmp(mode, AGENT_TASK_MODE_AUTO) == 0)
+        mode = NULL;
+    *declared = mode != NULL;
+    return mode;
+}
+
+/* C-17 判据：字符串与原生数组两种线形态都接受；数组序列化后交给引擎。 */
+static void parse_criteria(cJSON *params, task_args_t *out)
+{
     cJSON *crit = cJSON_GetObjectItem(params, "success_criteria");
     if (cJSON_IsArray(crit)) {
         out->criteria_owned = cJSON_PrintUnformatted(crit);
         out->success_criteria = out->criteria_owned;
-    } else {
-        out->success_criteria = json_str(params, "success_criteria");
+        return;
     }
-    out->client = json_str(params, "client");
-    out->rounds = cJSON_IsNumber(rounds) ? rounds->valueint : 0;
-    out->gccp_confirmed = cJSON_IsBool(conf) && cJSON_IsTrue(conf);
-    out->allow_dangerous = cJSON_IsBool(ad) && cJSON_IsTrue(ad);
+    out->success_criteria = json_str(params, "success_criteria");
+}
 
-    /* gccp_answers 兼容字符串与对象两种线形态：字符串供 think_d 直接消费，
-     * 对象需序列化后才能作为引擎入参。 */
+/* gccp_answers 兼容字符串与对象：对象需序列化后才能作为引擎入参。 */
+static void parse_answers(cJSON *params, task_args_t *out)
+{
     cJSON *ans = cJSON_GetObjectItem(params, "gccp_answers");
     if (cJSON_IsString(ans) && ans->valuestring && ans->valuestring[0]) {
         out->gccp_answers = ans->valuestring;
-    } else if (cJSON_IsObject(ans)) {
+        return;
+    }
+    if (cJSON_IsObject(ans)) {
         out->gccp_owned = cJSON_PrintUnformatted(ans);
         out->gccp_answers = out->gccp_owned;
     }
+}
+
+static int parse_task_args(cJSON *params, int id, airy_sock_t fd, task_args_t *out)
+{
+    AIRY_MEMSET(out, 0, sizeof(*out));
+    if (!params) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "Missing params", id);
+        return -1;
+    }
+    if (parse_goal(params, out, id, fd) != 0)
+        return -1;
+
+    cJSON *conf = cJSON_GetObjectItem(params, "gccp_confirmed");
+    cJSON *ad = cJSON_GetObjectItem(params, "allow_dangerous");
+    out->model = json_str(params, "model");
+    out->session_id = json_str(params, "session_id");
+    out->declared_mode = parse_mode(params, &out->mode_declared);
+    parse_criteria(params, out);
+    out->client = json_str(params, "client");
+    out->rounds = parse_rounds(params);
+    out->gccp_confirmed = cJSON_IsBool(conf) && cJSON_IsTrue(conf);
+    out->allow_dangerous = cJSON_IsBool(ad) && cJSON_IsTrue(ad);
+    parse_answers(params, out);
     return 0;
 }
 
@@ -319,36 +347,25 @@ static void task_send_notice(int id, airy_sock_t fd, const agent_run_event_sink_
     agent_run_emit_event(sink, &seq, task_id ? task_id : "", "", AIRY_RS_TYPE_TASK_STATE, obj);
 }
 
-/* 同步/流式共用主流程：裁决模式 -> GCCP 门禁 -> 引擎执行。
- * 未确认的 task 在门禁处直接返回 needs_intent，绝不触达引擎与工具。 */
-static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
-                               const agent_run_event_sink_t *sink)
+/* 裁决执行模式；失败时释放自持串并按需回错。 */
+static int task_decide_mode(task_args_t *a, agent_run_task_meta_t *meta, int id, airy_sock_t fd,
+                            const agent_run_event_sink_t *sink)
 {
-    task_args_t a;
-    if (parse_task_args(params, id, fd, &a) != 0)
-        return;
-
-    agent_run_task_meta_t meta;
-    AIRY_MEMSET(&meta, 0, sizeof(meta));
-    agent_task_gen_id("task", meta.task_id, sizeof(meta.task_id));
-    agent_task_gen_id("plan", meta.plan_id, sizeof(meta.plan_id));
-    meta.success_criteria = a.success_criteria;
-    meta.client = a.client;
-    meta.budget_rounds = a.rounds;
-    meta.gccp_confirmed = a.gccp_confirmed;
-    meta.allow_dangerous = a.allow_dangerous;
-
-    if (atk_decide_mode(a.goal, a.declared_mode, meta.mode, sizeof(meta.mode),
-                               meta.mode_reason, sizeof(meta.mode_reason)) != 0) {
-        AIRY_FREE(a.gccp_owned);
-        AIRY_FREE(a.criteria_owned);
+    if (atk_decide_mode(a->goal, a->declared_mode, meta->mode, sizeof(meta->mode),
+                        meta->mode_reason, sizeof(meta->mode_reason)) != 0) {
+        AIRY_FREE(a->gccp_owned);
+        AIRY_FREE(a->criteria_owned);
         if (!sink)
-            JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR,
-                               "task.submit failed: mode decision", id);
-        return;
+            JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "task.submit failed: mode decision", id);
+        return -1;
     }
+    return 0;
+}
 
-    /* GCCP 门禁：显式 confirmed 与按槽位齐备的答案二者其一即可放行。 */
+/* GCCP 门禁：显式 confirmed 与按槽位齐备的答案二者其一即可放行。 */
+static void gate_answers(cJSON *params, agent_run_task_meta_t *meta,
+                         agent_task_missing_slot_t *missing, size_t *missing_count)
+{
     cJSON *ans_raw = cJSON_GetObjectItem(params, "gccp_answers");
     const cJSON *answers = cJSON_IsObject(ans_raw) ? ans_raw : NULL;
     cJSON *answers_parsed = NULL;
@@ -356,47 +373,23 @@ static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
         answers_parsed = cJSON_Parse(ans_raw->valuestring);
         answers = answers_parsed;
     }
-    agent_task_missing_slot_t missing[AGENT_TASK_MISSING_MAX];
-    size_t missing_count = 0;
-    bool confirmed = meta.gccp_confirmed;
-    (void)gccp_ok(answers, &confirmed, missing, AGENT_TASK_MISSING_MAX,
-                                &missing_count);
-    meta.gccp_confirmed = confirmed;
+    bool confirmed = meta->gccp_confirmed;
+    (void)gccp_ok(answers, &confirmed, missing, AGENT_TASK_MISSING_MAX, missing_count);
+    meta->gccp_confirmed = confirmed;
     cJSON_Delete(answers_parsed);
+}
 
-    /* 门禁（唯一判定实现）：关闭时零引擎 / 零工具调用，直接返回
-     * needs_intent（gate:lab：`-p` 未确认不得产生任何工具调用事件）。 */
-    if (!gate_allows(meta.mode, meta.gccp_confirmed)) {
-        cJSON *ni = need_intent(&meta, missing, missing_count);
-        AIRY_FREE(a.gccp_owned);
-        AIRY_FREE(a.criteria_owned);
-        task_send_notice(id, fd, sink, meta.task_id, ni);
-        return;
-    }
+/* C-17 判据门禁：显式声明的 task 必须带可执行判据。 */
+static int task_needs_criteria(const task_args_t *a, const agent_run_task_meta_t *meta)
+{
+    if (!a->mode_declared || strcmp(meta->mode, AGENT_TASK_MODE_TASK) != 0)
+        return 0;
+    return criteria_ok(meta->success_criteria) ? 0 : 1;
+}
 
-    /* C-17 判据门禁：显式声明 task 必须带可执行判据；缺失/非法一律拒绝进入
-     * （零引擎 / 零工具调用），并回补判据示例。服务端自动裁决出的 task 不在此
-     * 拒绝——其判据可由计划节点 postcondition 派生，派生失败按 unverified 收尾。 */
-    if (a.mode_declared && strcmp(meta.mode, AGENT_TASK_MODE_TASK) == 0 &&
-        !criteria_ok(meta.success_criteria)) {
-        cJSON *nc = need_criteria_of(
-            &meta, "task mode requires at least one valid success criterion");
-        AIRY_FREE(a.gccp_owned);
-        AIRY_FREE(a.criteria_owned);
-        task_send_notice(id, fd, sink, meta.task_id, nc);
-        return;
-    }
-
-    cJSON *result = NULL;
-    int rc = agent_run_execute(a.goal, a.model, a.history, a.gccp_answers, NULL, NULL,
-                               a.session_id, a.rounds, a.resume_token, &meta, sink, &result);
-    AIRY_FREE(a.gccp_owned);
-    AIRY_FREE(a.criteria_owned);
-    if (sink) {
-        if (result)
-            cJSON_Delete(result);
-        return;
-    }
+/* 同步回包：取消 / 失败 / 成功三态；失败明细从 result 提取。 */
+static void task_finish_sync(airy_sock_t fd, int id, int rc, cJSON *result)
+{
     if (rc == 1) {
         JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Request cancelled by user", id);
         cJSON_Delete(result);
@@ -417,6 +410,67 @@ static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
         return;
     }
     JSONRPC_SEND_SUCCESS(fd, result, id);
+}
+
+/* 同步/流式共用主流程：裁决模式 -> GCCP 门禁 -> 引擎执行。
+ * 未确认的 task 在门禁处直接返回 needs_intent，绝不触达引擎与工具。 */
+static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
+                               const agent_run_event_sink_t *sink)
+{
+    task_args_t a;
+    if (parse_task_args(params, id, fd, &a) != 0)
+        return;
+
+    agent_run_task_meta_t meta;
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
+    agent_task_gen_id("task", meta.task_id, sizeof(meta.task_id));
+    agent_task_gen_id("plan", meta.plan_id, sizeof(meta.plan_id));
+    meta.success_criteria = a.success_criteria;
+    meta.client = a.client;
+    meta.budget_rounds = a.rounds;
+    meta.gccp_confirmed = a.gccp_confirmed;
+    meta.allow_dangerous = a.allow_dangerous;
+
+    if (task_decide_mode(&a, &meta, id, fd, sink) != 0)
+        return;
+
+    agent_task_missing_slot_t missing[AGENT_TASK_MISSING_MAX];
+    size_t missing_count = 0;
+    gate_answers(params, &meta, missing, &missing_count);
+
+    /* 门禁（唯一判定实现）：关闭时零引擎 / 零工具调用，直接返回
+     * needs_intent（gate:lab：`-p` 未确认不得产生任何工具调用事件）。 */
+    if (!gate_allows(meta.mode, meta.gccp_confirmed)) {
+        cJSON *ni = need_intent(&meta, missing, missing_count);
+        AIRY_FREE(a.gccp_owned);
+        AIRY_FREE(a.criteria_owned);
+        task_send_notice(id, fd, sink, meta.task_id, ni);
+        return;
+    }
+
+    /* C-17 判据门禁：显式声明 task 必须带可执行判据；缺失/非法一律拒绝进入
+     * （零引擎 / 零工具调用），并回补判据示例。服务端自动裁决出的 task 不在此
+     * 拒绝——其判据可由计划节点 postcondition 派生，派生失败按 unverified 收尾。 */
+    if (task_needs_criteria(&a, &meta)) {
+        cJSON *nc = need_criteria_of(
+            &meta, "task mode requires at least one valid success criterion");
+        AIRY_FREE(a.gccp_owned);
+        AIRY_FREE(a.criteria_owned);
+        task_send_notice(id, fd, sink, meta.task_id, nc);
+        return;
+    }
+
+    cJSON *result = NULL;
+    int rc = agent_run_execute(a.goal, a.model, a.history, a.gccp_answers, NULL, NULL,
+                               a.session_id, a.rounds, a.resume_token, &meta, sink, &result);
+    AIRY_FREE(a.gccp_owned);
+    AIRY_FREE(a.criteria_owned);
+    if (sink) {
+        if (result)
+            cJSON_Delete(result);
+        return;
+    }
+    task_finish_sync(fd, id, rc, result);
 }
 
 static void handle_task_submit(cJSON *params, int id, airy_sock_t client_fd)

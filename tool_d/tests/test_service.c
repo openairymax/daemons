@@ -331,22 +331,17 @@ static void test_fs_delete_builtin(void)
 #endif /* !_WIN32 */
 
 #ifndef _WIN32
-/* 会话内自制工具端到端：创建 → 目录可见 → 按名执行 → 重定义；并锁死三类
- * 拒绝路径（内置名抢占 / 非法名字 / 缺 shebang）。 */
-static void test_tool_create_builtin(void)
+static const char k_create_json[] =
+    "{\"name\":\"hello_tool\",\"description\":\"echo greeting\","
+    "\"script\":\"#!/bin/sh\\nprintf 'hi:%s' \\\"$1\\\"\\n\","
+    "\"params\":[{\"name\":\"who\",\"type\":\"string\"}]}";
+
+/* 创建成功 → 目录可见（executable/param_count）。 */
+static void create_make(tool_service_t *svc)
 {
-    printf("  test_tool_create_builtin...\n");
-
-    tool_service_t *svc = tool_service_create(NULL);
-    CHECK(svc != NULL);
-
-    const char *create_json =
-        "{\"name\":\"hello_tool\",\"description\":\"echo greeting\","
-        "\"script\":\"#!/bin/sh\\nprintf 'hi:%s' \\\"$1\\\"\\n\","
-        "\"params\":[{\"name\":\"who\",\"type\":\"string\"}]}";
     tool_execute_request_t req = {0};
     req.tool_id = "tool_create";
-    req.params_json = create_json;
+    req.params_json = k_create_json;
     /* D-9：tool_create 为高危工具，用例显式接受风险（审计仍留痕）。 */
     req.allow_dangerous = 1;
 
@@ -362,61 +357,92 @@ static void test_tool_create_builtin(void)
     CHECK(m->executable != NULL && strstr(m->executable, "/scripts/hello_tool") != NULL);
     CHECK(m->param_count == 1);
     tool_metadata_free(m);
+}
 
-    /* 落盘脚本可按名执行（JSON 参数作为 $1 传入） */
+/* 落盘脚本可按名执行（JSON 参数作为 $1 传入）→ 同名重定义 updated。 */
+static void create_run_redef(tool_service_t *svc)
+{
+    tool_execute_request_t req = {0};
     req.tool_id = "hello_tool";
     req.params_json = "{\"who\":\"bob\"}";
-    res = NULL;
-    rc = tool_service_execute(svc, &req, &res);
+    req.allow_dangerous = 1;
+
+    tool_result_t *res = NULL;
+    int rc = tool_service_execute(svc, &req, &res);
     CHECK(rc == 0 && res != NULL && res->err_code == 0);
     CHECK(res->output != NULL && strstr(res->output, "hi:") != NULL);
     tool_result_free(res);
 
     /* 同名重定义 → updated */
     req.tool_id = "tool_create";
-    req.params_json = create_json;
+    req.params_json = k_create_json;
     res = NULL;
     rc = tool_service_execute(svc, &req, &res);
     CHECK(rc == 0 && res != NULL && res->err_code == 0);
     CHECK(strstr(res->output, "\"updated\":true") != NULL);
     tool_result_free(res);
+}
 
-    /* 拒绝：内置工具名抢占 */
+/* 拒绝：内置工具名抢占 / 非法名字 / 缺 shebang。 */
+static void create_reject_name(tool_service_t *svc)
+{
+    tool_execute_request_t req = {0};
+    req.tool_id = "tool_create";
+    req.allow_dangerous = 1;
+    tool_result_t *res = NULL;
+
     req.params_json = "{\"name\":\"fs_read\",\"description\":\"x\","
                       "\"script\":\"#!/bin/sh\\nexit 0\\n\"}";
-    res = NULL;
-    rc = tool_service_execute(svc, &req, &res);
+    (void)tool_service_execute(svc, &req, &res);
     CHECK(res != NULL && res->err_code != 0);
     CHECK(res->error != NULL && strstr(res->error, "already registered") != NULL);
     tool_result_free(res);
 
-    /* 拒绝：非法名字与缺 shebang */
     req.params_json = "{\"name\":\"../escape\",\"description\":\"x\","
                       "\"script\":\"#!/bin/sh\\nexit 0\\n\"}";
     res = NULL;
-    rc = tool_service_execute(svc, &req, &res);
+    (void)tool_service_execute(svc, &req, &res);
     CHECK(res != NULL && res->err_code != 0);
     tool_result_free(res);
 
     req.params_json = "{\"name\":\"no_shebang\",\"description\":\"x\","
                       "\"script\":\"exit 0\\n\"}";
     res = NULL;
-    rc = tool_service_execute(svc, &req, &res);
+    (void)tool_service_execute(svc, &req, &res);
     CHECK(res != NULL && res->err_code != 0);
     CHECK(res->error != NULL && strstr(res->error, "shebang") != NULL);
     tool_result_free(res);
+}
 
-    /* D-9：高危工具未显式放行必须被拒（fail-closed），且错误可诊断。 */
+/* D-9：高危工具未显式放行必须被拒（fail-closed），且错误可诊断。 */
+static void create_deny_danger(tool_service_t *svc)
+{
+    tool_execute_request_t req = {0};
     req.tool_id = "tool_create";
-    req.params_json = create_json;
+    req.params_json = k_create_json;
     req.allow_dangerous = 0;
-    res = NULL;
-    rc = tool_service_execute(svc, &req, &res);
+    tool_result_t *res = NULL;
+    int rc = tool_service_execute(svc, &req, &res);
     CHECK(rc != 0);
     CHECK(res != NULL && res->err_code != 0);
     CHECK(res->error != NULL && strstr(res->error, "requires approval") != NULL);
     CHECK(strcmp(res->approval, "none") == 0);
     tool_result_free(res);
+}
+
+/* 会话内自制工具端到端：创建 → 目录可见 → 按名执行 → 重定义；并锁死三类
+ * 拒绝路径（内置名抢占 / 非法名字 / 缺 shebang）。 */
+static void test_tool_create_builtin(void)
+{
+    printf("  test_tool_create_builtin...\n");
+
+    tool_service_t *svc = tool_service_create(NULL);
+    CHECK(svc != NULL);
+
+    create_make(svc);
+    create_run_redef(svc);
+    create_reject_name(svc);
+    create_deny_danger(svc);
 
     tool_service_destroy(svc);
     printf("    PASSED\n");

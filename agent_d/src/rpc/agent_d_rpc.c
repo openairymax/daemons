@@ -46,6 +46,56 @@ static void log_if_slow(const char *op, uint64_t t0, const char *agent_id)
                      (unsigned long long)elapsed, (long long)slow_us, agent_id ? agent_id : "-");
 }
 
+/* 从 spec 取 role，缺省回落 agent_id/unknown。 */
+static void sched_role(const char *spec_str, const char *agent_id, char *role, size_t cap)
+{
+    role[0] = '\0';
+    cJSON *spec = cJSON_Parse(spec_str);
+    if (spec) {
+        cJSON *r = cJSON_GetObjectItem(spec, "role");
+        if (cJSON_IsString(r) && r->valuestring && *r->valuestring)
+            snprintf(role, cap, "%s", r->valuestring);
+        cJSON_Delete(spec);
+    }
+    if (role[0] == '\0')
+        snprintf(role, cap, "%s", agent_id ? agent_id : "unknown");
+}
+
+/* 组装 register_agent 参数 JSON（已序列化，调用方 free）。 */
+static char *sched_build_params(const char *role)
+{
+    cJSON *params = cJSON_CreateObject();
+    cJSON *agent = cJSON_CreateObject();
+    if (!params || !agent) {
+        if (params)
+            cJSON_Delete(params);
+        if (agent)
+            cJSON_Delete(agent);
+        return NULL;
+    }
+    cJSON_AddStringToObject(agent, "agent_id", role);
+    cJSON_AddStringToObject(agent, "agent_name", role);
+    cJSON_AddBoolToObject(agent, "is_available", true);
+    cJSON_AddNumberToObject(agent, "weight", 1.0);
+    cJSON_AddItemToObject(params, "agent", agent);
+
+    char *str = cJSON_PrintUnformatted(params);
+    cJSON_Delete(params);
+    return str;
+}
+
+/* 登记结果只告警不阻断 spawn。 */
+static void sched_report(int rc, char *result, const char *role, const char *agent_id)
+{
+    if (rc != AIRY_SUCCESS || !result) {
+        SVC_LOG_WARN("sched_d register_agent failed (role=%s, agent_id=%s, rc=%d)", role,
+                     agent_id ? agent_id : "?", rc);
+        return;
+    }
+    SVC_LOG_INFO("sched_d registered (role=%s, agent_id=%s)", role, agent_id ? agent_id : "?");
+    AIRY_FREE(result);
+}
+
 /*
  * After agent.spawn succeeds, register the role with sched_d, solving the
  * "sched_d registry always empty" problem (historically no component called
@@ -63,36 +113,10 @@ static void log_if_slow(const char *op, uint64_t t0, const char *agent_id)
  */
 static void sched_d_register_spawned_agent(const char *agent_id, const char *spec_str)
 {
-
     char role[128] = {0};
-    cJSON *spec = cJSON_Parse(spec_str);
-    if (spec) {
-        cJSON *r = cJSON_GetObjectItem(spec, "role");
-        if (cJSON_IsString(r) && r->valuestring && *r->valuestring) {
-            snprintf(role, sizeof(role), "%s", r->valuestring);
-        }
-        cJSON_Delete(spec);
-    }
-    if (role[0] == '\0')
-        snprintf(role, sizeof(role), "%s", agent_id ? agent_id : "unknown");
+    sched_role(spec_str, agent_id, role, sizeof(role));
 
-    cJSON *params = cJSON_CreateObject();
-    cJSON *agent = cJSON_CreateObject();
-    if (!params || !agent) {
-        if (params)
-            cJSON_Delete(params);
-        if (agent)
-            cJSON_Delete(agent);
-        return;
-    }
-    cJSON_AddStringToObject(agent, "agent_id", role);
-    cJSON_AddStringToObject(agent, "agent_name", role);
-    cJSON_AddBoolToObject(agent, "is_available", true);
-    cJSON_AddNumberToObject(agent, "weight", 1.0);
-    cJSON_AddItemToObject(params, "agent", agent);
-
-    char *params_str = cJSON_PrintUnformatted(params);
-    cJSON_Delete(params);
+    char *params_str = sched_build_params(role);
     if (!params_str)
         return;
 
@@ -101,13 +125,7 @@ static void sched_d_register_spawned_agent(const char *agent_id, const char *spe
     char *result = NULL;
     int rc = daemon_rpc_call(sock_buf, "register_agent", params_str, &result, 5000);
     AIRY_FREE(params_str);
-    if (rc != AIRY_SUCCESS || !result) {
-        SVC_LOG_WARN("sched_d register_agent failed (role=%s, agent_id=%s, rc=%d)", role,
-                     agent_id ? agent_id : "?", rc);
-    } else {
-        SVC_LOG_INFO("sched_d registered (role=%s, agent_id=%s)", role, agent_id ? agent_id : "?");
-        AIRY_FREE(result);
-    }
+    sched_report(rc, result, role, agent_id);
 }
 
 DAEMON_RPC_SHELL(spawn, handle_spawn)
@@ -171,6 +189,53 @@ static void handle_terminate(cJSON *params, int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
+/* 取 request_id；缺省生成进程内唯一的 auto-<seq>，保证每次 invoke 可取消。 */
+static const char *invoke_request_id(cJSON *params, char *auto_buf, size_t cap)
+{
+    cJSON *item = cJSON_GetObjectItem(params, "request_id");
+    const char *rid = (item && cJSON_IsString(item) && item->valuestring && item->valuestring[0]) ?
+                          item->valuestring :
+                          NULL;
+    if (!rid) {
+        static airy_atomic_int_t auto_seq;
+        long seq = (long)airy_atomic_fetch_add(&auto_seq, 1) + 1;
+        snprintf(auto_buf, cap, "auto-%ld", seq);
+        rid = auto_buf;
+    }
+    return rid;
+}
+
+/* 可选工作目录参数；未提供返回 NULL。 */
+static const char *invoke_workspace(cJSON *params)
+{
+    cJSON *ws = cJSON_GetObjectItem(params, "workspace_dir");
+    if (ws && cJSON_IsString(ws) && ws->valuestring && ws->valuestring[0])
+        return ws->valuestring;
+    return NULL;
+}
+
+/* 回包：成功输出 / 按错误码分派 JSON-RPC 错误。 */
+static void invoke_reply(airy_sock_t client_fd, int id, int ret, char *out_output)
+{
+    if (ret == AIRY_SUCCESS && out_output) {
+        cJSON *result = cJSON_CreateObject();
+        cJSON_AddStringToObject(result, "output", out_output);
+        JSONRPC_SEND_SUCCESS(client_fd, result, id);
+        AIRY_FREE(out_output);
+        return;
+    }
+
+    AIRY_FREE(out_output);
+    if (ret == AIRY_ERR_NOT_FOUND) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Agent not found", id);
+    } else if (ret == AIRY_ERR_CANCELED) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Agent invoke canceled", id);
+    } else {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Agent invoke failed", id);
+    }
+    SVC_LOG_ERROR("agent.invoke failed: error=%d", ret);
+}
+
 static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *agent_id = cJSON_GetObjectItem(params, "agent_id");
@@ -184,25 +249,15 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
     /* Improvement 1 (cancellation drill-down): an optional request_id param
      * enables a cross-process cancellation session. The caller (wh_agent_invoke
      * etc.) passes a unique request_id; while invoke blocks, the agent.cancel
-     * RPC can terminate the child by request_id (SIGTERM->SIGKILL). */
-    cJSON *request_id_item = cJSON_GetObjectItem(params, "request_id");
-    const char *request_id = (request_id_item && cJSON_IsString(request_id_item) &&
-                              request_id_item->valuestring && request_id_item->valuestring[0]) ?
-                                 request_id_item->valuestring :
-                                 NULL;
-
-    /* Server-side fallback: every invoke gets a session. Without one the
+     * RPC can terminate the child by request_id (SIGTERM->SIGKILL).
+     *
+     * Server-side fallback: every invoke gets a session. Without one the
      * request has no cancel token, can never be cancelled, and on daemon
      * shutdown holds a thread-pool worker for the full read timeout (the
      * SIGTERM-hang half of incident 0.1.16). A monotonically increasing
      * sequence keeps the id unique within this daemon process. */
     char auto_request_id[64];
-    if (!request_id) {
-        static airy_atomic_int_t auto_seq;
-        long seq = (long)airy_atomic_fetch_add(&auto_seq, 1) + 1;
-        snprintf(auto_request_id, sizeof(auto_request_id), "auto-%ld", seq);
-        request_id = auto_request_id;
-    }
+    const char *request_id = invoke_request_id(params, auto_request_id, sizeof(auto_request_id));
 
     /* Request-scoped read budget (optional): deadline-aware callers (CLI
      * review) keep the inner invoke timeout below their own outer deadline;
@@ -218,36 +273,14 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
 
     uint64_t perf_t0 = perf_now_us();
     char *out_output = NULL;
-    cJSON *ws_item = cJSON_GetObjectItem(params, "workspace_dir");
-    const char *workspace_dir = (ws_item && cJSON_IsString(ws_item) && ws_item->valuestring &&
-                                 ws_item->valuestring[0]) ?
-                                    ws_item->valuestring :
-                                    NULL;
+    const char *workspace_dir = invoke_workspace(params);
     int ret = agent_service_invoke(g_service, agent_id->valuestring, input_str, input_len,
                                    workspace_dir, timeout_s, token, &out_output);
 
     log_if_slow("agent.invoke", perf_t0, agent_id->valuestring);
 
     agent_service_invoke_end(g_service, request_id);
-
-    if (ret == AIRY_SUCCESS && out_output) {
-        cJSON *result = cJSON_CreateObject();
-        cJSON_AddStringToObject(result, "output", out_output);
-        JSONRPC_SEND_SUCCESS(client_fd, result, id);
-        AIRY_FREE(out_output);
-        return;
-    }
-
-    AIRY_FREE(out_output);
-    if (ret == AIRY_ERR_NOT_FOUND) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Agent not found", id);
-    } else if (ret == AIRY_ERR_CANCELED) {
-
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Agent invoke canceled", id);
-    } else {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Agent invoke failed", id);
-    }
-    SVC_LOG_ERROR("agent.invoke failed: error=%d", ret);
+    invoke_reply(client_fd, id, ret, out_output);
 }
 
 /* Improvement 1 (cancellation drill-down): agent.cancel — cancel the active

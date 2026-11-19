@@ -223,6 +223,52 @@ static void put_tool_err(cJSON *result, airy_err_t code, const char *diag, const
     cJSON_Delete(ctx);
 }
 
+/* 有结果：成功/失败都按业务结果封装（失败附 {class,code,diag} 三元组）。 */
+static void exec_fill_result(cJSON *result, tool_result_t *res, int ret, const char *job_id,
+                             const char *tid)
+{
+    int ok = tool_result_ok(res);
+    /* 业务失败（err_code 非 0）没有外层 errno 承载时，用结果自身的
+     * err_code 提升为 error_code；此前一律填 0，调用方只能看到失败。 */
+    airy_err_t ecode = ok ? ret
+                          : (ret != AIRY_OK ? ret
+                                            : (res->err_code != 0 ? res->err_code
+                                                                  : AIRY_ERR_GENERIC_FAIL));
+    cJSON_AddNumberToObject(result, "success", ok ? 1 : 0);
+    if (res->output)
+        cJSON_AddStringToObject(result, "output", res->output);
+    if (res->error)
+        cJSON_AddStringToObject(result, "error", res->error);
+    cJSON_AddNumberToObject(result, "exit_code", res->exit_code);
+    cJSON_AddNumberToObject(result, "err_code", (double)res->err_code);
+    cJSON_AddNumberToObject(result, "error_code", (double)ecode);
+    if (res->approval[0])
+        cJSON_AddStringToObject(result, "approval", res->approval);
+    if (res->sandbox[0])
+        cJSON_AddStringToObject(result, "sandbox", res->sandbox);
+    if (job_id[0])
+        cJSON_AddStringToObject(result, "job_id", job_id);
+    if (!ok) {
+        put_tool_err(result, ecode, res->error ? res->error : airy_err_str(ecode), tid);
+        SVC_LOG_ERROR("Tool execution failed: %s (err_code=%d)", tid, (int)res->err_code);
+    }
+    tool_result_free(res);
+}
+
+/* 无结果（服务层拒绝）：统一失败封装。 */
+static void exec_fill_fail(cJSON *result, int ret, const char *tid)
+{
+    const char *emsg = airy_err_str(ret);
+    if (!emsg || !emsg[0])
+        emsg = "Execution failed";
+    cJSON_AddNumberToObject(result, "success", 0);
+    cJSON_AddStringToObject(result, "error", emsg);
+    cJSON_AddNumberToObject(result, "exit_code", -1);
+    cJSON_AddNumberToObject(result, "error_code", ret);
+    put_tool_err(result, ret, emsg, tid);
+    SVC_LOG_ERROR("Tool execution rejected: %s (error=%d)", tid, ret);
+}
+
 static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *tid = get_string_field(params, "tool_id", NULL);
@@ -279,44 +325,10 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    if (res) {
-        int ok = tool_result_ok(res);
-        /* 业务失败（err_code 非 0）没有外层 errno 承载时，用结果自身的
-         * err_code 提升为 error_code；此前一律填 0，调用方只能看到失败。 */
-        airy_err_t ecode = ok ? ret
-                              : (ret != AIRY_OK ? ret
-                                                : (res->err_code != 0 ? res->err_code
-                                                                      : AIRY_ERR_GENERIC_FAIL));
-        cJSON_AddNumberToObject(result, "success", ok ? 1 : 0);
-        if (res->output)
-            cJSON_AddStringToObject(result, "output", res->output);
-        if (res->error)
-            cJSON_AddStringToObject(result, "error", res->error);
-        cJSON_AddNumberToObject(result, "exit_code", res->exit_code);
-        cJSON_AddNumberToObject(result, "err_code", (double)res->err_code);
-        cJSON_AddNumberToObject(result, "error_code", (double)ecode);
-        if (res->approval[0])
-            cJSON_AddStringToObject(result, "approval", res->approval);
-        if (res->sandbox[0])
-            cJSON_AddStringToObject(result, "sandbox", res->sandbox);
-        if (job_id[0])
-            cJSON_AddStringToObject(result, "job_id", job_id);
-        if (!ok) {
-            put_tool_err(result, ecode, res->error ? res->error : airy_err_str(ecode), tid);
-            SVC_LOG_ERROR("Tool execution failed: %s (err_code=%d)", tid, (int)res->err_code);
-        }
-        tool_result_free(res);
-    } else {
-        const char *emsg = airy_err_str(ret);
-        if (!emsg || !emsg[0])
-            emsg = "Execution failed";
-        cJSON_AddNumberToObject(result, "success", 0);
-        cJSON_AddStringToObject(result, "error", emsg);
-        cJSON_AddNumberToObject(result, "exit_code", -1);
-        cJSON_AddNumberToObject(result, "error_code", ret);
-        put_tool_err(result, ret, emsg, tid);
-        SVC_LOG_ERROR("Tool execution rejected: %s (error=%d)", tid, ret);
-    }
+    if (res)
+        exec_fill_result(result, res, ret, job_id, tid);
+    else
+        exec_fill_fail(result, ret, tid);
 
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }

@@ -86,6 +86,32 @@ static void old_dispose(llm_service_t *svc, provider_registry_t *reg, void *rule
     free_pricing_rules((pricing_rule_t *)rules, rule_n);
 }
 
+/* C-19：新槽位不得引用未注册模型。悬空即整次重载作废（旧配置继续服务），
+ * 而不是带着悬空引用切换，避免 role 在下一次请求才 404。返回 AIRY_OK 通过。 */
+static int reload_check_slots(llm_service_t *svc, llm_boot_t *b, provider_registry_t *nreg,
+                              uint64_t now)
+{
+    for (unsigned i = 0; i < SVC_SLOT_N; ++i) {
+        const char *v = svc_slot_get(&b->slots, i);
+        if (!v || !v[0] || provider_registry_find(nreg, v))
+            continue;
+        if (!llm_boot_unknown()) {
+            llm_boot_drop(b);
+            provider_registry_destroy(nreg);
+            svc->reload_fail++;
+            svc->reload_next_ms = now + LLM_RELOAD_BACKOFF_MS;
+            airy_mtx_unlock(&svc->reload_lock);
+            SVC_LOG_ERROR("C-19: SVC: reload rejected — slot %s 引用未注册模型 '%s'，"
+                          "保留旧配置",
+                          svc_slot_name(i), v);
+            return AIRY_ERR_STATE_ERROR;
+        }
+        SVC_LOG_WARN("C-19: SVC: slot %s='%s' 未注册，AIRY_ALLOW_UNKNOWN_MODEL 放行",
+                     svc_slot_name(i), v);
+    }
+    return AIRY_OK;
+}
+
 int llm_service_reload(llm_service_t *svc)
 {
     if (!svc)
@@ -113,26 +139,8 @@ int llm_service_reload(llm_service_t *svc)
         return AIRY_ERR_STATE_ERROR;
     }
 
-    /* C-19：新槽位不得引用未注册模型。悬空即整次重载作废（旧配置继续
-     * 服务），而不是带着悬空引用切换，避免 role 在下一次请求才 404。 */
-    for (unsigned i = 0; i < SVC_SLOT_N; ++i) {
-        const char *v = svc_slot_get(&b.slots, i);
-        if (!v || !v[0] || provider_registry_find(nreg, v))
-            continue;
-        if (!llm_boot_unknown()) {
-            llm_boot_drop(&b);
-            provider_registry_destroy(nreg);
-            svc->reload_fail++;
-            svc->reload_next_ms = now + LLM_RELOAD_BACKOFF_MS;
-            airy_mtx_unlock(&svc->reload_lock);
-            SVC_LOG_ERROR("C-19: SVC: reload rejected — slot %s 引用未注册模型 '%s'，"
-                          "保留旧配置",
-                          svc_slot_name(i), v);
-            return AIRY_ERR_STATE_ERROR;
-        }
-        SVC_LOG_WARN("C-19: SVC: slot %s='%s' 未注册，AIRY_ALLOW_UNKNOWN_MODEL 放行",
-                     svc_slot_name(i), v);
-    }
+    if (reload_check_slots(svc, &b, nreg, now) != AIRY_OK)
+        return AIRY_ERR_STATE_ERROR;
 
     /* 快照不在此处重照（0.1.20 D2-7）：应用成功后由 svc_mw_reload 自行
      * rebase 主监视，apply 回调再 rebase 副监视。此处照快照等于同一文件

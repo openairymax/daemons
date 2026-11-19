@@ -34,6 +34,54 @@
 
 #ifndef _WIN32
 
+/* 连接 maths_d socket；成功返回 fd，失败返回负错误码（res 已置）。 */
+static int maths_connect(const char *sock_path, tool_result_t *res)
+{
+    int fd = (int)socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0)
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL, "maths_d: socket() failed");
+
+    struct sockaddr_un addr;
+    AIRY_MEMSET(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    if (strlen(sock_path) >= sizeof(addr.sun_path)) {
+        close(fd);
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "maths_d socket path too long");
+    }
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", sock_path);
+
+    if (connect(fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        close(fd);
+        return btool_fail(res, AIRY_ERR_STATE_ERROR,
+                          "maths_d not reachable at %s (is maths_d running?)", sock_path);
+    }
+    return fd;
+}
+
+/* 等首包并收完整响应；返回总字节数，-1 超时。 */
+static int maths_wait_recv(int fd, char *resp, size_t resp_sz)
+{
+    struct pollfd pfd;
+    pfd.fd = fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    int pr = poll(&pfd, 1, MATHS_RPC_TIMEOUT_MS);
+    if (pr <= 0 || !(pfd.revents & POLLIN))
+        return -1;
+
+    size_t total = 0;
+    for (;;) {
+        ssize_t n = recv(fd, resp + total, resp_sz - total - 1, 0);
+        if (n <= 0)
+            break;
+        total += (size_t)n;
+        if (total >= resp_sz - 1)
+            break;
+    }
+    resp[total] = '\0';
+    return (int)total;
+}
+
 /* 经 Unix Socket 向 maths_d 发送一条 JSON-RPC 请求并收取响应。
  * 返回 0 成功（resp 含完整响应体）；负值失败（res->error 已置）。 */
 static int maths_rpc_call(const char *method, const char *params_json,
@@ -46,25 +94,9 @@ static int maths_rpc_call(const char *method, const char *params_json,
         return btool_fail(res, AIRY_ERR_STATE_ERROR,
                           "maths_d socket path unavailable");
 
-    int fd = (int)socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) return btool_fail(res, AIRY_ERR_EXEC_FAIL, "maths_d: socket() failed");
-
-    struct sockaddr_un addr;
-    AIRY_MEMSET(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    if (strlen(sock_path) >= sizeof(addr.sun_path)) {
-        close(fd);
-        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
-                          "maths_d socket path too long");
-    }
-    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", sock_path);
-
-    if (connect(fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        close(fd);
-        return btool_fail(res, AIRY_ERR_STATE_ERROR,
-                          "maths_d not reachable at %s (is maths_d running?)",
-                          sock_path);
-    }
+    int fd = maths_connect(sock_path, res);
+    if (fd < 0)
+        return fd;
 
     char req[8192];
     snprintf(req, sizeof(req),
@@ -77,27 +109,13 @@ static int maths_rpc_call(const char *method, const char *params_json,
     }
 
     /* 等待首包（防 maths_d 卡死阻塞 tool_d），再循环 recv 收完整响应 */
-    struct pollfd pfd;
-    pfd.fd = fd;
-    pfd.events = POLLIN;
-    pfd.revents = 0;
-    int pr = poll(&pfd, 1, MATHS_RPC_TIMEOUT_MS);
-    if (pr <= 0 || !(pfd.revents & POLLIN)) {
-        close(fd);
-        return btool_fail(res, AIRY_ERR_TIMEOUT, "maths_d: response timeout");
-    }
-
-    size_t total = 0;
-    for (;;) {
-        ssize_t n = recv(fd, resp + total, resp_sz - total - 1, 0);
-        if (n <= 0) break;
-        total += (size_t)n;
-        if (total >= resp_sz - 1) break;
-    }
-    resp[total] = '\0';
+    int total = maths_wait_recv(fd, resp, resp_sz);
     close(fd);
 
-    if (total == 0) return btool_fail(res, AIRY_ERR_EXEC_FAIL, "maths_d: empty response");
+    if (total < 0)
+        return btool_fail(res, AIRY_ERR_TIMEOUT, "maths_d: response timeout");
+    if (total == 0)
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL, "maths_d: empty response");
     return 0;
 }
 

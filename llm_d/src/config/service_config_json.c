@@ -23,6 +23,61 @@
 
 #include "config/model_loader.h"
 
+/* api_key_env → "env:NAME"；空值不设，保持 provider_base_init 的 local 语义。 */
+static void json_key_env(provider_config_t *pcfg, const cJSON *pkey_env)
+{
+    if (!cJSON_IsString(pkey_env) || !pkey_env->valuestring[0])
+        return;
+    size_t env_len = strlen(pkey_env->valuestring);
+    char *key_buf = (char *)AIRY_MALLOC(4 + env_len + 1);
+    if (!key_buf)
+        return;
+    __builtin_memcpy(key_buf, "env:", 4);
+    __builtin_memcpy(key_buf + 4, pkey_env->valuestring, env_len + 1);
+    pcfg->api_key = key_buf;
+}
+
+/* models 数组 → NULL 结尾的字符串表；非数组视为未声明。 */
+static void json_models(provider_config_t *pcfg, const cJSON *pmodels)
+{
+    if (!cJSON_IsArray(pmodels))
+        return;
+    int mcount = cJSON_GetArraySize(pmodels);
+    char **marr = (char **)AIRY_CALLOC((size_t)mcount + 1, sizeof(char *));
+    if (!marr)
+        return;
+    for (int j = 0; j < mcount; ++j) {
+        cJSON *mitem = cJSON_GetArrayItem(pmodels, j);
+        if (cJSON_IsString(mitem))
+            marr[j] = AIRY_STRDUP(mitem->valuestring);
+    }
+    marr[mcount] = NULL;
+    pcfg->models = marr;
+}
+
+/* 解析单个 provider 条目；name 非字符串返回 0（跳过该条目）。 */
+static int json_parse_provider(cJSON *pitem, provider_config_t *pcfg)
+{
+    cJSON *pname = cJSON_GetObjectItem(pitem, "name");
+    if (!cJSON_IsString(pname))
+        return 0;
+
+    cJSON *pbase = cJSON_GetObjectItem(pitem, "base_url");
+    cJSON *ptimeout = cJSON_GetObjectItem(pitem, "timeout_sec");
+    cJSON *pretries = cJSON_GetObjectItem(pitem, "max_retries");
+
+    pcfg->name = AIRY_STRDUP(pname->valuestring);
+    json_key_env(pcfg, cJSON_GetObjectItem(pitem, "api_key_env"));
+    if (cJSON_IsString(pbase))
+        pcfg->api_base = AIRY_STRDUP(pbase->valuestring);
+    if (cJSON_IsNumber(ptimeout))
+        pcfg->timeout_sec = ptimeout->valuedouble;
+    if (cJSON_IsNumber(pretries))
+        pcfg->max_retries = pretries->valueint;
+    json_models(pcfg, cJSON_GetObjectItem(pitem, "models"));
+    return 1;
+}
+
 /* 从 JSON 的 providers 数组装载模型配置，数组与计数由调用方释放。 */
 int svc_load_model_config_json(const char *config_path, provider_config_t **out_providers,
                                size_t *out_count)
@@ -86,50 +141,7 @@ int svc_load_model_config_json(const char *config_path, provider_config_t **out_
     size_t valid_count = 0;
     for (int i = 0; i < n; ++i) {
         cJSON *pitem = cJSON_GetArrayItem(providers_arr, i);
-        cJSON *pname = cJSON_GetObjectItem(pitem, "name");
-        cJSON *pkey_env = cJSON_GetObjectItem(pitem, "api_key_env");
-        cJSON *pbase = cJSON_GetObjectItem(pitem, "base_url");
-        cJSON *ptimeout = cJSON_GetObjectItem(pitem, "timeout_sec");
-        cJSON *pretries = cJSON_GetObjectItem(pitem, "max_retries");
-        cJSON *pmodels = cJSON_GetObjectItem(pitem, "models");
-
-        if (!cJSON_IsString(pname))
-            continue;
-
-        provider_config_t *pcfg = &result[valid_count];
-        pcfg->name = AIRY_STRDUP(pname->valuestring);
-
-        if (cJSON_IsString(pkey_env) && pkey_env->valuestring[0]) {
-            size_t env_len = strlen(pkey_env->valuestring);
-            char *key_buf = (char *)AIRY_MALLOC(4 + env_len + 1);
-            if (key_buf) {
-                __builtin_memcpy(key_buf, "env:", 4);
-                __builtin_memcpy(key_buf + 4, pkey_env->valuestring, env_len + 1);
-                pcfg->api_key = key_buf;
-            }
-        }
-
-        if (cJSON_IsString(pbase))
-            pcfg->api_base = AIRY_STRDUP(pbase->valuestring);
-        if (cJSON_IsNumber(ptimeout))
-            pcfg->timeout_sec = ptimeout->valuedouble;
-        if (cJSON_IsNumber(pretries))
-            pcfg->max_retries = pretries->valueint;
-
-        if (cJSON_IsArray(pmodels)) {
-            int mcount = cJSON_GetArraySize(pmodels);
-            char **marr = (char **)AIRY_CALLOC((size_t)mcount + 1, sizeof(char *));
-            if (marr) {
-                for (int j = 0; j < mcount; ++j) {
-                    cJSON *mitem = cJSON_GetArrayItem(pmodels, j);
-                    if (cJSON_IsString(mitem))
-                        marr[j] = AIRY_STRDUP(mitem->valuestring);
-                }
-                marr[mcount] = NULL;
-                pcfg->models = marr;
-            }
-        }
-        valid_count++;
+        valid_count += (size_t)json_parse_provider(pitem, &result[valid_count]);
     }
 
     *out_providers = result;

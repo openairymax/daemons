@@ -158,6 +158,38 @@ static void builtin_glob_impl(const char *base, const char **segs, size_t n, siz
                       path_len, path_cap, out, out_cap, out_len, count, max, timed_out, deadline);
 }
 
+/* 拆分 pattern 为段（上限 64，原地 malloc 拷贝）；返回段数，负值为错误码。 */
+static int glob_split_pattern(const char *pattern, const char *segs[64], tool_result_t *res)
+{
+    size_t nsegs = 0;
+    const char *s = pattern;
+    while (*s) {
+        while (*s == '/')
+            s++;
+        if (!*s)
+            break;
+        const char *e = s;
+        while (*e && *e != '/')
+            e++;
+        if (nsegs >= 64)
+            return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                              "pattern too deep (max 64 segments)");
+        char *seg = (char *)AIRY_MALLOC((size_t)(e - s) + 1);
+        if (!seg) {
+            for (size_t k = 0; k < nsegs; k++)
+                AIRY_FREE((void *)segs[k]);
+            return AIRY_ERR_OUT_OF_MEMORY;
+        }
+        AIRY_MEMCPY(seg, s, (size_t)(e - s));
+        seg[e - s] = '\0';
+        segs[nsegs++] = seg;
+        s = e;
+    }
+    if (nsegs == 0)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "pattern is empty after splitting");
+    return (int)nsegs;
+}
+
 int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
@@ -173,31 +205,10 @@ int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
         return rc;
 
     const char *segs[64];
-    size_t nsegs = 0;
-    const char *s = pattern;
-    while (*s) {
-        while (*s == '/')
-            s++;
-        if (!*s)
-            break;
-        const char *e = s;
-        while (*e && *e != '/')
-            e++;
-        if (nsegs >= 64)
-            return btool_fail(res, AIRY_ERR_INVALID_PARAM, "pattern too deep (max 64 segments)");
-        char *seg = (char *)AIRY_MALLOC((size_t)(e - s) + 1);
-        if (!seg) {
-            for (size_t k = 0; k < nsegs; k++)
-                AIRY_FREE((void *)segs[k]);
-            return AIRY_ERR_OUT_OF_MEMORY;
-        }
-        AIRY_MEMCPY(seg, s, (size_t)(e - s));
-        seg[e - s] = '\0';
-        segs[nsegs++] = seg;
-        s = e;
-    }
-    if (nsegs == 0)
-        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "pattern is empty after splitting");
+    int seg_rc = glob_split_pattern(pattern, segs, res);
+    if (seg_rc < 0)
+        return seg_rc;
+    size_t nsegs = (size_t)seg_rc;
 
     char *out = (char *)AIRY_CALLOC(BUILTIN_OUTPUT_CAP, 1);
     char *path = (char *)AIRY_MALLOC(AIRY_PATH_MAX);
