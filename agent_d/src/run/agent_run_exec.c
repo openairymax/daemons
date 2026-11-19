@@ -24,6 +24,7 @@
 #include "airy_memory.h"
 #include "airy_run_stream.h"
 #include "daemon_rpc_client.h"
+#include "err_class.h"
 #include "error.h"
 #include "hall_event.h"
 #include "platform.h"
@@ -78,6 +79,7 @@ typedef struct {
      * 客户端据此区分「不可达 / 鉴权 / 超时 / 模型名错误」。 */
     char fail_msg[256];
     int fail_transport;   /* 上游失败是否为传输层（决定能否说「不可达」） */
+    int fail_code;        /* 'E' 帧携带的真实上游码（0 = 未携带） */
     uint64_t think_ms;
     uint64_t llm_ms;
     uint64_t tool_ms;
@@ -447,6 +449,7 @@ static void run_loop(run_ctx_t *c, const cJSON *history)
     c->fail_denied = lr.fail_denied;
     AIRY_STRNCPY_TERM(c->fail_msg, lr.fail_msg, sizeof(c->fail_msg));
     c->fail_transport = lr.fail_transport;
+    c->fail_code = lr.fail_code;
 }
 
 /* 会话槽位 + 模型解析：调用方给定合法 sess_ ID 时沿用，否则生成新 ID。
@@ -890,20 +893,20 @@ static cJSON *run_fail_obj(const run_ctx_t *c)
 
     if (!f)
         return NULL;
-    /* 上游失败按实际错误类别再细分：只有传输层才说「不可达」；可达但被拒
-     * （鉴权/模型名/配额/5xx）归 provider_error 且不可原样重试，避免把配置
-     * 错误误导成网络故障。 */
+    /* 上游失败按实际错误类别再细分：传输层才说「不可达」；可达但瞬时故障
+     * （5xx/空响应/解析失败/限流）与配置类（鉴权/模型名/参数/策略拒绝）
+     * 都归 provider_error，但只有配置类不可重试——原样重发对瞬时故障有效，
+     * 对配置错误只会重复失败。 */
     if (c->rc == AGENT_RUN_RC_LLM_FAIL) {
+        airy_err_class_t cls = airy_err_class_of(c->fail_code);
         d.origin = AIRY_RS_ORIGIN_PROVIDER;
-        if (c->fail_transport) {
-            d.reason = AIRY_RS_REASON_PROVIDER;
-            d.retryable = 1;
-            d.next_action = AIRY_RS_NEXT_RETRY;
-        } else {
-            d.reason = AIRY_RS_REASON_PROVIDER_ERR;
-            d.retryable = 0;
-            d.next_action = AIRY_RS_NEXT_INSPECT;
-        }
+        d.reason = c->fail_transport ? AIRY_RS_REASON_PROVIDER : AIRY_RS_REASON_PROVIDER_ERR;
+        /* 未携带真实上游码时退回传输判据：无码的 LLM_FAIL 只可能来自
+         * llm_d 不可达或协议拒绝，前者可重试、后者不可。 */
+        d.retryable = c->fail_code != 0
+                          ? (cls != AIRY_ERR_CLASS_CONFIG && cls != AIRY_ERR_CLASS_POLICY)
+                          : c->fail_transport;
+        d.next_action = d.retryable ? AIRY_RS_NEXT_RETRY : AIRY_RS_NEXT_INSPECT;
     }
     if (!c->fail_node[0] && cJSON_IsString(id) && id->valuestring[0])
         node = id->valuestring;

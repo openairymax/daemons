@@ -13,6 +13,7 @@
  */
 
 #include "airy_memory.h"
+#include "err_class.h"
 #include "error.h"
 #include "svc_llm_d.h"
 #include "llm_d_internal.h"
@@ -24,6 +25,8 @@
 #include "router/core/llm_rtr_health.h"
 #include "token.h"
 #include "token_standard.h"
+
+#include <cjson/cJSON.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -636,25 +639,58 @@ static int llm_stream_callback(const char *chunk, void *user_data)
 
 /* P24（0.1.12）：流式路径的错误必须以 RS 'E' 帧下发——裸 JSON-RPC 信封会被
  * adapter 流解复用器当正文转发给客户端（社区 ubuntu v0.1.11 实证）；旧
- * adapter 不识别 'E' 标签则整帧丢弃（可接受的降级）。帧体由 jsonrpc_build_error
- * 构造，避免把 message 以 %s 裸拼进 JSON 时转义责任落到各调用点。
+ * adapter 不识别 'E' 标签则整帧丢弃（可接受的降级）。帧体由 cJSON 构造，
+ * 避免把 message 以 %s 裸拼进 JSON 时转义责任落到各调用点。
  *
  * '\x1e' 必须写成字符字面量：\x 转义会吞掉紧随的十六进制字符（'E' 也是
- * hex digit），"\x1eE{..." 被解析成 0x1EE（clang #132 macOS 实证）。 */
-static void llm_stream_send_error_frame(airy_sock_t fd, int id, int code, const char *message)
+ * hex digit），"\x1eE{..." 被解析成 0x1EE（clang #132 macOS 实证）。
+ *
+ * L-8（0.1.21）：信封 code 只能是 JSON-RPC 协议码，真实上游错误码另置
+ * error.data.err（ErrorModel v1：class + code）。此前一律折叠成 -32603，
+ * 客户端无法区分「上游不可达 / 上游瞬时故障 / 配置错误」，只能把全部失败
+ * 归为不可重试的业务错误。帧体用堆缓冲：失败文案最长 640 字节，固定 512
+ * 栈缓冲会让超长帧被静默丢弃，客户端只看得到空流。 */
+static void llm_stream_send_error_frame(airy_sock_t fd, int id, int code, int upstream,
+                                        const char *message)
 {
-    char *body = jsonrpc_build_error(code, message, id);
+    cJSON *root = cJSON_CreateObject();
+    cJSON *err;
+    char *body;
+    char *frame;
+    size_t blen;
+
+    if (!root)
+        return;
+    cJSON_AddStringToObject(root, "jsonrpc", "2.0");
+    err = cJSON_AddObjectToObject(root, "error");
+    if (!err) {
+        cJSON_Delete(root);
+        return;
+    }
+    cJSON_AddNumberToObject(err, "code", code);
+    cJSON_AddStringToObject(err, "message", message ? message : "");
+    if (upstream != 0) {
+        cJSON *data = cJSON_AddObjectToObject(err, "data");
+        if (data)
+            (void)airy_err_json_put(data, airy_err_class_of((airy_err_t)upstream),
+                                    (airy_err_t)upstream, message, NULL);
+    }
+    cJSON_AddNumberToObject(root, "id", id);
+
+    body = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
     if (!body)
         return;
 
-    const size_t blen = strlen(body);
-    char buf[512];
-    if (blen + 3 <= sizeof(buf)) {
-        buf[0] = '\x1e';
-        buf[1] = 'E';
-        AIRY_MEMCPY(buf + 2, body, blen);
-        buf[blen + 2] = '\x1e';
-        llm_stream_send_all(fd, buf, blen + 3);
+    blen = strlen(body);
+    frame = (char *)AIRY_MALLOC(blen + 3);
+    if (frame) {
+        frame[0] = '\x1e';
+        frame[1] = 'E';
+        AIRY_MEMCPY(frame + 2, body, blen);
+        frame[blen + 2] = '\x1e';
+        (void)llm_stream_send_all(fd, frame, blen + 3);
+        AIRY_FREE(frame);
     }
     AIRY_FREE(body);
 }
@@ -693,7 +729,7 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
         char rbuf[200];
         snprintf(rbuf, sizeof(rbuf), "Invalid params: %s", reason);
         SVC_LOG_ERROR("complete_stream: %s", rbuf);
-        llm_stream_send_error_frame(fd, id, JSONRPC_INVALID_PARAMS, rbuf);
+        llm_stream_send_error_frame(fd, id, JSONRPC_INVALID_PARAMS, 0, rbuf);
         request_context_destroy(ctx);
         return;
     }
@@ -730,7 +766,7 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
         char ebuf[640];
         const char *msg = llm_fail_msg(ret, ebuf, sizeof(ebuf));
         SVC_LOG_ERROR("complete_stream: %s", msg);
-        llm_stream_send_error_frame(fd, id, JSONRPC_INTERNAL_ERROR, msg);
+        llm_stream_send_error_frame(fd, id, JSONRPC_INTERNAL_ERROR, ret, msg);
         return;
     }
 
