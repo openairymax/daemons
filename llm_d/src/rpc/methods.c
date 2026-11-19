@@ -303,10 +303,10 @@ static const char *probe_reason(int rc, long code, int key_missing, int base_mis
     return "unexpected_status";
 }
 
-static void handle_probe(cJSON *params, int id, airy_sock_t fd)
+/* 探测目标：显式 model 精确命中优先；未注册的 model 是请求错误，不回落。
+ * 否则按 provider 名选（want 为空时取注册表首项）。 */
+static const provider_t *probe_pick_prov(cJSON *params, airy_sock_t fd, int id)
 {
-    JSONRPC_REQUIRE(params && g_service, fd, "Invalid params", id);
-
     cJSON *pj = cJSON_GetObjectItem(params, "provider");
     cJSON *mj = cJSON_GetObjectItem(params, "model");
     const char *want = (cJSON_IsString(pj) && pj->valuestring && pj->valuestring[0])
@@ -318,23 +318,72 @@ static void handle_probe(cJSON *params, int id, airy_sock_t fd)
 
     provider_registry_t *reg = llm_svc_reg(g_service);
     const provider_t *prov = (model && reg) ? provider_registry_find(reg, model) : NULL;
-    if (model && !prov) {
+    if (prov)
+        return prov;
+    if (model) {
         JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "model not registered", id);
-        return;
+        return NULL;
     }
-    if (!prov) {
-        probe_pick_t pick = {.want = want, .hit = NULL, .exact = 0};
-        provider_reg_walk(reg, probe_walk, &pick);
-        if (want && !pick.exact) {
-            JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "provider not found", id);
-            return;
-        }
-        prov = pick.hit;
+
+    probe_pick_t pick = {.want = want, .hit = NULL, .exact = 0};
+    provider_reg_walk(reg, probe_walk, &pick);
+    if (want && !pick.exact) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "provider not found", id);
+        return NULL;
     }
-    if (!prov) {
+    if (!pick.hit) {
         JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "no provider configured", id);
+        return NULL;
+    }
+    return pick.hit;
+}
+
+/* 传输探测：api_base/密钥齐全才发 GET /models（缺项不发请求，
+ * 由 reason 说明缺什么，避免把配置缺失误报成上游不可达）。 */
+static int probe_run(const provider_t *prov, provider_base_ctx_t *base, int attempted,
+                     long *out_code, double *out_latency)
+{
+    *out_code = 0;
+    *out_latency = 0.0;
+    if (!attempted)
+        return AIRY_ERR_INVALID_PARAM;
+    uint64_t t0 = airy_time_ms();
+    provider_http_resp_t *resp = NULL;
+    int rc = prov_probe_get(base, "/models", prov->adapter ? prov->adapter->headers : NULL, 8.0,
+                            &resp, out_code);
+    *out_latency = (double)(airy_time_ms() - t0);
+    provider_http_resp_free(resp);
+    return rc;
+}
+
+/* 探测结果：reachable 只由 reason 判定；实际发过请求且失败时附原始码。 */
+static void probe_reply(airy_sock_t fd, int id, const provider_t *prov,
+                        const provider_base_ctx_t *base, const char *reason, long code,
+                        double latency_ms, int rc, int attempted)
+{
+    cJSON *result = cJSON_CreateObject();
+    if (!result) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
         return;
     }
+    cJSON_AddStringToObject(result, "provider", prov->name);
+    cJSON_AddStringToObject(result, "api_base", base->api_base);
+    cJSON_AddBoolToObject(result, "reachable", strcmp(reason, "ok") == 0);
+    cJSON_AddNumberToObject(result, "http_code", (double)code);
+    cJSON_AddNumberToObject(result, "latency_ms", latency_ms);
+    cJSON_AddStringToObject(result, "reason", reason);
+    if (attempted && rc != AIRY_OK)
+        cJSON_AddNumberToObject(result, "rc", (double)rc);
+    JSONRPC_SEND_SUCCESS(fd, result, id);
+}
+
+static void handle_probe(cJSON *params, int id, airy_sock_t fd)
+{
+    JSONRPC_REQUIRE(params && g_service, fd, "Invalid params", id);
+
+    const provider_t *prov = probe_pick_prov(params, fd, id);
+    if (!prov)
+        return;
 
     provider_base_ctx_t *base = prov->ctx ? provider_base_ctx(prov->ctx) : NULL;
     if (!base) {
@@ -349,34 +398,13 @@ static void handle_probe(cJSON *params, int id, airy_sock_t fd)
     int key_missing = (!base_missing && prov->adapter && prov->adapter->headers &&
                        prov->adapter->headers->auth != PROVIDER_AUTH_NONE &&
                        base->api_key[0] == '\0');
+    int attempted = !base_missing && !key_missing;
 
-    int rc = AIRY_ERR_INVALID_PARAM;
     long code = 0;
     double latency_ms = 0.0;
-    if (!base_missing && !key_missing) {
-        uint64_t t0 = airy_time_ms();
-        provider_http_resp_t *resp = NULL;
-        rc = prov_probe_get(base, "/models", prov->adapter ? prov->adapter->headers : NULL,
-                            8.0, &resp, &code);
-        latency_ms = (double)(airy_time_ms() - t0);
-        provider_http_resp_free(resp);
-    }
-
-    const char *reason = probe_reason(rc, code, key_missing, base_missing);
-    cJSON *result = cJSON_CreateObject();
-    if (!result) {
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
-        return;
-    }
-    cJSON_AddStringToObject(result, "provider", prov->name);
-    cJSON_AddStringToObject(result, "api_base", base->api_base);
-    cJSON_AddBoolToObject(result, "reachable", strcmp(reason, "ok") == 0);
-    cJSON_AddNumberToObject(result, "http_code", (double)code);
-    cJSON_AddNumberToObject(result, "latency_ms", latency_ms);
-    cJSON_AddStringToObject(result, "reason", reason);
-    if (!base_missing && !key_missing && rc != AIRY_OK)
-        cJSON_AddNumberToObject(result, "rc", (double)rc);
-    JSONRPC_SEND_SUCCESS(fd, result, id);
+    int rc = probe_run(prov, base, attempted, &code, &latency_ms);
+    probe_reply(fd, id, prov, base, probe_reason(rc, code, key_missing, base_missing), code,
+                latency_ms, rc, attempted);
 }
 
 static void handle_health_check(cJSON *params, int id, airy_sock_t fd)
