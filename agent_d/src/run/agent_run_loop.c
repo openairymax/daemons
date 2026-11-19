@@ -62,7 +62,11 @@ int rounds_resolve(int requested)
  *   工具熔断         tool      tool              0          inspect
  *   审批拒绝         tool      denied            0          inspect
  *   上游不可达       provider  provider          1          retry
- *   上游可达但报错   provider  provider_error    0          inspect
+ *   上游瞬时故障     provider  provider_error    1          retry
+ *   上游配置错误     provider  provider_error    0          inspect
+ * 「瞬时」指 5xx/空响应/解析失败/限流等原样重发安全的上游故障；「配置」
+ * 指鉴权/模型名/参数/策略拒绝，重发只会重复失败。两者都归 provider_error，
+ * 区别只在 retryable——该字段由 'E' 帧真实上游码的错误类别判定。
  * retryable 只表示「原样重发是否安全」，不等于能推进：budget 必须用令牌
  * 续跑，重发同一 prompt 只会再耗一轮预算；denied 需人工放行后重提。 */
 agent_fail_desc_t agent_fail_desc(int rc, int denied)
@@ -593,12 +597,18 @@ static int llm_fail_fill(loop_ctx_t *r, int lrc, agent_stream_result_t *sr)
     /* 上游失败必须带着原始码与文案离开本函数：以前只记日志并返回 -1，
      * 终态帧只能兜底成「tool loop exhausted or LLM service error」，
      * 客户端把它渲染成「未知错误」。 */
-    int ec = sr->error_code ? sr->error_code : lrc;
+    int ec = sr->upstream_code ? sr->upstream_code
+                               : (sr->error_code ? sr->error_code : lrc);
     const char *detail = sr->error_msg[0] ? sr->error_msg : airy_err_str(ec);
-    int transport = ec > 0 && airy_err_class_of(ec) == AIRY_ERR_CLASS_TRANSPORT;
+    /* 分类必须吃负码：错误码全为负，曾经的 ec > 0 守卫让任何失败都判不出
+     * 传输层，客户端只能把上游不可达当成业务错误。 */
+    int transport = ec != 0 && airy_err_class_of(ec) == AIRY_ERR_CLASS_TRANSPORT;
     if (!detail || !detail[0])
         detail = "no detail from provider";
     r->out->fail_transport = transport;
+    /* 真实上游码（'E' 帧 data.err）单独回填：协议信封码（-32603/-32602）
+     * 无法区分瞬时故障与配置错误，重试语义只能按真实码判定。 */
+    r->out->fail_code = sr->upstream_code;
     if (transport)
         snprintf(r->out->fail_msg, sizeof(r->out->fail_msg),
                  "LLM service unreachable (code=%d): %s", ec, detail);
