@@ -537,6 +537,7 @@ static int sup_proc_spawn(sup_ctx_t *ctx, sup_proc_t *p)
     }
     p->state = SUP_ST_STARTING;
     p->dead_ticks = 0;
+    p->ready_until = sup_now_ms() + (p->ready_ms > 0 ? p->ready_ms : ctx->startup_grace_ms);
     return SUP_SPAWN_OK;
 }
 
@@ -835,6 +836,14 @@ void sup_health_tick(sup_ctx_t *ctx, sup_proc_t *p)
         p->state = SUP_ST_RUNNING;
         p->dead_ticks = 0;
         p->fail_count = 0;
+        return;
+    }
+    /* 启动宽限：自托管模型（llama.cpp）要先把权重读入内存才监听端口，
+     * 期间探活必然失败。宽限窗口内不累计假死，否则 15s 就被 SIGKILL，
+     * 大模型永远起不来。窗口过后恢复正常假死判定。 */
+    if (p->ready_until > 0 && sup_now_ms() < p->ready_until) {
+        if (p->state != SUP_ST_STARTING)
+            p->state = SUP_ST_STARTING;
         return;
     }
     p->dead_ticks++;
