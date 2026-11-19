@@ -145,6 +145,63 @@ static int fs_delete_tree(const char *path, int depth)
     return rmdir(path);
 }
 
+static int del_path_ok(const cJSON *path)
+{
+    return cJSON_IsString(path) && path->valuestring && path->valuestring[0];
+}
+
+/* 参数只允许真布尔或非零数字表示 recursive。 */
+static int del_is_recursive(const cJSON *rec)
+{
+    return (cJSON_IsBool(rec) && cJSON_IsTrue(rec)) ||
+           (cJSON_IsNumber(rec) && rec->valueint != 0);
+}
+
+/* 非递归删目录：非空目录拒绝，空目录 rmdir。返回 1 表示已产出结果。 */
+static int del_dir_flat(const char *p, tool_result_t *res, int *rc)
+{
+    DIR *d = opendir(p);
+    if (!d) {
+        *rc = btool_fail(res, AIRY_ERR_IO, "Cannot open directory '%s': %s", p, strerror(errno));
+        return 1;
+    }
+    int non_empty = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+            continue;
+        non_empty = 1;
+        break;
+    }
+    closedir(d);
+    if (non_empty) {
+        *rc = btool_soft(res, "Directory '%s' is not empty; set \"recursive\":true to "
+                              "delete the whole tree (destructive)",
+                         p);
+        return 1;
+    }
+    if (rmdir(p) == 0) {
+        *rc = btool_okf(res, "Removed directory '%s'", p);
+        return 1;
+    }
+    return 0;
+}
+
+/* 删除目录：递归整树或非递归单层；返回最终 rc。 */
+static int del_dir(const char *p, int recursive, tool_result_t *res)
+{
+    if (!recursive) {
+        int rc = 0;
+        if (del_dir_flat(p, res, &rc))
+            return rc;
+        return btool_fail(res, AIRY_ERR_IO, "Failed to remove directory '%s': %s", p,
+                          strerror(errno));
+    }
+    if (fs_delete_tree(p, 0) == 0)
+        return btool_okf(res, "Removed directory tree '%s'", p);
+    return btool_fail(res, AIRY_ERR_IO, "Failed to remove directory '%s': %s", p, strerror(errno));
+}
+
 int fs_delete_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     (void)timeout_ms;
@@ -153,14 +210,13 @@ int fs_delete_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
     });
     cJSON *path = cJSON_GetObjectItem(root, "path");
     cJSON *rec = cJSON_GetObjectItem(root, "recursive");
-    if (!cJSON_IsString(path) || !path->valuestring || !path->valuestring[0])
+    if (!del_path_ok(path))
         return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Missing required string parameter: path");
     const char *p = path->valuestring;
     if (strcmp(p, "/") == 0 || strcmp(p, ".") == 0 || strcmp(p, "..") == 0)
         return btool_fail(res, AIRY_ERR_INVALID_PARAM,
                           "Refusing to delete a root or current directory");
-    int recursive = (cJSON_IsBool(rec) && cJSON_IsTrue(rec)) ||
-                    (cJSON_IsNumber(rec) && rec->valueint != 0);
+    int recursive = del_is_recursive(rec);
 
     /* Confinement (T16): resolve the path into the workspace before any
      * filesystem access. "./", "sub/.." or an absolute path equal to the
@@ -181,34 +237,9 @@ int fs_delete_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
         return btool_fail(res, code, "Cannot access '%s': %s", p, strerror(errno));
     }
 
-    if (S_ISDIR(st.st_mode)) {
-        if (!recursive) {
-            /* 非空目录拒绝；空目录允许直接删除（rmdir 语义）。 */
-            DIR *d = opendir(p);
-            if (!d)
-                return btool_fail(res, AIRY_ERR_IO, "Cannot open directory '%s': %s", p,
-                                  strerror(errno));
-            int non_empty = 0;
-            struct dirent *e;
-            while ((e = readdir(d)) != NULL) {
-                if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
-                    continue;
-                non_empty = 1;
-                break;
-            }
-            closedir(d);
-            if (non_empty)
-                return btool_soft(res, "Directory '%s' is not empty; set \"recursive\":true to "
-                                       "delete the whole tree (destructive)",
-                                  p);
-            if (rmdir(p) == 0)
-                return btool_okf(res, "Removed directory '%s'", p);
-        } else if (fs_delete_tree(p, 0) == 0) {
-            return btool_okf(res, "Removed directory tree '%s'", p);
-        }
-        return btool_fail(res, AIRY_ERR_IO, "Failed to remove directory '%s': %s", p,
-                          strerror(errno));
-    }
+    /* 非空目录拒绝；空目录允许直接删除（rmdir 语义）。 */
+    if (S_ISDIR(st.st_mode))
+        return del_dir(p, recursive, res);
 
     if (unlink(p) != 0)
         return btool_fail(res, AIRY_ERR_IO, "Failed to delete file '%s': %s", p, strerror(errno));

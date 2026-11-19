@@ -220,6 +220,41 @@ static void tool_hall_emit_result(const tool_metadata_t *meta, const char *calle
     cJSON_Delete(evt);
 }
 
+/* 参数摘要：超长截断并压成单行（换行会破坏日志记录结构）。 */
+static void call_log_params(char *params, size_t cap, const char *params_json)
+{
+    size_t plen = params_json ? strlen(params_json) : 0;
+    if (plen >= cap) {
+        __builtin_memcpy(params, params_json, cap - 5);
+        __builtin_memcpy(params + cap - 5, "...", 4);
+        params[cap - 1] = '\0';
+    } else if (plen > 0) {
+        __builtin_memcpy(params, params_json, plen + 1);
+    } else {
+        params[0] = '\0';
+    }
+    for (char *q = params; *q; q++)
+        if (*q == '\n' || *q == '\r')
+            *q = ' ';
+}
+
+/* 结果状态短标签。 */
+static const char *call_log_status(const tool_result_t *result)
+{
+    if (!result)
+        return "?";
+    switch (result->failure_class) {
+    case TOOL_RESULT_CLASS_SUCCESS:
+        return tool_result_ok(result) ? "success" : "fail";
+    case TOOL_RESULT_CLASS_NORMAL_FAIL:
+        return "fail";
+    case TOOL_RESULT_CLASS_RESPOND_TO_MODEL:
+        return "respond";
+    default:
+        return "fatal";
+    }
+}
+
 /* P1-2 工具调用级日志（可观测性）：每次工具执行输出一条结构化调用记录，
  * 含调用方 agent / 工具名 / 参数摘要 / 耗时 / 结果状态。用于 CLI 与日志
  * 分析定位"任务执行链路"（哪个 agent 调了什么工具、成功与否、耗时）。 */
@@ -227,38 +262,8 @@ static void tool_call_log(const tool_metadata_t *meta, const char *caller_agent,
                           const char *params_json, const tool_result_t *result)
 {
     char params[192];
-    size_t plen = params_json ? strlen(params_json) : 0;
-    if (plen >= sizeof(params)) {
-        __builtin_memcpy(params, params_json, sizeof(params) - 5);
-        __builtin_memcpy(params + sizeof(params) - 5, "...", 4);
-        params[sizeof(params) - 1] = '\0';
-    } else if (plen > 0) {
-        __builtin_memcpy(params, params_json, plen + 1);
-    } else {
-        params[0] = '\0';
-    }
-    /* 参数 JSON 压缩为单行，避免换行破坏日志记录结构 */
-    for (char *q = params; *q; q++)
-        if (*q == '\n' || *q == '\r')
-            *q = ' ';
-
-    const char *st = "?";
-    if (result) {
-        switch (result->failure_class) {
-        case TOOL_RESULT_CLASS_SUCCESS:
-            st = tool_result_ok(result) ? "success" : "fail";
-            break;
-        case TOOL_RESULT_CLASS_NORMAL_FAIL:
-            st = "fail";
-            break;
-        case TOOL_RESULT_CLASS_RESPOND_TO_MODEL:
-            st = "respond";
-            break;
-        default:
-            st = "fatal";
-            break;
-        }
-    }
+    call_log_params(params, sizeof(params), params_json);
+    const char *st = call_log_status(result);
     const char *err = (result && result->error && result->error[0]) ? result->error : NULL;
     SVC_LOG_INFO("[tool] call agent=%s tool=%s dur=%ums status=%s exit=%d params=%s%s%s",
                  caller_agent ? caller_agent : "?", meta->name ? meta->name : "?",
@@ -364,6 +369,78 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     return tool_executor_run_ex(exec, meta, params_json, agent_id, 0, out_result);
 }
 
+/* agent_id 空串视作未声明调用方（走工具默认主体）。 */
+static const char *exec_caller(const char *agent_id)
+{
+    return (agent_id && agent_id[0]) ? agent_id : NULL;
+}
+
+static int exec_has_executable(const tool_metadata_t *meta)
+{
+    return meta->executable && meta->executable[0];
+}
+
+/* 审批闸门：fail-closed，未允许即返回授权错误（deny_reason 由闸门填充）。 */
+static airy_err_t exec_gate_check(tool_executor_t *exec, const tool_metadata_t *meta,
+                                  const char *params_json, const char *caller_agent,
+                                  int allow_dangerous, tool_result_t *result, char **deny_reason)
+{
+    approval_gate_verdict_t verdict =
+        gate_ask_ex(exec->gate, caller_agent, meta, params_json, allow_dangerous,
+                    result->approval, sizeof(result->approval), deny_reason);
+    return verdict == APPROVAL_GATE_ALLOWED ? AIRY_OK : AIRY_ERR_PERMISSION_DENIED;
+}
+
+/* argv: executable + 可选 params（单参数传入，无 shell 注入面）。 */
+static void exec_build_argv(const tool_metadata_t *meta, const char *params_json,
+                            const char **argv)
+{
+    int arg_count = 0;
+    argv[arg_count++] = meta->executable;
+    if (params_json && params_json[0] != '\0')
+        argv[arg_count++] = params_json;
+    argv[arg_count] = NULL;
+}
+
+/* 经沙箱执行（三层拦截）；失败时释放 output 并回填 deny_msg。 */
+static airy_err_t exec_sandbox_run(tool_executor_t *exec, const tool_metadata_t *meta,
+                                   const char *const *argv, char *output_buffer, size_t cap_size,
+                                   uint32_t timeout_ms, char **output, int *exec_result,
+                                   const char **deny_msg)
+{
+    *deny_msg = NULL;
+    if (!exec->sandbox) {
+        SVC_LOG_ERROR("sandbox is NULL — tool execution DENIED (fail-closed). "
+                      "Sandbox initialization failed during executor creation.");
+        AIRY_FREE(output_buffer);
+        *output = NULL;
+        *deny_msg = "Sandbox not configured (initialization failed)";
+        return AIRY_EPERM;
+    }
+
+    tool_execute_args_t targs = {.executable = meta->executable,
+                                 .argv = (char *const *)argv,
+                                 .timeout_ms = timeout_ms,
+                                 .output_buffer = output_buffer,
+                                 .cap_size = cap_size,
+                                 .exec_result = 0};
+    void *invoke_args[1] = {&targs};
+    void *sb_out_result = NULL;
+    airy_err_t sb_ret =
+        airy_sandbox_invoke(exec->sandbox, SYS_TOOL_EXECUTE, invoke_args, 1, &sb_out_result);
+    if (sb_ret != AIRY_SUCCESS) {
+        SVC_LOG_ERROR("sandbox denied tool '%s' execution (rc=%d) — fail-closed",
+                      meta->name ? meta->name : "?", (int)sb_ret);
+        AIRY_FREE(output_buffer);
+        *output = NULL;
+        *deny_msg = "Tool execution denied by sandbox (permission/quota/state)";
+        return AIRY_EPERM;
+    }
+    (void)sb_out_result;
+    *exec_result = targs.exec_result;
+    return AIRY_OK;
+}
+
 int tool_executor_run_ex(tool_executor_t *exec, const tool_metadata_t *meta,
                          const char *params_json, const char *agent_id, int allow_dangerous,
                          tool_result_t **out_result)
@@ -373,7 +450,8 @@ int tool_executor_run_ex(tool_executor_t *exec, const tool_metadata_t *meta,
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    const char *caller_agent = (agent_id && agent_id[0]) ? agent_id : NULL;
+    const char *caller_agent = exec_caller(agent_id);
+    const char *tool_id = meta->id ? meta->id : "?";
 
     *out_result = NULL;
 
@@ -393,11 +471,11 @@ int tool_executor_run_ex(tool_executor_t *exec, const tool_metadata_t *meta,
     if (strcmp(result->sandbox, "degraded") == 0)
         SVC_LOG_WARN("sandbox degraded: Landlock unavailable, tool '%s' runs with reduced "
                      "isolation",
-                     meta->id ? meta->id : "?");
+                     tool_id);
 
-    if (!meta->executable || strlen(meta->executable) == 0) {
+    if (!exec_has_executable(meta)) {
         SVC_LOG_ERROR("tool_executor_run: no executable specified in tool metadata (id=%s)",
-                      meta->id ? meta->id : "?");
+                      tool_id);
         *out_result = result;
         return tool_fail(result, AIRY_STRDUP("No executable specified in tool metadata"),
                          TOOL_RESULT_CLASS_RESPOND_TO_MODEL, AIRY_ERR_INVALID_PARAM);
@@ -427,10 +505,8 @@ int tool_executor_run_ex(tool_executor_t *exec, const tool_metadata_t *meta,
 
     {
         char *deny_reason = NULL;
-        approval_gate_verdict_t verdict =
-            gate_ask_ex(exec->gate, caller_agent, meta, params_json, allow_dangerous,
-                        result->approval, sizeof(result->approval), &deny_reason);
-        if (verdict != APPROVAL_GATE_ALLOWED) {
+        if (exec_gate_check(exec, meta, params_json, caller_agent, allow_dangerous, result,
+                            &deny_reason) != AIRY_OK) {
             *out_result = result;
             return tool_fail(result,
                              deny_reason ? deny_reason
@@ -457,12 +533,7 @@ int tool_executor_run_ex(tool_executor_t *exec, const tool_metadata_t *meta,
      * eliminating command-injection risk. params_json is passed as a single
      * argv element; the tool parses it itself. */
     const char *argv[3];
-    int arg_count = 0;
-    argv[arg_count++] = meta->executable;
-    if (params_json && strlen(params_json) > 0) {
-        argv[arg_count++] = params_json;
-    }
-    argv[arg_count] = NULL;
+    exec_build_argv(meta, params_json, argv);
 
     size_t cap_size = 1024 * 1024;
     char *output_buffer = (char *)AIRY_MALLOC(cap_size);
@@ -491,45 +562,22 @@ int tool_executor_run_ex(tool_executor_t *exec, const tool_metadata_t *meta,
      * Execution path: airy_sandbox_invoke -> permission_check -> quota_check ->
      * airy_syscall_invoke -> sys_tool_execute -> airy_process_run_capture
      */
-    if (!exec->sandbox) {
-        SVC_LOG_ERROR("sandbox is NULL — tool execution DENIED (fail-closed). "
-                      "Sandbox initialization failed during executor creation.");
+    int exec_result = 0;
+    const char *deny_msg = NULL;
+    airy_err_t sb_ret = exec_sandbox_run(exec, meta, argv, output_buffer, cap_size, timeout_ms,
+                                         &output_buffer, &exec_result, &deny_msg);
+    if (sb_ret != AIRY_OK) {
         result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
-        AIRY_FREE(output_buffer);
         *out_result = result;
-        return tool_fail(result, AIRY_STRDUP("Sandbox not configured (initialization failed)"),
-                         TOOL_RESULT_CLASS_FATAL, AIRY_EPERM);
+        return tool_fail(result, AIRY_STRDUP(deny_msg), TOOL_RESULT_CLASS_FATAL, (int)sb_ret);
     }
 
-    tool_execute_args_t targs = {.executable = meta->executable,
-                                 .argv = (char *const *)argv,
-                                 .timeout_ms = timeout_ms,
-                                 .output_buffer = output_buffer,
-                                 .cap_size = cap_size,
-                                 .exec_result = 0};
-    void *invoke_args[1] = {&targs};
-    void *sb_out_result = NULL;
-    airy_err_t sb_ret =
-        airy_sandbox_invoke(exec->sandbox, SYS_TOOL_EXECUTE, invoke_args, 1, &sb_out_result);
-    if (sb_ret != AIRY_SUCCESS) {
-        SVC_LOG_ERROR("sandbox denied tool '%s' execution (rc=%d) — fail-closed",
-                      meta->name ? meta->name : "?", (int)sb_ret);
-        result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
-        AIRY_FREE(output_buffer);
-        *out_result = result;
-        return tool_fail(result,
-                         AIRY_STRDUP("Tool execution denied by sandbox (permission/quota/state)"),
-                         TOOL_RESULT_CLASS_FATAL, AIRY_EPERM);
-    }
-
-    /* sandbox_invoke succeeded: targs.exec_result holds the
-     * airy_process_run_capture return value (0-255=exit code; -1=start
-     * failure; -2=timeout) */
-    (void)sb_out_result;
+    /* sandbox_invoke succeeded: exec_result holds the airy_process_run_capture
+     * return value (0-255=exit code; -1=start failure; -2=timeout) */
 
     result->output = tool_shrink(output_buffer, cap_size);
     result->error = NULL;
-    tool_set_exit(exec, result, targs.exec_result, timeout_ms, meta->executable);
+    tool_set_exit(exec, result, exec_result, timeout_ms, meta->executable);
 
     result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
 

@@ -71,6 +71,25 @@ static int make_schema_ok(const char *type)
            strcmp(type, "number") == 0 || strcmp(type, "boolean") == 0;
 }
 
+/* 单个参数条目校验并填充槽位：type 缺省 string，required 缺省为真。 */
+static int make_one_param(const cJSON *item, tool_param_t *slot)
+{
+    const cJSON *jn = cJSON_GetObjectItemCaseSensitive(item, "name");
+    const cJSON *jt = cJSON_GetObjectItemCaseSensitive(item, "type");
+    const cJSON *jr = cJSON_GetObjectItemCaseSensitive(item, "required");
+    if (!cJSON_IsString(jn) || !jn->valuestring || jn->valuestring[0] == '\0' ||
+        !make_schema_ok(cJSON_IsString(jt) ? jt->valuestring : NULL))
+        return AIRY_ERR_INVALID_PARAM;
+
+    const char *type = cJSON_IsString(jt) ? jt->valuestring : "string";
+    char schema[48];
+    snprintf(schema, sizeof(schema), "{\"type\":\"%s\"}", type);
+    slot->name = AIRY_STRDUP(jn->valuestring);
+    slot->schema = AIRY_STRDUP(schema);
+    slot->required = cJSON_IsBool(jr) ? (cJSON_IsTrue(jr) ? 1 : 0) : 1;
+    return (slot->name && slot->schema) ? 0 : AIRY_ERR_OUT_OF_MEMORY;
+}
+
 /* params: [{"name":"q","type":"string","required":true}, ...] -> 元数据参数表。
  * type 缺省 string（脚本最常用形态），required 缺省为真（脚本参数通常必填）。
  * 返回参数个数，失败返回负值。调用方用 make_par_free 释放。 */
@@ -91,23 +110,10 @@ static int make_params(const cJSON *params, tool_param_t **out)
     const cJSON *item = NULL;
     cJSON_ArrayForEach(item, params)
     {
-        const cJSON *jn = cJSON_GetObjectItemCaseSensitive(item, "name");
-        const cJSON *jt = cJSON_GetObjectItemCaseSensitive(item, "type");
-        const cJSON *jr = cJSON_GetObjectItemCaseSensitive(item, "required");
-        if (!cJSON_IsString(jn) || !jn->valuestring || jn->valuestring[0] == '\0' ||
-            !make_schema_ok(cJSON_IsString(jt) ? jt->valuestring : NULL)) {
-            make_par_free(arr, i);
-            return AIRY_ERR_INVALID_PARAM;
-        }
-        const char *type = cJSON_IsString(jt) ? jt->valuestring : "string";
-        char schema[48];
-        snprintf(schema, sizeof(schema), "{\"type\":\"%s\"}", type);
-        arr[i].name = AIRY_STRDUP(jn->valuestring);
-        arr[i].schema = AIRY_STRDUP(schema);
-        arr[i].required = cJSON_IsBool(jr) ? (cJSON_IsTrue(jr) ? 1 : 0) : 1;
-        if (!arr[i].name || !arr[i].schema) {
-            make_par_free(arr, i + 1);
-            return AIRY_ERR_OUT_OF_MEMORY;
+        int rc = make_one_param(item, &arr[i]);
+        if (rc != 0) {
+            make_par_free(arr, i + (rc == AIRY_ERR_OUT_OF_MEMORY ? 1 : 0));
+            return rc;
         }
         ++i;
     }

@@ -281,9 +281,8 @@ static void test_switch_gate(void)
     CHECK(!run_repeat_blocked(last, repeat, other), "gate: success reopens");
 }
 
-/* C-14：续跑令牌必须 URL 安全、无填充，且无论诉求与步骤多长都收敛到硬上限；
- * 上限内放不下时只裁剪步骤摘要，不得丢弃令牌本身。 */
-static void test_resume_token(void)
+/* base64url 编码：无填充、URL 安全字母表。 */
+static void resume_check_b64(void)
 {
     char *a = run_b64url((const unsigned char *)"f", 1);
     char *b = run_b64url((const unsigned char *)"fo", 2);
@@ -297,40 +296,63 @@ static void test_resume_token(void)
     AIRY_FREE(b);
     AIRY_FREE(c);
     AIRY_FREE(d);
+}
 
-    char *prompt = (char *)AIRY_CALLOC(1, 4096);
-    CHECK(prompt != NULL, "resume: prompt alloc");
-    if (!prompt)
-        return;
+/* 令牌仅含 URL 安全字母表。 */
+static int resume_url_safe(const char *tok)
+{
+    static const char k_url_safe[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    if (!tok)
+        return 0;
+    for (const char *p = tok; *p; p++) {
+        if (!strchr(k_url_safe, *p))
+            return 0;
+    }
+    return 1;
+}
+
+/* 构造 20 条工具 trace 的满预算 run 上下文。 */
+static void resume_fill_ctx(loop_ctx_t *r, agent_run_loop_args_t *args,
+                            agent_run_loop_result_t *out, char *prompt)
+{
     AIRY_MEMSET(prompt, 'x', 4095);
-
-    agent_run_loop_args_t args = {.prompt = prompt};
-    agent_run_loop_result_t out = {0};
-    loop_ctx_t r = {.args = &args, .out = &out, .sess = "sess_test"};
-    r.trace = cJSON_CreateArray();
+    args->prompt = prompt;
+    r->args = args;
+    r->out = out;
+    r->sess = "sess_test";
+    r->trace = cJSON_CreateArray();
     for (int i = 0; i < 20; i++) {
         cJSON *it = cJSON_CreateObject();
         cJSON_AddStringToObject(it, "tool", "shell_run");
         cJSON_AddStringToObject(it, "result", "permission denied on /var/log/app.log");
         cJSON_AddNumberToObject(it, "ok", i % 2);
-        cJSON_AddItemToArray(r.trace, it);
+        cJSON_AddItemToArray(r->trace, it);
     }
-    r.text = AIRY_STRDUP("halfway there");
-    out.rounds_limit = AGENT_RUN_ROUNDS_MAX;
-    out.rounds_used = AGENT_RUN_ROUNDS_MAX;
+    r->text = AIRY_STRDUP("halfway there");
+    out->rounds_limit = AGENT_RUN_ROUNDS_MAX;
+    out->rounds_used = AGENT_RUN_ROUNDS_MAX;
+}
+
+/* C-14：续跑令牌必须 URL 安全、无填充，且无论诉求与步骤多长都收敛到硬上限；
+ * 上限内放不下时只裁剪步骤摘要，不得丢弃令牌本身。 */
+static void test_resume_token(void)
+{
+    resume_check_b64();
+
+    char *prompt = (char *)AIRY_CALLOC(1, 4096);
+    CHECK(prompt != NULL, "resume: prompt alloc");
+    if (!prompt)
+        return;
+
+    agent_run_loop_args_t args = {0};
+    agent_run_loop_result_t out = {0};
+    loop_ctx_t r = {0};
+    resume_fill_ctx(&r, &args, &out, prompt);
 
     char *tok = run_resume_emit(&r);
     CHECK(tok != NULL, "resume: token emitted");
     CHECK(tok && strlen(tok) <= AGENT_RUN_RESUME_TOKEN_MAX, "resume: token within cap");
-    int safe = tok != NULL;
-    for (const char *p = tok; p && *p; p++) {
-        if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') ||
-              (*p >= '0' && *p <= '9') || *p == '-' || *p == '_')) {
-            safe = 0;
-            break;
-        }
-    }
-    CHECK(safe, "resume: url-safe alphabet only");
+    CHECK(resume_url_safe(tok), "resume: url-safe alphabet only");
     AIRY_FREE(tok);
     cJSON_Delete(r.trace);
     AIRY_FREE(r.text);

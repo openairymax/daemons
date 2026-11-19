@@ -136,6 +136,53 @@ int fs_write_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *r
  *   (for the LLM to adjust)
  * ============================================================================ */
 
+/* path/old/new 三项必填且非空。 */
+static int edit_args_ok(const cJSON *path, const cJSON *old, const cJSON *new)
+{
+    return cJSON_IsString(path) && path->valuestring && path->valuestring[0] &&
+           cJSON_IsString(old) && old->valuestring && old->valuestring[0] &&
+           cJSON_IsString(new) && new->valuestring;
+}
+
+/* 统计 old 在 content 中的非重叠出现次数。 */
+static int edit_count_matches(const char *content, const char *old, size_t olen)
+{
+    int total = 0;
+    const char *p = content;
+    while ((p = strstr(p, old)) != NULL) {
+        total++;
+        p += olen;
+    }
+    return total;
+}
+
+/* 生成替换后的缓冲区（前 reps 处替换）；返回缓冲区，失败 NULL。 */
+static char *edit_build_buf(const char *content, const char *old, size_t olen, const char *new,
+                            size_t nlen, int reps, size_t new_size, size_t *out_w)
+{
+    char *buf = (char *)AIRY_MALLOC(new_size + 1);
+    if (!buf)
+        return NULL;
+    size_t w = 0, done = 0;
+    const char *p = content;
+    const char *cur = content;
+    while (done < (size_t)reps && (p = strstr(cur, old)) != NULL) {
+        __builtin_memcpy(buf + w, cur, (size_t)(p - cur));
+        w += (size_t)(p - cur);
+        __builtin_memcpy(buf + w, new, nlen);
+        w += nlen;
+        cur = p + olen;
+        done++;
+    }
+    if (w < new_size) {
+        __builtin_memcpy(buf + w, cur, new_size - w);
+        w = new_size;
+    }
+    buf[w] = '\0';
+    *out_w = w;
+    return buf;
+}
+
 int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     (void)timeout_ms;
@@ -146,9 +193,7 @@ int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     cJSON *old = cJSON_GetObjectItem(root, "old");
     cJSON *new = cJSON_GetObjectItem(root, "new");
     cJSON *cnt = cJSON_GetObjectItem(root, "count");
-    if (!cJSON_IsString(path) || !path->valuestring || !path->valuestring[0] ||
-        !cJSON_IsString(old) || !old->valuestring || !old->valuestring[0] || !cJSON_IsString(new) ||
-        !new->valuestring)
+    if (!edit_args_ok(path, old, new))
         return btool_fail(res, AIRY_ERR_INVALID_PARAM,
                           "Missing required string parameter: path/old/new");
     int max_rep = (cJSON_IsNumber(cnt) && cnt->valueint > 0) ? cnt->valueint : 1;
@@ -166,14 +211,7 @@ int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     size_t olen = strlen(old->valuestring);
     size_t nlen = strlen(new->valuestring);
     size_t content_len = strlen(content);
-    int total = 0;
-    {
-        const char *p = content;
-        while ((p = strstr(p, old->valuestring)) != NULL) {
-            total++;
-            p += olen;
-        }
-    }
+    int total = edit_count_matches(content, old->valuestring, olen);
     if (total == 0) {
         AIRY_FREE(content);
         return btool_soft(res, "String not found in '%s': %s", resolved, old->valuestring);
@@ -181,27 +219,13 @@ int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     int reps = (total < max_rep) ? total : max_rep;
 
     size_t new_size = content_len - (size_t)reps * olen + (size_t)reps * nlen;
-    char *buf = (char *)AIRY_MALLOC(new_size + 1);
+    size_t w = 0;
+    char *buf = edit_build_buf(content, old->valuestring, olen, new->valuestring, nlen, reps,
+                               new_size, &w);
     if (!buf) {
         AIRY_FREE(content);
         return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY, "Out of memory");
     }
-    size_t w = 0, done = 0;
-    const char *p = content;
-    const char *cur = content;
-    while (done < (size_t)reps && (p = strstr(cur, old->valuestring)) != NULL) {
-        __builtin_memcpy(buf + w, cur, (size_t)(p - cur));
-        w += (size_t)(p - cur);
-        __builtin_memcpy(buf + w, new->valuestring, nlen);
-        w += nlen;
-        cur = p + olen;
-        done++;
-    }
-    if (w < new_size) {
-        __builtin_memcpy(buf + w, cur, new_size - w);
-        w = new_size;
-    }
-    buf[w] = '\0';
     AIRY_FREE(content);
 
     if (airy_io_write_file(resolved, buf, w) != 0) {

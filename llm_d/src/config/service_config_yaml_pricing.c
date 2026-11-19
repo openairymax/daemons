@@ -20,6 +20,49 @@
 #include "config/pricing_api.h"
 #include "config/types.h"
 
+/* 只注册"显式声明了价格"的模型：显式 0（免费模型）保留为零价规则，
+ * 判据是 has_*_price 而非数值大小。 */
+static int pricing_has_price(const model_entry_t *m)
+{
+    return m->has_input_price || m->has_output_price;
+}
+
+/* 释放 providers 段解析时 strdup 的 model_names：pcfg 是这些字符串的
+ * 唯一持有者，只清理 pcfg 即可。 */
+static void pricing_rel_models(svc_yaml_state_t *st)
+{
+    for (size_t pi = 0; pi < st->pcfg_count; ++pi) {
+        for (size_t k = 0; k < st->pcfg[pi].model_count; ++k)
+            AIRY_FREE(st->pcfg[pi].model_names[k]);
+        st->pcfg[pi].model_count = 0;
+    }
+}
+
+/* 按声明顺序把价格模型拷贝成规则表；任一项 strdup 失败即全量回滚。 */
+static pricing_rule_t *pricing_fill_rules(const svc_yaml_state_t *st, int n)
+{
+    pricing_rule_t *rules = (pricing_rule_t *)AIRY_CALLOC((size_t)n, sizeof(pricing_rule_t));
+
+    if (!rules)
+        return NULL;
+    int idx = 0;
+    for (size_t i = 0; i < st->model_count; ++i) {
+        if (!pricing_has_price(&st->models[i]))
+            continue;
+        rules[idx].model_pattern = AIRY_STRDUP(st->models[i].name);
+        if (!rules[idx].model_pattern) {
+            for (int j = 0; j < idx; ++j)
+                AIRY_FREE((void *)rules[j].model_pattern);
+            AIRY_FREE(rules);
+            return NULL;
+        }
+        rules[idx].input_price_per_k = st->models[i].input_cost_per_k;
+        rules[idx].output_price_per_k = st->models[i].output_cost_per_k;
+        idx++;
+    }
+    return rules;
+}
+
 /**
  * @brief Load pricing rules from a YAML model config (model.yaml).
  *
@@ -45,14 +88,7 @@ int load_pricing_rules_from_yaml(const char *config_path, pricing_rule_t **out_r
     if (svc_yaml_load_state(config_path, &st) != AIRY_OK)
         return 0;
 
-    /* 释放 providers 段解析时 strdup 的 model_names。cur_p 是浅拷贝，
-     * pcfg 数组是这些字符串的唯一持有者，只清理 pcfg 即可（cur_p 副本
-     * 已由 parse_provider 的 memset 清零，不重复释放）。 */
-    for (size_t pi = 0; pi < st.pcfg_count; ++pi) {
-        for (size_t k = 0; k < st.pcfg[pi].model_count; ++k)
-            AIRY_FREE(st.pcfg[pi].model_names[k]);
-        st.pcfg[pi].model_count = 0;
-    }
+    pricing_rel_models(&st);
 
     /* 注意：此处不调用 svc_yaml_expand_llm —— llm 简化段只有模型名没有
      * 价格，若替换 models 会把价格全丢。价格规则覆盖完整 models 列表，
@@ -61,33 +97,15 @@ int load_pricing_rules_from_yaml(const char *config_path, pricing_rule_t **out_r
 
     int n = 0;
     for (size_t i = 0; i < st.model_count; ++i) {
-        /* 只注册"显式声明了价格"的模型：显式 0（免费模型，如 llama 本地
-         * 推理）保留为零价规则，字段缺失的模型跳过并落默认价。判据是
-         * has_*_price 而非数值大小，避免把免费模型误判为未配置。 */
-        if (st.models[i].has_input_price || st.models[i].has_output_price)
+        if (pricing_has_price(&st.models[i]))
             n++;
     }
     if (n == 0)
         return 0;
 
-    pricing_rule_t *rules = (pricing_rule_t *)AIRY_CALLOC((size_t)n, sizeof(pricing_rule_t));
+    pricing_rule_t *rules = pricing_fill_rules(&st, n);
     if (!rules)
         return 0;
-    int idx = 0;
-    for (size_t i = 0; i < st.model_count; ++i) {
-        if (!st.models[i].has_input_price && !st.models[i].has_output_price)
-            continue;
-        rules[idx].model_pattern = AIRY_STRDUP(st.models[i].name);
-        if (!rules[idx].model_pattern) {
-            for (int j = 0; j < idx; ++j)
-                AIRY_FREE((void *)rules[j].model_pattern);
-            AIRY_FREE(rules);
-            return 0;
-        }
-        rules[idx].input_price_per_k = st.models[i].input_cost_per_k;
-        rules[idx].output_price_per_k = st.models[i].output_cost_per_k;
-        idx++;
-    }
     *out_rules = rules;
     *out_count = n;
     SVC_LOG_INFO("C-L02: SVC: pricing rules from YAML models=%d", n);

@@ -112,24 +112,64 @@ int plugin_permission_map_to_guard(const char *permission, safety_guard_type_t *
     return AIRY_ERR_NOT_SUPPORTED;
 }
 
+/* 未声明权限：严格模式拒绝并给出原因，否则放行（默认非严格，兼容旧插件）。 */
+static plugin_permission_result_t perm_none(const char *plugin_name, char *out_denied,
+                                            size_t out_denied_size)
+{
+    if (!g_permission.config.enable_strict_mode)
+        return PLUGIN_PERM_ALLOWED;
+    if (out_denied && out_denied_size > 0)
+        safe_strcpy(out_denied, "no permissions declared", out_denied_size);
+    AIRY_LOG_WARN("PluginPermission: plugin '%s' has no permissions "
+                  "(strict mode)",
+                  plugin_name);
+    return PLUGIN_PERM_DENIED;
+}
+
+/* 逗号分隔追加被拒权限；容量不足即停止追加（保留已收集项）。 */
+static void perm_append(char *list, size_t cap, size_t *off, const char *perm)
+{
+    if (*off >= cap - 1)
+        return;
+    *off += (size_t)snprintf(list + *off, cap - *off, "%s%s", *off > 0 ? "," : "", perm);
+}
+
+/* 单条权限映射 + 检查；未知/被拒由调用方按 strict 模式处置。 */
+static plugin_permission_result_t perm_check_one(const char *perm, const char *plugin_name)
+{
+    safety_guard_type_t guard_type;
+    if (plugin_permission_map_to_guard(perm, &guard_type) != 0) {
+        AIRY_LOG_WARN("PluginPermission: plugin '%s' declares unknown "
+                      "permission '%s'",
+                      plugin_name, perm);
+        return PLUGIN_PERM_UNKNOWN;
+    }
+    if (!g_permission.guard_ctx)
+        return PLUGIN_PERM_ALLOWED;
+
+    bool allowed = false;
+    int check_ret = safety_guard_check_permission(
+        g_permission.guard_ctx, guard_type,
+        g_permission.config.agent_id ? g_permission.config.agent_id : "tool_d", &allowed);
+    if (check_ret != 0 || !allowed) {
+        AIRY_LOG_WARN("PluginPermission: permission '%s' denied "
+                      "for plugin '%s'",
+                      perm, plugin_name);
+        return PLUGIN_PERM_DENIED;
+    }
+    AIRY_LOG_DEBUG("PluginPermission: permission '%s' allowed "
+                   "for plugin '%s'",
+                   perm, plugin_name);
+    return PLUGIN_PERM_ALLOWED;
+}
+
 plugin_permission_result_t plugin_permission_check(const char (*permissions)[64],
                                                    uint32_t permission_count,
                                                    const char *plugin_name, char *out_denied,
                                                    size_t out_denied_size)
 {
-    if (!permissions || permission_count == 0) {
-
-        if (g_permission.config.enable_strict_mode) {
-            if (out_denied && out_denied_size > 0) {
-                safe_strcpy(out_denied, "no permissions declared", out_denied_size);
-            }
-            AIRY_LOG_WARN("PluginPermission: plugin '%s' has no permissions "
-                          "(strict mode)",
-                          plugin_name);
-            return PLUGIN_PERM_DENIED;
-        }
-        return PLUGIN_PERM_ALLOWED;
-    }
+    if (!permissions || permission_count == 0)
+        return perm_none(plugin_name, out_denied, out_denied_size);
 
     if (!g_permission.initialized) {
         plugin_permission_init(NULL);
@@ -144,48 +184,13 @@ plugin_permission_result_t plugin_permission_check(const char (*permissions)[64]
         if (!perm || perm[0] == '\0')
             continue;
 
-        safety_guard_type_t guard_type;
-        int map_ret = plugin_permission_map_to_guard(perm, &guard_type);
-
-        if (map_ret != 0) {
-
-            AIRY_LOG_WARN("PluginPermission: plugin '%s' declares unknown "
-                          "permission '%s'",
-                          plugin_name, perm);
-            if (g_permission.config.enable_strict_mode) {
-                overall = PLUGIN_PERM_UNKNOWN;
-                if (denied_offset < sizeof(denied_list) - 1) {
-                    denied_offset += (size_t)snprintf(denied_list + denied_offset,
-                                                      sizeof(denied_list) - denied_offset, "%s%s",
-                                                      denied_offset > 0 ? "," : "", perm);
-                }
-            }
-            continue;
-        }
-
-        if (g_permission.guard_ctx) {
-            bool allowed = false;
-            int check_ret = safety_guard_check_permission(g_permission.guard_ctx, guard_type,
-                                                          g_permission.config.agent_id ?
-                                                              g_permission.config.agent_id :
-                                                              "tool_d",
-                                                          &allowed);
-
-            if (check_ret != 0 || !allowed) {
-                AIRY_LOG_WARN("PluginPermission: permission '%s' denied "
-                              "for plugin '%s'",
-                              perm, plugin_name);
-                overall = PLUGIN_PERM_DENIED;
-                if (denied_offset < sizeof(denied_list) - 1) {
-                    denied_offset += (size_t)snprintf(denied_list + denied_offset,
-                                                      sizeof(denied_list) - denied_offset, "%s%s",
-                                                      denied_offset > 0 ? "," : "", perm);
-                }
-            } else {
-                AIRY_LOG_DEBUG("PluginPermission: permission '%s' allowed "
-                               "for plugin '%s'",
-                               perm, plugin_name);
-            }
+        plugin_permission_result_t one = perm_check_one(perm, plugin_name);
+        if (one == PLUGIN_PERM_UNKNOWN && g_permission.config.enable_strict_mode) {
+            overall = PLUGIN_PERM_UNKNOWN;
+            perm_append(denied_list, sizeof(denied_list), &denied_offset, perm);
+        } else if (one == PLUGIN_PERM_DENIED) {
+            overall = PLUGIN_PERM_DENIED;
+            perm_append(denied_list, sizeof(denied_list), &denied_offset, perm);
         }
     }
 

@@ -57,6 +57,39 @@ static int notify_d_send_ws_frame(notify_client_t *client, const char *payload, 
     return 0;
 }
 
+/* 订阅判定：无 topic 限制、客户端无 topic、broadcast、同名或订阅表命中。 */
+static int ntf_subscribed(notify_d_service_t *svc, const notify_client_t *client,
+                          const notify_event_t *event)
+{
+    int subscribed = !event->topic || !client->topic ||
+                     strcmp(event->topic, "broadcast") == 0 ||
+                     strcmp(client->topic, event->topic) == 0;
+
+    if (!subscribed && event->topic && client->client_id)
+        subscribed = notify_d_has_subscription(svc, event->topic, client->client_id);
+    return subscribed;
+}
+
+/* 按客户端类型投递一帧；返回 1 表示已发送并计入 messages_sent。 */
+static int ntf_deliver(notify_client_t *client, const char *json_msg, size_t msg_len,
+                       const char *event_type)
+{
+    if (client->type == NOTIFY_CLIENT_WEBSOCKET && client->handshake_done) {
+        notify_d_send_ws_frame(client, json_msg, msg_len);
+    } else if (client->type == NOTIFY_CLIENT_SOCKET) {
+        airy_sock_send(client->fd, json_msg, msg_len);
+    } else if (client->type == NOTIFY_CLIENT_SSE) {
+        char sse_msg[8448];
+        int sse_len = snprintf(sse_msg, sizeof(sse_msg), "event: %s\ndata: %s\n\n",
+                               event_type ? event_type : "message", json_msg);
+        airy_sock_send(client->fd, sse_msg, (size_t)sse_len);
+    } else {
+        return 0;
+    }
+    client->messages_sent++;
+    return 1;
+}
+
 int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *event)
 {
     if (!svc || !event) {
@@ -82,33 +115,10 @@ int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *even
         notify_client_t *client = &svc->clients[i];
         if (!client->active)
             continue;
-
-        int subscribed = !event->topic || !client->topic ||
-                         strcmp(event->topic, "broadcast") == 0 ||
-                         strcmp(client->topic, event->topic) == 0;
-
-        if (!subscribed && event->topic && client->client_id)
-            subscribed = notify_d_has_subscription(svc, event->topic, client->client_id);
-
-        if (!subscribed)
+        if (!ntf_subscribed(svc, client, event))
             continue;
-
-        if (client->type == NOTIFY_CLIENT_WEBSOCKET && client->handshake_done) {
-            notify_d_send_ws_frame(client, json_msg, (size_t)msg_len);
-            client->messages_sent++;
-            broadcast_count++;
-        } else if (client->type == NOTIFY_CLIENT_SOCKET) {
-            airy_sock_send(client->fd, json_msg, (size_t)msg_len);
-            client->messages_sent++;
-            broadcast_count++;
-        } else if (client->type == NOTIFY_CLIENT_SSE) {
-            char sse_msg[8448];
-            int sse_len = snprintf(sse_msg, sizeof(sse_msg), "event: %s\ndata: %s\n\n",
-                                   event->event_type ? event->event_type : "message", json_msg);
-            airy_sock_send(client->fd, sse_msg, (size_t)sse_len);
-            client->messages_sent++;
-            broadcast_count++;
-        }
+        broadcast_count += (size_t)ntf_deliver(client, json_msg, (size_t)msg_len,
+                                               event->event_type);
     }
 
     return (int)broadcast_count;

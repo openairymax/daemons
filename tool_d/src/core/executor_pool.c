@@ -190,13 +190,10 @@ static void *pool_worker(void *arg)
 
 /* ---------- 池生命周期 ---------- */
 
-executor_pool_t *executor_pool_new(tool_executor_t *exec)
+/* 来源优先级：executor 配置（越界回落内置默认 2）> env 覆盖。
+ * 配置面此前是死字段（无消费点），此处接线后 service 可用它表达部署偏好。 */
+static int pool_resolve_workers(tool_executor_t *exec)
 {
-    if (!exec)
-        return NULL;
-
-    /* 来源优先级：env AIRY_TOOL_EXEC_WORKERS > executor 配置 > 内置默认 2。
-     * 配置面此前是死字段（无消费点），此处接线后 service 可用它表达部署偏好。 */
     int workers = executor_max_workers(exec);
     if (workers < 1 || workers > POOL_WORKER_MAX)
         workers = POOL_WORKER_DEFAULT;
@@ -206,6 +203,15 @@ executor_pool_t *executor_pool_new(tool_executor_t *exec)
         if (v >= 1 && v <= POOL_WORKER_MAX)
             workers = (int)v;
     }
+    return workers;
+}
+
+executor_pool_t *executor_pool_new(tool_executor_t *exec)
+{
+    if (!exec)
+        return NULL;
+
+    int workers = pool_resolve_workers(exec);
 
     executor_pool_t *p = (executor_pool_t *)AIRY_CALLOC(1, sizeof(executor_pool_t));
     if (!p)
@@ -295,6 +301,46 @@ int executor_pool_run(executor_pool_t *p, const tool_metadata_t *meta, const cha
     return executor_pool_run_ex(p, meta, params_json, agent_id, 0, out_result);
 }
 
+/* 等待心跳（社区反馈③）：每 5s 报告等待去向（排队/在跑）、已等时长与
+ * 余量，daemon 日志全程可观测，不再静默悬置。返回下次打点时刻。 */
+static uint64_t pool_wait_tick(const executor_pool_t *p, const pool_job_t *job,
+                               const tool_metadata_t *meta, uint64_t now, uint64_t next_tick,
+                               uint64_t budget)
+{
+    if (now < next_tick)
+        return next_tick;
+    SVC_LOG_INFO("executor_pool: '%s' waiting %llu / %llu ms: %s (queue=%d running=%d)",
+                 meta->id ? meta->id : "?", (unsigned long long)(now - job->enqueue_ms),
+                 (unsigned long long)budget, job->started ? "running" : "queued", p->count,
+                 p->running);
+    return now + WAIT_TICK_MS;
+}
+
+/* 按单调钟实测预算等待 job 完成；超时则置 detached 并返回 1。
+ * cond_timedwait 允许超时过睡（POSIX 语义，macOS 定时器合并 + CI 负载下
+ * 100ms 切片可实睡 135ms+），按切片值累加会系统性低估真实流逝时间，
+ * 预算晚于工具自然完成才生效（取消永不触发）。切片只作唤醒粒度，
+ * deadline 以 airy_time_ms 兜底判定。 */
+static int pool_wait_locked(executor_pool_t *p, pool_job_t *job, const tool_metadata_t *meta,
+                            uint64_t budget)
+{
+    uint64_t deadline = airy_time_ms() + budget;
+    uint64_t next_tick = airy_time_ms() + WAIT_TICK_MS;
+
+    while (!job->done) {
+        uint64_t now = airy_time_ms();
+        if (now >= deadline) {
+            job->detached = 1;
+            return 1;
+        }
+        next_tick = pool_wait_tick(p, job, meta, now, next_tick, budget);
+        uint64_t remain = deadline - now;
+        uint32_t slice = (remain > WAIT_SLICE_MS) ? WAIT_SLICE_MS : (uint32_t)remain;
+        airy_cond_timedwait(&p->done_cond, &p->lock, slice);
+    }
+    return 0;
+}
+
 int executor_pool_run_ex(executor_pool_t *p, const tool_metadata_t *meta,
                          const char *params_json, const char *agent_id, int allow_dangerous,
                          tool_result_t **out_result)
@@ -332,34 +378,7 @@ int executor_pool_run_ex(executor_pool_t *p, const tool_metadata_t *meta,
                      "worker",
                      meta->id ? meta->id : "?", p->count, p->worker_count);
 
-    /* 预算按单调钟实测：cond_timedwait 允许超时过睡（POSIX 语义，
-     * macOS 定时器合并 + CI 负载下 100ms 切片可实睡 135ms+），按切片
-     * 值累加会系统性低估真实流逝时间，预算晚于工具自然完成才生效
-     * （取消永不触发）。切片只作唤醒粒度，deadline 以 airy_time_ms
-     * 兜底判定。 */
-    uint64_t deadline = airy_time_ms() + budget;
-    uint64_t next_tick = airy_time_ms() + WAIT_TICK_MS;
-    int canceled = 0;
-    while (!job->done) {
-        uint64_t now = airy_time_ms();
-        if (now >= deadline) {
-            job->detached = 1;
-            canceled = 1;
-            break;
-        }
-        /* 等待心跳（社区反馈③）：每 5s 报告等待去向（排队/在跑）、已
-         * 等时长与余量，daemon 日志全程可观测，不再静默悬置。 */
-        if (now >= next_tick) {
-            SVC_LOG_INFO("executor_pool: '%s' waiting %llu / %llu ms: %s (queue=%d running=%d)",
-                         meta->id ? meta->id : "?", (unsigned long long)(now - job->enqueue_ms),
-                         (unsigned long long)budget, job->started ? "running" : "queued",
-                         p->count, p->running);
-            next_tick = now + WAIT_TICK_MS;
-        }
-        uint64_t remain = deadline - now;
-        uint32_t slice = (remain > WAIT_SLICE_MS) ? WAIT_SLICE_MS : (uint32_t)remain;
-        airy_cond_timedwait(&p->done_cond, &p->lock, slice);
-    }
+    int canceled = pool_wait_locked(p, job, meta, budget);
 
     if (canceled) {
         airy_mtx_unlock(&p->lock);

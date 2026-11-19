@@ -64,6 +64,61 @@ size_t agent_service_count(agent_service_t *svc)
     return c;
 }
 
+#if AIRY_PLATFORM_POSIX
+/* 持锁收集空闲槽位下标（快路径）；成功返回 0，OOM 返回错误码。 */
+static int reap_collect(agent_service_t *svc, uint64_t now, uint64_t max_idle_s,
+                        size_t **out_arr, size_t *out_count)
+{
+    *out_arr = NULL;
+    *out_count = 0;
+    size_t *candidates = NULL;
+
+    agent_lock_svc(svc);
+    if (svc->agent_count > SIZE_MAX / sizeof(size_t)) {
+        airy_mtx_unlock(&svc->lock);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+    if (svc->agent_count > 0) {
+        candidates = (size_t *)AIRY_MALLOC(svc->agent_count * sizeof(size_t));
+        if (candidates) {
+            for (size_t i = 0; i < svc->agent_count; i++) {
+                agent_entry_internal_t *a = &svc->agents[i];
+                if (a->status != AGENT_STATUS_RUNNING || a->child_pid <= 0)
+                    continue;
+                if (now <= a->last_active || (now - a->last_active) < max_idle_s)
+                    continue;
+                candidates[(*out_count)++] = i;
+            }
+        }
+    }
+    airy_mtx_unlock(&svc->lock);
+
+    *out_arr = candidates;
+    return 0;
+}
+
+/* 锁外逐槽位复核并回收；返回实际回收数量。 */
+static size_t reap_kill(agent_service_t *svc, const size_t *candidates, size_t count,
+                        uint64_t now)
+{
+    size_t reaped = 0;
+
+    for (size_t j = 0; j < count; j++) {
+        agent_entry_internal_t *a = &svc->agents[candidates[j]];
+        airy_mtx_lock(&a->entry_lock);
+        if (a->status == AGENT_STATUS_RUNNING && a->child_pid > 0) {
+            SVC_LOG_INFO("Agent idle reclaimed: agent_id=%s, idle=%llus", a->agent_id,
+                         (unsigned long long)(now - a->last_active));
+            agent_kill_and_reap(&a->child_pid, &a->stdin_fd, &a->stdout_fd);
+            a->status = AGENT_STATUS_TERMINATED;
+            reaped++;
+        }
+        airy_mtx_unlock(&a->entry_lock);
+    }
+    return reaped;
+}
+#endif
+
 int agent_service_reap_idle(agent_service_t *svc, uint64_t max_idle_s)
 {
     if (!svc || !svc->initialized)
@@ -77,41 +132,10 @@ int agent_service_reap_idle(agent_service_t *svc, uint64_t max_idle_s)
      * runs outside the lock to avoid blocking other agent operations */
     size_t *candidates = NULL;
     size_t candidate_count = 0;
-    {
-        agent_lock_svc(svc);
-        if (svc->agent_count > 0) {
-
-            if (svc->agent_count > SIZE_MAX / sizeof(size_t)) {
-                airy_mtx_unlock(&svc->lock);
-                return AIRY_ERR_OUT_OF_MEMORY;
-            }
-            candidates = (size_t *)AIRY_MALLOC(svc->agent_count * sizeof(size_t));
-            if (candidates) {
-                for (size_t i = 0; i < svc->agent_count; i++) {
-                    agent_entry_internal_t *a = &svc->agents[i];
-                    if (a->status != AGENT_STATUS_RUNNING || a->child_pid <= 0)
-                        continue;
-                    if (now <= a->last_active || (now - a->last_active) < max_idle_s)
-                        continue;
-                    candidates[candidate_count++] = i;
-                }
-            }
-        }
-        airy_mtx_unlock(&svc->lock);
-    }
-
-    for (size_t j = 0; j < candidate_count; j++) {
-        agent_entry_internal_t *a = &svc->agents[candidates[j]];
-        airy_mtx_lock(&a->entry_lock);
-        if (a->status == AGENT_STATUS_RUNNING && a->child_pid > 0) {
-            SVC_LOG_INFO("Agent idle reclaimed: agent_id=%s, idle=%llus", a->agent_id,
-                         (unsigned long long)(now - a->last_active));
-            agent_kill_and_reap(&a->child_pid, &a->stdin_fd, &a->stdout_fd);
-            a->status = AGENT_STATUS_TERMINATED;
-            reaped++;
-        }
-        airy_mtx_unlock(&a->entry_lock);
-    }
+    int rc = reap_collect(svc, now, max_idle_s, &candidates, &candidate_count);
+    if (rc != 0)
+        return rc;
+    reaped = reap_kill(svc, candidates, candidate_count, now);
     AIRY_FREE(candidates);
 #else
     /* Windows：child_pid/stdin_fd 等子进程域字段为 AIRY_PLATFORM_POSIX 专属

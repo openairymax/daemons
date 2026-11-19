@@ -203,6 +203,40 @@ bool gate_allows(const char *mode, bool gccp_confirmed)
 
 /* ---- 完成判据（C-17） ---- */
 
+/* service 判据：port 必须是 1..65535 的整数。 */
+static bool criteria_port_ok(const cJSON *it)
+{
+    const cJSON *port = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_PORT);
+    return port && cJSON_IsNumber(port) && port->valueint > 0 && port->valueint <= 65535;
+}
+
+/* rpc 判据：daemon 与 method 均为非空字符串。 */
+static bool criteria_rpc_ok(const cJSON *it)
+{
+    const cJSON *m = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_METHOD);
+    const cJSON *d = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_DAEMON);
+    return cJSON_IsString(d) && d->valuestring && d->valuestring[0] && cJSON_IsString(m) &&
+           m->valuestring && m->valuestring[0];
+}
+
+/* 按 type 取唯一必需字段判定合法性；未知 type 一律不合法。 */
+static bool criteria_type_check(const cJSON *it, const char *type)
+{
+    if (strcmp(type, AIRY_VC_T_CMD) == 0) {
+        const cJSON *cmd = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_CMD);
+        return cJSON_IsString(cmd) && cmd->valuestring && cmd->valuestring[0];
+    }
+    if (strcmp(type, AIRY_VC_T_FILE) == 0) {
+        const cJSON *path = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_PATH);
+        return cJSON_IsString(path) && path->valuestring && path->valuestring[0];
+    }
+    if (strcmp(type, AIRY_VC_T_SERVICE) == 0)
+        return criteria_port_ok(it);
+    if (strcmp(type, AIRY_VC_T_RPC) == 0)
+        return criteria_rpc_ok(it);
+    return false;
+}
+
 /* 单条判据的结构合法性：type 决定唯一必需字段，缺一即不可复核。 */
 static bool criteria_item_ok(const cJSON *it)
 {
@@ -211,26 +245,7 @@ static bool criteria_item_ok(const cJSON *it)
     const cJSON *t = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_TYPE);
     if (!cJSON_IsString(t) || !t->valuestring)
         return false;
-
-    const cJSON *need = NULL;
-    if (strcmp(t->valuestring, AIRY_VC_T_CMD) == 0) {
-        need = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_CMD);
-    } else if (strcmp(t->valuestring, AIRY_VC_T_FILE) == 0) {
-        need = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_PATH);
-    } else if (strcmp(t->valuestring, AIRY_VC_T_SERVICE) == 0) {
-        need = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_PORT);
-        if (need && cJSON_IsNumber(need) && need->valueint > 0 && need->valueint <= 65535)
-            return true;
-        return false;
-    } else if (strcmp(t->valuestring, AIRY_VC_T_RPC) == 0) {
-        const cJSON *m = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_METHOD);
-        need = cJSON_GetObjectItemCaseSensitive(it, AIRY_VC_DAEMON);
-        return cJSON_IsString(need) && need->valuestring && need->valuestring[0] &&
-               cJSON_IsString(m) && m->valuestring && m->valuestring[0];
-    } else {
-        return false;
-    }
-    return cJSON_IsString(need) && need->valuestring && need->valuestring[0];
+    return criteria_type_check(it, t->valuestring);
 }
 
 /* 取出判据数组（兼容裸数组与 {"criteria":[...]} 两种线形态）。 */

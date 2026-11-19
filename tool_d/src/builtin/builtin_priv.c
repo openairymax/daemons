@@ -101,23 +101,28 @@ static int priv_str_in(const char *s, const char *const *set)
     return 0;
 }
 
-/* 参数只允许包名/单元名与白名单选项所需的字符集：不含空白、引号、
- * shell 元字符、路径分隔符与控制字符，故本地 rpm 路径安装一并被拒。 */
+/* 允许字符：字母数字，及 . _ + - : @ =（不含空白、引号、shell 元字符、
+ * 路径分隔符与控制字符）。 */
+static int priv_char_ok(unsigned char c)
+{
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+        return 1;
+    switch (c) {
+    case '.': case '_': case '+': case '-': case ':': case '@': case '=':
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* 参数只允许包名/单元名与白名单选项所需的字符集，故本地 rpm 路径安装一并被拒。 */
 static int priv_arg_ok(const char *s)
 {
     if (!s || !s[0] || strlen(s) > PRIV_ARG_MAX_LEN)
         return 0;
-    for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
-        if ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
-            (*p >= '0' && *p <= '9'))
-            continue;
-        switch (*p) {
-        case '.': case '_': case '+': case '-': case ':': case '@': case '=':
-            continue;
-        default:
+    for (const unsigned char *p = (const unsigned char *)s; *p; ++p)
+        if (!priv_char_ok(*p))
             return 0;
-        }
-    }
     return 1;
 }
 

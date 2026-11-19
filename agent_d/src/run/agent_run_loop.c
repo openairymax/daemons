@@ -469,6 +469,30 @@ static cJSON *run_resume_parse(const char *tok)
     return p;
 }
 
+/* 渲染单条已完成步骤；返回写入长度，<0 表示溢出/错误。 */
+static int seed_step_line(const cJSON *s, char *dst, size_t cap)
+{
+    const char *tool = cJSON_GetStringValue(cJSON_GetObjectItem(s, "tool"));
+    const char *brief = cJSON_GetStringValue(cJSON_GetObjectItem(s, "brief"));
+    const char *why = cJSON_GetStringValue(cJSON_GetObjectItem(s, "why"));
+    const cJSON *ok = cJSON_GetObjectItem(s, "ok");
+    return snprintf(dst, cap, "- %s [%s] %s%s%s\n", tool ? tool : "?",
+                    (cJSON_IsNumber(ok) && ok->valueint) ? "ok" : "failed", brief ? brief : "",
+                    why ? " / 换路: " : "", why ? why : "");
+}
+
+/* 逐条追加已完成步骤；返回新偏移。 */
+static size_t seed_steps_render(const cJSON *steps, int n, char *buf, size_t cap, size_t o)
+{
+    for (int i = 0; i < n && o + 1 < cap; i++) {
+        int w = seed_step_line(cJSON_GetArrayItem(steps, i), buf + o, cap - o);
+        if (w < 0)
+            break;
+        o += (size_t)w < cap - o ? (size_t)w : cap - o - 1;
+    }
+    return o;
+}
+
 /* 续跑上下文渲染：把令牌还原成一条紧凑 user 消息——原始诉求、已完成步骤
  * 摘要、待续目标。只给「做到哪、还差什么」，不复制历史消息与工具全文，
  * 这是二次续跑 token 显著低于首次全量的机制保证。 */
@@ -484,23 +508,10 @@ static char *run_seed_render(const cJSON *p)
     if (!buf)
         return NULL;
 
-    size_t o = 0;
     int w = snprintf(buf, cap, "【续跑】原始诉求：%s\n已完成步骤（不要重复执行已成功步骤）：\n",
                      prompt ? prompt : "");
-    o = (w > 0 && (size_t)w < cap) ? (size_t)w : 0;
-    for (int i = 0; i < n && o + 1 < cap; i++) {
-        const cJSON *s = cJSON_GetArrayItem(steps, i);
-        const char *tool = cJSON_GetStringValue(cJSON_GetObjectItem(s, "tool"));
-        const char *brief = cJSON_GetStringValue(cJSON_GetObjectItem(s, "brief"));
-        const char *why = cJSON_GetStringValue(cJSON_GetObjectItem(s, "why"));
-        const cJSON *ok = cJSON_GetObjectItem(s, "ok");
-        w = snprintf(buf + o, cap - o, "- %s [%s] %s%s%s\n", tool ? tool : "?",
-                     (cJSON_IsNumber(ok) && ok->valueint) ? "ok" : "failed", brief ? brief : "",
-                     why ? " / 换路: " : "", why ? why : "");
-        if (w < 0)
-            break;
-        o += (size_t)w < cap - o ? (size_t)w : cap - o - 1;
-    }
+    size_t o = (w > 0 && (size_t)w < cap) ? (size_t)w : 0;
+    o = seed_steps_render(steps, n, buf, cap, o);
     snprintf(buf + o, cap - o,
              "待续目标：%s\n请从上述进度继续；若同一调用再次失败，必须换参数、换工具或询问用户。",
              pending ? pending : "");
@@ -576,6 +587,64 @@ static void run_ev_send(loop_ctx_t *r, const char *type, cJSON *ev)
     agent_run_emit_event(r->args->sink, &r->seq, r->run_id, r->sess, type, ev);
 }
 
+/* 上游失败：回填原始码与文案供终态帧，返回终局失败码。 */
+static int llm_fail_fill(loop_ctx_t *r, int lrc, agent_stream_result_t *sr)
+{
+    /* 上游失败必须带着原始码与文案离开本函数：以前只记日志并返回 -1，
+     * 终态帧只能兜底成「tool loop exhausted or LLM service error」，
+     * 客户端把它渲染成「未知错误」。 */
+    int ec = sr->error_code ? sr->error_code : lrc;
+    const char *detail = sr->error_msg[0] ? sr->error_msg : airy_err_str(ec);
+    int transport = ec > 0 && airy_err_class_of(ec) == AIRY_ERR_CLASS_TRANSPORT;
+    if (!detail || !detail[0])
+        detail = "no detail from provider";
+    r->out->fail_transport = transport;
+    if (transport)
+        snprintf(r->out->fail_msg, sizeof(r->out->fail_msg),
+                 "LLM service unreachable (code=%d): %s", ec, detail);
+    else
+        snprintf(r->out->fail_msg, sizeof(r->out->fail_msg),
+                 "LLM request failed (code=%d): %s", ec, detail);
+    SVC_LOG_ERROR("agent.run: llm stream failed (rc=%d, ec=%d, msg=%s, session=%s)", lrc,
+                  sr->error_code, sr->error_msg, r->sess ? r->sess : "?");
+    run_stream_result_free(sr);
+    return AGENT_RUN_RC_LLM_FAIL;
+}
+
+/* 记账：tokens/成本累积与 reasoning 拼接。 */
+static void llm_record_usage(loop_ctx_t *r, agent_stream_result_t *sr)
+{
+    r->out->tokens += sr->tokens;
+    r->out->tokens_in += sr->prompt_tokens;
+    r->out->tokens_out += sr->completion_tokens;
+    r->out->cost += sr->cost;
+    if (sr->reason && sr->reason[0])
+        run_reason_add(r, sr->reason);
+    AIRY_FREE(sr->reason);
+}
+
+/* 空数组与「无 tool_calls」同义：释放后按无工具处理。 */
+static cJSON *llm_take_calls(cJSON *tools)
+{
+    if (tools && cJSON_GetArraySize(tools) == 0) {
+        cJSON_Delete(tools);
+        return NULL;
+    }
+    return tools;
+}
+
+/* 回填 assistant 消息（含 tool_calls 副本）并记台账。 */
+static void llm_append_assistant(loop_ctx_t *r, agent_stream_result_t *sr, const cJSON *calls)
+{
+    cJSON *am = cJSON_CreateObject();
+    cJSON_AddStringToObject(am, "role", "assistant");
+    cJSON_AddStringToObject(am, "content", sr->text ? sr->text : "");
+    if (calls)
+        cJSON_AddItemToObject(am, "tool_calls", cJSON_Duplicate(calls, 1));
+    cJSON_AddItemToArray(r->messages, am);
+    agent_ledger_add(&r->lg, "assistant", sr->text ? sr->text : "", (size_t)sr->tokens, am);
+}
+
 /* 单轮 LLM：建参 → 流式收流 → 取产物 → 回填 assistant 消息与台账。
  * 返回 1 终局回复（正文已移交 r->text）、0 有待执行工具、-1 失败。 */
 static int run_llm_round(loop_ctx_t *r, cJSON **tool_calls)
@@ -601,49 +670,12 @@ static int run_llm_round(loop_ctx_t *r, cJSON **tool_calls)
     agent_stream_result_t sr;
     agent_stream_take(&st, &sr);
     agent_stream_free(&st);
-    if (lrc != AIRY_SUCCESS || sr.error_code != 0) {
-        /* 上游失败必须带着原始码与文案离开本函数：以前只记日志并返回 -1，
-         * 终态帧只能兜底成「tool loop exhausted or LLM service error」，
-         * 客户端把它渲染成「未知错误」。 */
-        int ec = sr.error_code ? sr.error_code : lrc;
-        const char *detail = sr.error_msg[0] ? sr.error_msg : airy_err_str(ec);
-        int transport = ec > 0 && airy_err_class_of(ec) == AIRY_ERR_CLASS_TRANSPORT;
-        if (!detail || !detail[0])
-            detail = "no detail from provider";
-        r->out->fail_transport = transport;
-        if (transport)
-            snprintf(r->out->fail_msg, sizeof(r->out->fail_msg),
-                     "LLM service unreachable (code=%d): %s", ec, detail);
-        else
-            snprintf(r->out->fail_msg, sizeof(r->out->fail_msg),
-                     "LLM request failed (code=%d): %s", ec, detail);
-        SVC_LOG_ERROR("agent.run: llm stream failed (rc=%d, ec=%d, msg=%s, session=%s)", lrc,
-                      sr.error_code, sr.error_msg, r->sess ? r->sess : "?");
-        run_stream_result_free(&sr);
-        return AGENT_RUN_RC_LLM_FAIL;
-    }
+    if (lrc != AIRY_SUCCESS || sr.error_code != 0)
+        return llm_fail_fill(r, lrc, &sr);
 
-    r->out->tokens += sr.tokens;
-    r->out->tokens_in += sr.prompt_tokens;
-    r->out->tokens_out += sr.completion_tokens;
-    r->out->cost += sr.cost;
-    if (sr.reason && sr.reason[0])
-        run_reason_add(r, sr.reason);
-    AIRY_FREE(sr.reason);
-
-    /* 空数组与「无 tool_calls」同义（旧解析器同判）：本轮即终局回复。 */
-    cJSON *calls = sr.tools;
-    if (calls && cJSON_GetArraySize(calls) == 0) {
-        cJSON_Delete(calls);
-        calls = NULL;
-    }
-    cJSON *am = cJSON_CreateObject();
-    cJSON_AddStringToObject(am, "role", "assistant");
-    cJSON_AddStringToObject(am, "content", sr.text ? sr.text : "");
-    if (calls)
-        cJSON_AddItemToObject(am, "tool_calls", cJSON_Duplicate(calls, 1));
-    cJSON_AddItemToArray(r->messages, am);
-    agent_ledger_add(&r->lg, "assistant", sr.text ? sr.text : "", (size_t)sr.tokens, am);
+    llm_record_usage(r, &sr);
+    cJSON *calls = llm_take_calls(sr.tools);
+    llm_append_assistant(r, &sr, calls);
 
     if (calls) {
         AIRY_FREE(sr.text);
@@ -835,6 +867,36 @@ static void run_catalog_static(loop_ctx_t *r)
     r->cat_src = AIRY_RS_CATALOG_SOURCE_STATIC;
 }
 
+/* 单条 list_tools 条目分流：不可用进 cat_denied，已证不可用跳过，其余入目录。 */
+static void catalog_take(loop_ctx_t *r, const cJSON *it, cJSON *next)
+{
+    const char *n = cJSON_GetStringValue(cJSON_GetObjectItem(it, "name"));
+    if (!n || !n[0])
+        n = cJSON_GetStringValue(cJSON_GetObjectItem(it, "id"));
+    if (!n || !n[0])
+        return;
+    const cJSON *avail = cJSON_GetObjectItem(it, "available");
+    if (cJSON_IsBool(avail) && !cJSON_IsTrue(avail)) {
+        run_cat_deny(r->cat_denied, n,
+                     cJSON_GetStringValue(cJSON_GetObjectItem(it, AIRY_RS_K_DENIED_REASON)));
+        return;
+    }
+    if (run_cat_denied_has(r->cat_denied, n))
+        return; /* 会话内已证不可用：不再回到可见集 */
+    run_cat_add(next, n, cJSON_GetStringValue(cJSON_GetObjectItem(it, "description")),
+                cJSON_GetObjectItem(it, "input_schema"));
+}
+
+/* 目录已换：摘要变化才推送快照事件。 */
+static void catalog_publish(loop_ctx_t *r)
+{
+    uint64_t sig = run_cat_sig(r);
+    if (sig != r->cat_hash) {
+        r->cat_hash = sig;
+        run_cat_emit(r);
+    }
+}
+
 /* 每轮唯一的一次目录采样：include_denied 一次取全，避免两次调用产生两份
  * 不一致快照；不可用条目在此分流进 cat_denied，绝不进 catalog。 */
 static void run_catalog_load(loop_ctx_t *r)
@@ -854,11 +916,7 @@ static void run_catalog_load(loop_ctx_t *r)
     if (!cJSON_IsArray(list)) {
         cJSON_Delete(root);
         run_catalog_static(r);
-        uint64_t sig = run_cat_sig(r);
-        if (sig != r->cat_hash) {
-            r->cat_hash = sig;
-            run_cat_emit(r);
-        }
+        catalog_publish(r);
         return;
     }
 
@@ -870,33 +928,14 @@ static void run_catalog_load(loop_ctx_t *r)
     const cJSON *it = NULL;
     cJSON_ArrayForEach(it, list)
     {
-        const char *n = cJSON_GetStringValue(cJSON_GetObjectItem(it, "name"));
-        if (!n || !n[0])
-            n = cJSON_GetStringValue(cJSON_GetObjectItem(it, "id"));
-        if (!n || !n[0])
-            continue;
-        cJSON *avail = cJSON_GetObjectItem(it, "available");
-        if (cJSON_IsBool(avail) && !cJSON_IsTrue(avail)) {
-            run_cat_deny(r->cat_denied, n,
-                         cJSON_GetStringValue(cJSON_GetObjectItem(it, AIRY_RS_K_DENIED_REASON)));
-            continue;
-        }
-        if (run_cat_denied_has(r->cat_denied, n))
-            continue; /* 会话内已证不可用：不再回到可见集 */
-        run_cat_add(next, n, cJSON_GetStringValue(cJSON_GetObjectItem(it, "description")),
-                    cJSON_GetObjectItem(it, "input_schema"));
+        catalog_take(r, it, next);
     }
     cJSON_Delete(root);
 
     cJSON_Delete(r->catalog);
     r->catalog = next;
     r->cat_src = AIRY_RS_CATALOG_SOURCE_LIVE;
-
-    uint64_t sig = run_cat_sig(r);
-    if (sig != r->cat_hash) {
-        r->cat_hash = sig;
-        run_cat_emit(r);
-    }
+    catalog_publish(r);
 }
 
 /* 工具自报策略拒绝 / 无处理器：立即移出本轮目录并记原因，下一轮重新采样
@@ -1253,23 +1292,43 @@ static void run_tc_acct(loop_ctx_t *r, run_tc_t *c)
     }
 }
 
-/* 回填 messages / 台账 / trace（后者供最终响应），并在工具边界落检查点。
- * 回填预算（C-23）：长输出按 8 KB 头尾保留，超出部分以标记替代，避免整段
- * 塞回上下文挤掉后续轮次；预算与 UTF-8 边界由 string SSoT 统一裁决。 */
-static void run_tc_rec(loop_ctx_t *r, run_tc_t *c)
+/* tool_end 事件：result_hash 取结果前 160 字节（UTF-8 安全截断）。 */
+static void tc_rec_event(loop_ctx_t *r, run_tc_t *c)
 {
     char buf[160];
-    cJSON *ev;
-
     AIRY_STRNCPY_TERM(buf, c->res ? c->res : "", sizeof(buf));
     buf[utf8_prefix_len(buf, strlen(buf))] = '\0';
-    ev = cJSON_CreateObject();
+    cJSON *ev = cJSON_CreateObject();
     if (ev) {
         cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL_ID, c->tid);
         cJSON_AddStringToObject(ev, AIRY_RS_K_STATUS, c->erc == 0 ? "ok" : "error");
         cJSON_AddStringToObject(ev, AIRY_RS_K_RESULT_HASH, buf);
     }
     run_ev_send(r, AIRY_RS_TYPE_TOOL_END, ev);
+}
+
+/* D-12：工具边界即检查点。令牌只含边界前的步骤摘要，守护重启后客户端
+ * 凭 agent.turns 取回令牌续跑，不会重复执行已完成的工具。 */
+static void tc_rec_checkpoint(loop_ctx_t *r, const char *tname)
+{
+    if (r->out->rounds_used > 0) {
+        char *tok = run_resume_emit(r);
+        if (tok) {
+            const char *key = r->run_id ? r->run_id : r->sess;
+            if (key && key[0])
+                agent_ckpt_save(key, r->sess, r->out->rounds_used, r->out->rounds_limit,
+                                cJSON_GetArraySize(r->trace), tname, tok);
+            AIRY_FREE(tok);
+        }
+    }
+}
+
+/* 回填 messages / 台账 / trace（后者供最终响应），并在工具边界落检查点。
+ * 回填预算（C-23）：长输出按 8 KB 头尾保留，超出部分以标记替代，避免整段
+ * 塞回上下文挤掉后续轮次；预算与 UTF-8 边界由 string SSoT 统一裁决。 */
+static void run_tc_rec(loop_ctx_t *r, run_tc_t *c)
+{
+    tc_rec_event(r, c);
 
     char *content = airy_text_budget(c->res ? c->res : "Tool execution failed", 0);
     if (!content)
@@ -1293,18 +1352,7 @@ static void run_tc_rec(loop_ctx_t *r, run_tc_t *c)
         cJSON_AddItemToObject(tr, "fallback", c->fbev);
     cJSON_AddItemToArray(r->trace, tr);
 
-    /* D-12：工具边界即检查点。令牌只含边界前的步骤摘要，守护重启后客户端
-     * 凭 agent.turns 取回令牌续跑，不会重复执行已完成的工具。 */
-    if (r->out->rounds_used > 0) {
-        char *tok = run_resume_emit(r);
-        if (tok) {
-            const char *key = r->run_id ? r->run_id : r->sess;
-            if (key && key[0])
-                agent_ckpt_save(key, r->sess, r->out->rounds_used, r->out->rounds_limit,
-                                cJSON_GetArraySize(r->trace), c->tname, tok);
-            AIRY_FREE(tok);
-        }
-    }
+    tc_rec_checkpoint(r, c->tname);
     AIRY_FREE(content);
     AIRY_FREE(c->res);
     c->res = NULL;

@@ -184,65 +184,56 @@ void plugin_discovery_destroy(void)
     g_discovery.initialized = false;
 }
 
-static int parse_manifest(const char *yaml_path, const char *plugin_dir,
-                                           plugin_discovery_result_t *out_result)
+/* 单行 manifest 字段解析；返回 1 表示该行已被消费（权限列表行也算）。 */
+static int manifest_parse_line(plugin_discovery_result_t *out, const char *line,
+                               const char *plugin_dir, char *raw_type, size_t raw_cap)
 {
-    if (!yaml_path || !out_result)
-        return AIRY_ERR_INVALID_PARAM;
+    char *value = NULL;
+    int consumed = 1;
 
-    __builtin_memset(out_result, 0, sizeof(*out_result));
+    if ((value = parse_yaml_value(line, "name"))) {
+        safe_strcpy(out->name, value, sizeof(out->name));
+    } else if ((value = parse_yaml_value(line, "version"))) {
+        safe_strcpy(out->version, value, sizeof(out->version));
+    } else if ((value = parse_yaml_value(line, "author"))) {
+        safe_strcpy(out->author, value, sizeof(out->author));
+    } else if ((value = parse_yaml_value(line, "description"))) {
+        safe_strcpy(out->description, value, sizeof(out->description));
+    } else if ((value = parse_yaml_value(line, "type"))) {
+        safe_strcpy(raw_type, value, raw_cap);
+        out->type = parse_plugin_type(value);
+    } else if ((value = parse_yaml_value(line, "api_version"))) {
+        out->api_version = (uint32_t)atoi(value);
+    } else if ((value = parse_yaml_value(line, "min_airy_version"))) {
+        out->min_airy_version = (uint32_t)atoi(value);
+    } else if ((value = parse_yaml_value(line, "library"))) {
 
-    FILE *fp = fopen(yaml_path, "r");
-    if (!fp) {
-        AIRY_LOG_WARN("PluginDiscovery: cannot open manifest '%s'", yaml_path);
-        return disco_reject(out_result, AIRY_ERR_IO,
-                            "Cannot open manifest file");
-    }
-
-    char line[512];
-    char raw_type[64] = "";
-    while (fgets(line, sizeof(line), fp)) {
-        char *value = NULL;
-
-        if ((value = parse_yaml_value(line, "name"))) {
-            safe_strcpy(out_result->name, value, sizeof(out_result->name));
-        } else if ((value = parse_yaml_value(line, "version"))) {
-            safe_strcpy(out_result->version, value, sizeof(out_result->version));
-        } else if ((value = parse_yaml_value(line, "author"))) {
-            safe_strcpy(out_result->author, value, sizeof(out_result->author));
-        } else if ((value = parse_yaml_value(line, "description"))) {
-            safe_strcpy(out_result->description, value, sizeof(out_result->description));
-        } else if ((value = parse_yaml_value(line, "type"))) {
-            safe_strcpy(raw_type, value, sizeof(raw_type));
-            out_result->type = parse_plugin_type(value);
-        } else if ((value = parse_yaml_value(line, "api_version"))) {
-            out_result->api_version = (uint32_t)atoi(value);
-        } else if ((value = parse_yaml_value(line, "min_airy_version"))) {
-            out_result->min_airy_version = (uint32_t)atoi(value);
-        } else if ((value = parse_yaml_value(line, "library"))) {
-
-            if (plugin_dir) {
-                snprintf(out_result->library_path, sizeof(out_result->library_path), "%s/%s",
-                         plugin_dir, value);
-            } else {
-                safe_strcpy(out_result->library_path, value, sizeof(out_result->library_path));
-            }
-        } else if (strncmp(line, "  - ", 4) == 0) {
-
-            char *perm = parse_yaml_value(line, "-");
-            if (perm && out_result->permission_count < PLUGIN_DISCOVERY_MAX_PERMISSIONS) {
-                safe_strcpy(out_result->permissions[out_result->permission_count], perm, 64);
-                out_result->permission_count++;
-            }
-            AIRY_FREE(perm);
+        if (plugin_dir) {
+            snprintf(out->library_path, sizeof(out->library_path), "%s/%s", plugin_dir, value);
+        } else {
+            safe_strcpy(out->library_path, value, sizeof(out->library_path));
         }
+    } else if (strncmp(line, "  - ", 4) == 0) {
 
-        if (value)
-            AIRY_FREE(value);
+        char *perm = parse_yaml_value(line, "-");
+        if (perm && out->permission_count < PLUGIN_DISCOVERY_MAX_PERMISSIONS) {
+            safe_strcpy(out->permissions[out->permission_count], perm, 64);
+            out->permission_count++;
+        }
+        AIRY_FREE(perm);
+    } else {
+        consumed = 0;
     }
 
-    fclose(fp);
+    if (value)
+        AIRY_FREE(value);
+    return consumed;
+}
 
+/* manifest 必填字段校验；通过则置 valid 并输出 debug 摘要。 */
+static int manifest_validate(plugin_discovery_result_t *out_result, const char *yaml_path,
+                             const char *raw_type)
+{
     if (out_result->name[0] == '\0') {
         int rc = disco_reject(out_result, AIRY_ERR_PARSE_ERROR,
                               "Missing required field: name");
@@ -280,6 +271,64 @@ static int parse_manifest(const char *yaml_path, const char *plugin_dir,
                    "type=%d version=%s perms=%u",
                    yaml_path, out_result->name, out_result->type, out_result->version,
                    out_result->permission_count);
+    return 0;
+}
+
+/* 打开并校验一个 manifest；返回 parse_manifest 的 rc（0 成功）。 */
+static int manifest_load(const char *yaml_path, const char *plugin_dir,
+                         plugin_discovery_result_t *out_result)
+{
+    __builtin_memset(out_result, 0, sizeof(*out_result));
+
+    FILE *fp = fopen(yaml_path, "r");
+    if (!fp) {
+        AIRY_LOG_WARN("PluginDiscovery: cannot open manifest '%s'", yaml_path);
+        return disco_reject(out_result, AIRY_ERR_IO, "Cannot open manifest file");
+    }
+
+    char line[512];
+    char raw_type[64] = "";
+    while (fgets(line, sizeof(line), fp))
+        manifest_parse_line(out_result, line, plugin_dir, raw_type, sizeof(raw_type));
+
+    fclose(fp);
+    return manifest_validate(out_result, yaml_path, raw_type);
+}
+
+static int parse_manifest(const char *yaml_path, const char *plugin_dir,
+                                           plugin_discovery_result_t *out_result)
+{
+    if (!yaml_path || !out_result)
+        return AIRY_ERR_INVALID_PARAM;
+    return manifest_load(yaml_path, plugin_dir, out_result);
+}
+
+/* 检查单个子目录并解析 manifest；有效插件返回 1。 */
+static int scan_entry(const char *plugins_dir, const char *d_name,
+                      plugin_discovery_result_t *result)
+{
+    char plugin_dir_path[PLUGIN_DISCOVERY_MAX_PATH];
+    snprintf(plugin_dir_path, sizeof(plugin_dir_path), "%s/%s", plugins_dir, d_name);
+
+    if (!dir_exists(plugin_dir_path))
+        return 0;
+
+    char manifest_path[PLUGIN_DISCOVERY_MAX_PATH];
+    snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.yaml", plugin_dir_path);
+
+    if (!file_exists(manifest_path)) {
+        AIRY_LOG_DEBUG("PluginDiscovery: skipping '%s' (no manifest.yaml)", d_name);
+        return 0;
+    }
+
+    int ret = parse_manifest(manifest_path, plugin_dir_path, result);
+    if (ret == 0 && result->valid) {
+        AIRY_LOG_INFO("PluginDiscovery: found plugin '%s' v%s (type=%d)", result->name,
+                      result->version, result->type);
+        return 1;
+    }
+    if (g_discovery.config.fail_on_invalid)
+        AIRY_LOG_ERROR("PluginDiscovery: invalid plugin '%s' in '%s'", d_name, plugin_dir_path);
     return 0;
 }
 
@@ -363,30 +412,7 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results, size_t *out_c
         if (d_name[0] == '.')
             continue;
 
-        char plugin_dir_path[PLUGIN_DISCOVERY_MAX_PATH];
-        snprintf(plugin_dir_path, sizeof(plugin_dir_path), "%s/%s", plugins_dir, d_name);
-
-        if (!dir_exists(plugin_dir_path))
-            continue;
-
-        char manifest_path[PLUGIN_DISCOVERY_MAX_PATH];
-        snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.yaml", plugin_dir_path);
-
-        if (!file_exists(manifest_path)) {
-            AIRY_LOG_DEBUG("PluginDiscovery: skipping '%s' (no manifest.yaml)", d_name);
-            continue;
-        }
-
-        plugin_discovery_result_t *result = &results[found];
-        int ret = parse_manifest(manifest_path, plugin_dir_path, result);
-
-        if (ret == 0 && result->valid) {
-            found++;
-            AIRY_LOG_INFO("PluginDiscovery: found plugin '%s' v%s (type=%d)", result->name,
-                          result->version, result->type);
-        } else if (g_discovery.config.fail_on_invalid) {
-            AIRY_LOG_ERROR("PluginDiscovery: invalid plugin '%s' in '%s'", d_name, plugin_dir_path);
-        }
+        found += (size_t)scan_entry(plugins_dir, d_name, &results[found]);
     }
 
 #ifndef _WIN32

@@ -236,37 +236,38 @@ static void lg_apply(agent_ledger_t *lg, cJSON *messages, size_t protect, const 
                  n_entries, min_idx);
 }
 
-void agent_ledger_fit(agent_ledger_t *lg, cJSON *messages)
+/* 取 ledger_window 裁决：返回非 NULL root 表示需要压缩（调用方负责释放）。 */
+static cJSON *lg_window_ok(agent_ledger_t *lg)
 {
-    if (!lg->enabled || !messages)
-        return;
     cJSON *params = cJSON_CreateObject();
     if (!params)
-        return;
+        return NULL;
     cJSON_AddStringToObject(params, "session_id", lg->sess);
     char *resp = lg_call(lg, "ledger_window", params);
     cJSON_Delete(params);
     if (!resp) {
         SVC_LOG_DEBUG("agent.run: ledger_window failed (session=%s)", lg->sess);
-        return;
+        return NULL;
     }
     cJSON *root = cJSON_Parse(resp);
     AIRY_FREE(resp);
     cJSON *warn = root ? cJSON_GetObjectItem(root, "warn") : NULL;
     if (!root || !cJSON_IsTrue(warn)) {
         cJSON_Delete(root);
-        return;
+        return NULL;
     }
-    size_t protect = lg_protect_start(lg);
+    return root;
+}
+
+/* 取压缩候选并调用 compress，成功则本地替换。 */
+static void lg_compress(agent_ledger_t *lg, cJSON *messages, size_t protect)
+{
     cJSON *entries = protect > 1 ? lg_cand_entries(lg, protect) : NULL;
-    if (!entries) {
-        cJSON_Delete(root);
+    if (!entries)
         return;
-    }
     cJSON *cparams = cJSON_CreateObject();
     if (!cparams) {
         cJSON_Delete(entries);
-        cJSON_Delete(root);
         return;
     }
     cJSON_AddStringToObject(cparams, "session_id", lg->sess);
@@ -276,7 +277,6 @@ void agent_ledger_fit(agent_ledger_t *lg, cJSON *messages)
     cJSON_Delete(cparams); /* entries 所有权已随 params 递归释放 */
     if (!comp_resp) {
         SVC_LOG_DEBUG("agent.run: mem.compress failed (session=%s)", lg->sess);
-        cJSON_Delete(root);
         return;
     }
     cJSON *comp = cJSON_Parse(comp_resp);
@@ -285,5 +285,16 @@ void agent_ledger_fit(agent_ledger_t *lg, cJSON *messages)
     if (cJSON_IsString(context) && context->valuestring && context->valuestring[0])
         lg_apply(lg, messages, protect, context->valuestring, n_entries);
     cJSON_Delete(comp);
+}
+
+void agent_ledger_fit(agent_ledger_t *lg, cJSON *messages)
+{
+    if (!lg->enabled || !messages)
+        return;
+    cJSON *root = lg_window_ok(lg);
+    if (!root)
+        return;
+    size_t protect = lg_protect_start(lg);
+    lg_compress(lg, messages, protect);
     cJSON_Delete(root);
 }

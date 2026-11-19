@@ -182,50 +182,70 @@ static void spec_resolve_rust_binary(const char *spec, const char *agent_id, cha
 #define AGENT_LOG_KEEP_MAX 64
 #define AGENT_LOG_SCAN_MAX 512
 
+/* 是否 agent_*.log 常规文件；命中时回填完整路径与 mtime，返回 1。 */
+static int prune_match(const char *logdir, const char *name, char *full, size_t cap,
+                       time_t *mtime)
+{
+    if (strncmp(name, "agent_", 6) != 0)
+        return 0;
+    size_t nlen = strlen(name);
+    if (nlen < 5 || strcmp(name + nlen - 4, ".log") != 0)
+        return 0;
+
+    snprintf(full, cap, "%s/%s", logdir, name);
+    struct stat st;
+    if (stat(full, &st) != 0 || !S_ISREG(st.st_mode))
+        return 0;
+    *mtime = st.st_mtime;
+    return 1;
+}
+
+/* 按 mtime 升序插入（最旧在前，便于批量删除）。 */
+static void prune_insert(char **paths, time_t *mtimes, size_t *count, char *copy, time_t mtime)
+{
+    size_t pos = *count;
+    while (pos > 0 && mtimes[pos - 1] > mtime) {
+        paths[pos] = paths[pos - 1];
+        mtimes[pos] = mtimes[pos - 1];
+        pos--;
+    }
+    paths[pos] = copy;
+    mtimes[pos] = mtime;
+    (*count)++;
+}
+
+/* 扫描日志目录并收集 agent_*.log，返回条数（上限 AGENT_LOG_SCAN_MAX）。 */
+static size_t prune_scan(const char *logdir, char **paths, time_t *mtimes)
+{
+    DIR *dir = opendir(logdir);
+    if (!dir)
+        return 0;
+
+    size_t count = 0;
+    struct dirent *entry;
+    while (count < AGENT_LOG_SCAN_MAX && (entry = readdir(dir)) != NULL) {
+        char full[AIRY_PATH_MAX];
+        time_t mtime = 0;
+        if (!prune_match(logdir, entry->d_name, full, sizeof(full), &mtime))
+            continue;
+        char *copy = AIRY_STRDUP(full);
+        if (!copy)
+            continue;
+        prune_insert(paths, mtimes, &count, copy, mtime);
+    }
+    closedir(dir);
+    return count;
+}
+
 static void agent_logs_prune(void)
 {
     const char *logdir = airy_log_dir();
     if (!logdir || !logdir[0])
         return;
 
-    DIR *dir = opendir(logdir);
-    if (!dir)
-        return;
-
     char *paths[AGENT_LOG_SCAN_MAX] = {0};
     time_t mtimes[AGENT_LOG_SCAN_MAX] = {0};
-    size_t count = 0;
-
-    struct dirent *entry;
-    while (count < AGENT_LOG_SCAN_MAX && (entry = readdir(dir)) != NULL) {
-        if (strncmp(entry->d_name, "agent_", 6) != 0)
-            continue;
-        size_t nlen = strlen(entry->d_name);
-        if (nlen < 5 || strcmp(entry->d_name + nlen - 4, ".log") != 0)
-            continue;
-
-        char full[AIRY_PATH_MAX];
-        snprintf(full, sizeof(full), "%s/%s", logdir, entry->d_name);
-        struct stat st;
-        if (stat(full, &st) != 0 || !S_ISREG(st.st_mode))
-            continue;
-
-        char *copy = AIRY_STRDUP(full);
-        if (!copy)
-            continue;
-
-        /* 插入排序维持 mtime 升序（最旧在前，便于批量删除）。 */
-        size_t pos = count;
-        while (pos > 0 && mtimes[pos - 1] > st.st_mtime) {
-            paths[pos] = paths[pos - 1];
-            mtimes[pos] = mtimes[pos - 1];
-            pos--;
-        }
-        paths[pos] = copy;
-        mtimes[pos] = st.st_mtime;
-        count++;
-    }
-    closedir(dir);
+    size_t count = prune_scan(logdir, paths, mtimes);
 
     if (count <= (size_t)AGENT_LOG_KEEP_MAX) {
         for (size_t i = 0; i < count; i++)
