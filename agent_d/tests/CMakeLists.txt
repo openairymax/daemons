@@ -15,6 +15,7 @@ set(AGENT_TEST_SOURCES
     test_run_ledger.c
     test_run_loop.c
     test_run_open.c
+    test_run_cancel.c
     test_run_stream.c
     test_task_orchestrate.c
     test_task_ledger.c
@@ -77,6 +78,14 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
         target_sources(test_agent_${TEST_NAME} PRIVATE
             ${AGENT_RUN_CORE_SOURCES}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_loop.c
+        )
+    endif()
+
+    # R11 取消契约直测：包含工具循环源，需同编其调用的执行入口闭环。
+    if(TEST_NAME STREQUAL "test_run_cancel")
+        target_sources(test_agent_${TEST_NAME} PRIVATE
+            ${AGENT_RUN_CORE_SOURCES}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_exec.c
         )
     endif()
 
