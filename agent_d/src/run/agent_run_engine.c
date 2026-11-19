@@ -93,6 +93,10 @@ agent_run_session_t *agent_run_register(const char *session_id)
         return NULL;
     AIRY_STRNCPY_TERM(s->session_id, session_id, sizeof(s->session_id));
     s->cancelled = 0;
+    if (airy_cancel_token_init(&s->cancel) != 0) {
+        AIRY_FREE(s);
+        return NULL;
+    }
     airy_mtx_lock(&g_run_lock);
     s->next = g_run_sessions;
     g_run_sessions = s;
@@ -115,6 +119,7 @@ void agent_run_unregister(agent_run_session_t *s)
         pp = &(*pp)->next;
     }
     airy_mtx_unlock(&g_run_lock);
+    airy_cancel_token_destroy(&s->cancel);
     AIRY_FREE(s);
 }
 
@@ -187,6 +192,7 @@ int agent_run_cancel_by_session(const char *session_id, const char *by)
              * 否则追溯链被后来的请求覆盖，事后无法定位真实触发方。 */
             if (!s->cancelled) {
                 s->cancelled = 1;
+                airy_cancel_token_cancel(&s->cancel);
                 AIRY_STRNCPY_TERM(s->cancel_by, (by && by[0]) ? by : "client",
                                   sizeof(s->cancel_by));
                 s->cancel_at_ms = airy_time_ms();
@@ -219,6 +225,7 @@ int agent_run_cancel_all(void)
     for (agent_run_session_t *s = g_run_sessions; s; s = s->next) {
         if (!s->cancelled) {
             s->cancelled = 1;
+            airy_cancel_token_cancel(&s->cancel);
             /* 关机/退出是另一类取消发起者：与用户主动取消必须可区分，
              * 否则回放里全是 cancelled，看不到停机导致的批量中断。 */
             AIRY_STRNCPY_TERM(s->cancel_by, "shutdown", sizeof(s->cancel_by));
