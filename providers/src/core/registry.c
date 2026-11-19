@@ -373,6 +373,52 @@ static void copy_fit(char *dst, size_t cap, const char *src)
         __builtin_memcpy(dst, src, len + 1);
 }
 
+/* Record the api_key_env name (for secrets.env hot-reload on request).
+ * Prefer extracting from the "env:NAME" prefix; otherwise derive the
+ * conventional env var name from the declared provider name (brand-neutral
+ * rule in core/secrets.c, no vendor table). An explicit empty api_key means
+ * the provider has no key (local adapter): do not fabricate an env name,
+ * which would emit a misleading NO-KEY warning for self-hosted models. */
+static void base_init_env(provider_base_ctx_t *base_ctx, const char *provider_name,
+                          const char *api_key)
+{
+    base_ctx->api_key_env[0] = '\0';
+    if (api_key && strncmp(api_key, "env:", 4) == 0) {
+        copy_fit(base_ctx->api_key_env, sizeof(base_ctx->api_key_env), api_key + 4);
+    } else if (!api_key || api_key[0] != '\0') {
+        char env_name[128];
+        if (sec_env_name_for(provider_name, env_name, sizeof(env_name))) {
+            AIRY_STRNCPY_TERM(base_ctx->api_key_env, env_name, sizeof(base_ctx->api_key_env));
+        }
+    }
+}
+
+/* 解析实际密钥：显式值 / env 前缀优先，兜底读 api_key_env 指向的环境变量。 */
+static const char *base_resolve_key(const char *api_key, const char *env_name)
+{
+    const char *resolved_key = sec_resolve_key(api_key);
+    if ((!resolved_key || resolved_key[0] == '\0') && env_name[0]) {
+        resolved_key = getenv(env_name);
+    }
+    return resolved_key;
+}
+
+/* BASE-INIT 日志与无 key 引导。local 模式的 api_key_env 为空，不会命中
+ * NO-KEY；只有声明了 env 名却解析不到值才提示。密钥值不写日志。 */
+static void base_init_log(const provider_base_ctx_t *base_ctx)
+{
+    SVC_LOG_INFO("C-L02: PROVIDER: BASE-INIT api_base=%s timeout=%.1fs retries=%d has_api_key=%d",
+                 base_ctx->api_base[0] ? base_ctx->api_base : "(none)", base_ctx->timeout_sec,
+                 base_ctx->max_retries, base_ctx->api_key[0] ? 1 : 0);
+
+    if (base_ctx->api_key[0] == '\0' && base_ctx->api_key_env[0] != '\0') {
+        SVC_LOG_WARN("C-L02: PROVIDER: NO-KEY env=%s —— 在 %s/secrets.env 写 "
+                     "%s=<密钥>（或 airy_cli /apikey set），或把 model.yaml 该行 "
+                     "mode 改为 local 免 key；写入后下一次请求自动生效",
+                     base_ctx->api_key_env, airy_config_dir(), base_ctx->api_key_env);
+    }
+}
+
 void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name, const char *api_key,
                         const char *api_base, const char *organization, double timeout_sec,
                         int max_retries, const char *default_base)
@@ -383,28 +429,9 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name
     __builtin_memset(base_ctx, 0, sizeof(provider_base_ctx_t));
 
     copy_fit(base_ctx->name, sizeof(base_ctx->name), provider_name);
+    base_init_env(base_ctx, provider_name, api_key);
 
-    /* Record the api_key_env name (for secrets.env hot-reload on request).
-     * Prefer extracting from the "env:NAME" prefix; otherwise derive the
-     * conventional env var name from the declared provider name (brand-neutral
-     * rule in core/secrets.c, no vendor table). An explicit empty api_key means
-     * the provider has no key (local adapter): do not fabricate an env name,
-     * which would emit a misleading NO-KEY warning for self-hosted models. */
-    base_ctx->api_key_env[0] = '\0';
-    if (api_key && strncmp(api_key, "env:", 4) == 0) {
-        copy_fit(base_ctx->api_key_env, sizeof(base_ctx->api_key_env), api_key + 4);
-    } else if (!api_key || api_key[0] != '\0') {
-        char env_name[128];
-        if (sec_env_name_for(provider_name, env_name, sizeof(env_name))) {
-            AIRY_STRNCPY_TERM(base_ctx->api_key_env, env_name, sizeof(base_ctx->api_key_env));
-        }
-    }
-
-    const char *resolved_key = sec_resolve_key(api_key);
-    if ((!resolved_key || resolved_key[0] == '\0') && base_ctx->api_key_env[0]) {
-        resolved_key = getenv(base_ctx->api_key_env);
-    }
-
+    const char *resolved_key = base_resolve_key(api_key, base_ctx->api_key_env);
     copy_fit(base_ctx->api_key, sizeof(base_ctx->api_key), resolved_key);
 
     if (api_base || default_base) {
@@ -420,18 +447,7 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name
     /* B-2：默认可用；装配面在 provider_build 里按配置覆盖为「未配置」。 */
     base_ctx->backend_ready = 1;
 
-    SVC_LOG_INFO("C-L02: PROVIDER: BASE-INIT api_base=%s timeout=%.1fs retries=%d has_api_key=%d",
-                 base_ctx->api_base[0] ? base_ctx->api_base : "(none)", base_ctx->timeout_sec,
-                 base_ctx->max_retries, base_ctx->api_key[0] ? 1 : 0);
-
-    /* A-7：无 key 时给出一条可执行引导。local 模式的 api_key_env 为空，
-     * 不会命中；只有声明了 env 名却解析不到值才提示。密钥值不写日志。 */
-    if (base_ctx->api_key[0] == '\0' && base_ctx->api_key_env[0] != '\0') {
-        SVC_LOG_WARN("C-L02: PROVIDER: NO-KEY env=%s —— 在 %s/secrets.env 写 "
-                     "%s=<密钥>（或 airy_cli /apikey set），或把 model.yaml 该行 "
-                     "mode 改为 local 免 key；写入后下一次请求自动生效",
-                     base_ctx->api_key_env, airy_config_dir(), base_ctx->api_key_env);
-    }
+    base_init_log(base_ctx);
 }
 
 provider_base_ctx_t *provider_base_ctx(provider_ctx_t *ctx)

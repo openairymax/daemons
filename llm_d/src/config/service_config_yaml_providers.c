@@ -42,6 +42,60 @@ static size_t agg_slot(provider_agg_t *provs, size_t *prov_count, const char *na
     return (*prov_count)++;
 }
 
+/* 从端点 URL 派生 base_url：剥掉 /chat/completions、/messages 后缀。 */
+static void agg_base_url(provider_agg_t *p, const char *endpoint)
+{
+    if (p->base_url[0] || !endpoint[0])
+        return;
+    const char *suffix = strstr(endpoint, "/chat/completions");
+    if (!suffix)
+        suffix = strstr(endpoint, "/messages");
+    if (suffix && suffix != endpoint) {
+        size_t base_len = (size_t)(suffix - endpoint);
+        if (base_len < sizeof(p->base_url)) {
+            __builtin_memcpy(p->base_url, endpoint, base_len);
+            p->base_url[base_len] = '\0';
+        }
+    } else {
+        AIRY_STRNCPY_TERM(p->base_url, endpoint, sizeof(p->base_url));
+    }
+}
+
+/* A7-4：能力位取首个显式声明（与 api_format/extra_headers 的聚合惯例
+ * 同构）；显式 false 也是声明，整表替换不继承兄弟行。B-1：加速器/显存/
+ * 上下文等能力位同样取首个显式声明行，缺省保持未知。 */
+static void agg_take_caps(provider_agg_t *p, const model_entry_t *m)
+{
+    if (!p->has_caps && m->has_caps) {
+        p->caps_override = m->caps_override;
+        p->has_caps = 1;
+    }
+    if (!p->hw_caps.declared && m->hw_caps.declared)
+        p->hw_caps = m->hw_caps;
+}
+
+/* 追加一个模型（上限 64），并补齐 provider 级声明位。 */
+static void agg_add_model(provider_agg_t *p, const model_entry_t *m)
+{
+    if (p->model_count < 64) {
+        size_t mi = p->model_count;
+        p->model_names[mi] = AIRY_STRDUP(m->name);
+        p->model_max_output[mi] = m->max_output_tokens;
+        p->model_max_concurrent[mi] = m->max_concurrent;
+        p->model_count++;
+    }
+    agg_base_url(p, m->endpoint);
+    if (!p->api_format[0] && m->api_format[0])
+        AIRY_STRNCPY_TERM(p->api_format, m->api_format, sizeof(p->api_format));
+    if (!p->extra_headers[0] && m->extra_headers[0])
+        AIRY_STRNCPY_TERM(p->extra_headers, m->extra_headers, sizeof(p->extra_headers));
+    agg_take_caps(p, m);
+    if (m->timeout_sec > p->timeout_sec)
+        p->timeout_sec = m->timeout_sec;
+    if (m->max_retries > p->max_retries)
+        p->max_retries = m->max_retries;
+}
+
 /* Aggregate providers from the models list: first model of a provider seeds
  * the provider record, later models append to its model_names. */
 static void svc_yaml_aggregate_providers(svc_yaml_state_t *st, provider_agg_t *provs,
@@ -52,47 +106,7 @@ static void svc_yaml_aggregate_providers(svc_yaml_state_t *st, provider_agg_t *p
                             st->models[i].api_key_env);
         if (j == (size_t)-1)
             break;
-        if (provs[j].model_count < 64) {
-            size_t mi = provs[j].model_count;
-            provs[j].model_names[mi] = AIRY_STRDUP(st->models[i].name);
-            provs[j].model_max_output[mi] = st->models[i].max_output_tokens;
-            provs[j].model_max_concurrent[mi] = st->models[i].max_concurrent;
-            provs[j].model_count++;
-        }
-        if (!provs[j].base_url[0] && st->models[i].endpoint[0]) {
-            const char *suffix = strstr(st->models[i].endpoint, "/chat/completions");
-            if (!suffix)
-                suffix = strstr(st->models[i].endpoint, "/messages");
-            if (suffix && suffix != st->models[i].endpoint) {
-                size_t base_len = (size_t)(suffix - st->models[i].endpoint);
-                if (base_len < sizeof(provs[j].base_url)) {
-                    __builtin_memcpy(provs[j].base_url, st->models[i].endpoint, base_len);
-                    provs[j].base_url[base_len] = '\0';
-                }
-            } else {
-                AIRY_STRNCPY_TERM(provs[j].base_url, st->models[i].endpoint,
-                                  sizeof(provs[j].base_url));
-            }
-        }
-        if (!provs[j].api_format[0] && st->models[i].api_format[0])
-            AIRY_STRNCPY_TERM(provs[j].api_format, st->models[i].api_format,
-                              sizeof(provs[j].api_format));
-        if (!provs[j].extra_headers[0] && st->models[i].extra_headers[0])
-            AIRY_STRNCPY_TERM(provs[j].extra_headers, st->models[i].extra_headers,
-                              sizeof(provs[j].extra_headers));
-        /* A7-4：能力位取首个显式声明（与 api_format/extra_headers 的聚合
-         * 惯例同构）；显式 false 也是声明，整表替换不继承兄弟行。 */
-        if (!provs[j].has_caps && st->models[i].has_caps) {
-            provs[j].caps_override = st->models[i].caps_override;
-            provs[j].has_caps = 1;
-        }
-        /* B-1：加速器/显存/上下文等能力位同样取首个显式声明行，缺省保持未知。 */
-        if (!provs[j].hw_caps.declared && st->models[i].hw_caps.declared)
-            provs[j].hw_caps = st->models[i].hw_caps;
-        if (st->models[i].timeout_sec > provs[j].timeout_sec)
-            provs[j].timeout_sec = st->models[i].timeout_sec;
-        if (st->models[i].max_retries > provs[j].max_retries)
-            provs[j].max_retries = st->models[i].max_retries;
+        agg_add_model(&provs[j], &st->models[i]);
     }
 }
 
@@ -151,6 +165,33 @@ static void svc_yaml_merge_provider_cfgs(svc_yaml_state_t *st, provider_agg_t *p
     }
 }
 
+/* 转移 model_names 所有权到 result；分配失败则释放名字并留空（引擎走默认）。 */
+static void build_models(provider_agg_t *p, provider_config_t *out)
+{
+    if (p->model_count == 0)
+        return;
+    char **marr = (char **)AIRY_CALLOC(p->model_count + 1, sizeof(char *));
+    int *caparr = (int *)AIRY_CALLOC(p->model_count + 1, sizeof(int));
+    int *cncarr = (int *)AIRY_CALLOC(p->model_count + 1, sizeof(int));
+    if (marr && caparr && cncarr) {
+        for (size_t k = 0; k < p->model_count; ++k) {
+            marr[k] = p->model_names[k];
+            caparr[k] = p->model_max_output[k];
+            cncarr[k] = p->model_max_concurrent[k];
+        }
+        marr[p->model_count] = NULL;
+        out->models = marr;
+        out->model_max_output = caparr;
+        out->model_max_concurrent = cncarr;
+    } else {
+        AIRY_FREE(marr);
+        AIRY_FREE(caparr);
+        AIRY_FREE(cncarr);
+        for (size_t k = 0; k < p->model_count; ++k)
+            AIRY_FREE(p->model_names[k]);
+    }
+}
+
 static int svc_yaml_build_result(provider_agg_t *provs, size_t prov_count,
                                  provider_config_t **out_providers, size_t *out_count)
 {
@@ -185,28 +226,7 @@ static int svc_yaml_build_result(provider_agg_t *provs, size_t prov_count,
             result[i].extra_headers = AIRY_STRDUP(provs[i].extra_headers);
         result[i].timeout_sec = (double)provs[i].timeout_sec;
         result[i].max_retries = provs[i].max_retries;
-        if (provs[i].model_count > 0) {
-            char **marr = (char **)AIRY_CALLOC(provs[i].model_count + 1, sizeof(char *));
-            int *caparr = (int *)AIRY_CALLOC(provs[i].model_count + 1, sizeof(int));
-            int *cncarr = (int *)AIRY_CALLOC(provs[i].model_count + 1, sizeof(int));
-            if (marr && caparr && cncarr) {
-                for (size_t k = 0; k < provs[i].model_count; ++k) {
-                    marr[k] = provs[i].model_names[k];
-                    caparr[k] = provs[i].model_max_output[k];
-                    cncarr[k] = provs[i].model_max_concurrent[k];
-                }
-                marr[provs[i].model_count] = NULL;
-                result[i].models = marr;
-                result[i].model_max_output = caparr;
-                result[i].model_max_concurrent = cncarr;
-            } else {
-                AIRY_FREE(marr);
-                AIRY_FREE(caparr);
-                AIRY_FREE(cncarr);
-                for (size_t k = 0; k < provs[i].model_count; ++k)
-                    AIRY_FREE(provs[i].model_names[k]);
-            }
-        }
+        build_models(&provs[i], &result[i]);
     }
 
     *out_providers = result;

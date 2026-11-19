@@ -34,6 +34,31 @@ static int flag_ok(int actual, int required, int *unknown)
     return actual != 0;
 }
 
+/* 加速器约束：未要求或未知均放行（未知记 unknown），显式不符返回 1。 */
+static int caps_accel_miss(const provider_caps_t *caps, const provider_select_t *sel,
+                           int *unknown)
+{
+    if (sel->require_accel == AIRY_ACCEL_NONE)
+        return 0;
+    if (caps->accelerator == AIRY_ACCEL_NONE) {
+        *unknown = 1;
+        return 0;
+    }
+    return caps->accelerator != sel->require_accel;
+}
+
+/* 数值下限约束：0 表示不限；实际值未声明记未知，低于要求返回 1。 */
+static int caps_min_miss(uint64_t actual, uint64_t required, int *unknown)
+{
+    if (required == 0)
+        return 0;
+    if (actual == 0) {
+        *unknown = 1;
+        return 0;
+    }
+    return actual < required;
+}
+
 int provider_caps_match(const provider_caps_t *caps, const provider_select_t *sel)
 {
     int unknown = 0;
@@ -43,26 +68,12 @@ int provider_caps_match(const provider_caps_t *caps, const provider_select_t *se
     if (!caps || !caps->declared)
         return sel_has_requirement(sel) ? PROVIDER_CAPS_CONSERVATIVE : PROVIDER_CAPS_EXACT;
 
-    if (sel->require_accel != AIRY_ACCEL_NONE) {
-        if (caps->accelerator == AIRY_ACCEL_NONE)
-            unknown = 1;
-        else if (caps->accelerator != sel->require_accel)
-            return PROVIDER_CAPS_MISS;
-    }
-
-    if (sel->min_vram_bytes != 0) {
-        if (caps->vram_bytes == 0)
-            unknown = 1;
-        else if (caps->vram_bytes < sel->min_vram_bytes)
-            return PROVIDER_CAPS_MISS;
-    }
-
-    if (sel->min_context != 0) {
-        if (caps->max_context == 0)
-            unknown = 1;
-        else if (caps->max_context < sel->min_context)
-            return PROVIDER_CAPS_MISS;
-    }
+    if (caps_accel_miss(caps, sel, &unknown))
+        return PROVIDER_CAPS_MISS;
+    if (caps_min_miss(caps->vram_bytes, sel->min_vram_bytes, &unknown))
+        return PROVIDER_CAPS_MISS;
+    if (caps_min_miss(caps->max_context, sel->min_context, &unknown))
+        return PROVIDER_CAPS_MISS;
 
     if (!flag_ok(caps->supports_stream, sel->need_stream, &unknown))
         return PROVIDER_CAPS_MISS;

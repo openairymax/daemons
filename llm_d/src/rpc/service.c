@@ -512,6 +512,145 @@ static int svc_ep_cb(const provider_t *prov, void *ud)
     return 0;
 }
 
+/* D-7（Q19）：一次快照出请求四元组，调用方无需再从多个计数器拼失败率。 */
+static void stats_add_requests(llm_service_t *svc, cJSON *root)
+{
+    uint64_t rq_total, rq_ok, rq_fail, rq_timeout;
+    airy_mtx_lock(&svc->lock);
+    rq_total = svc->req_total;
+    rq_ok = svc->req_ok;
+    rq_fail = svc->req_fail;
+    rq_timeout = svc->req_timeout;
+    airy_mtx_unlock(&svc->lock);
+
+    cJSON *rq = cJSON_CreateObject();
+    if (rq) {
+        cJSON_AddNumberToObject(rq, "total", (double)rq_total);
+        cJSON_AddNumberToObject(rq, "ok", (double)rq_ok);
+        cJSON_AddNumberToObject(rq, "fail", (double)rq_fail);
+        cJSON_AddNumberToObject(rq, "timeout", (double)rq_timeout);
+        cJSON_AddNumberToObject(rq, "success_rate",
+                                rq_total ? (double)rq_ok / (double)rq_total : 0.0);
+        cJSON_AddItemToObject(root, "requests", rq);
+    }
+}
+
+/* G47：分列与样本数并出，禁止以 aggregate 冒充性能；判定层为端点自报。 */
+static void stats_add_measure(cJSON *root, const llm_router_stats_t *rs)
+{
+    cJSON *meas = cJSON_CreateObject();
+    if (!meas)
+        return;
+    cJSON_AddNumberToObject(meas, "lat_samples", (double)rs->lat_samples);
+    cJSON_AddNumberToObject(meas, "lat_total_ms", (double)rs->lat_total_ms);
+    cJSON_AddNumberToObject(meas, "avg_latency_ms",
+                            rs->lat_samples ? (double)rs->lat_total_ms / (double)rs->lat_samples
+                                            : 0.0);
+    cJSON_AddNumberToObject(meas, "prompt_tokens", (double)rs->prompt_tokens_sum);
+    cJSON_AddNumberToObject(meas, "cached_tokens", (double)rs->cached_tokens_sum);
+    cJSON_AddNumberToObject(meas, "meas_samples", (double)rs->meas_samples);
+    cJSON_AddNumberToObject(meas, "prefill_tokens", (double)rs->prefill_tokens);
+    cJSON_AddNumberToObject(meas, "decode_tokens", (double)rs->decode_tokens);
+    cJSON_AddNumberToObject(meas, "kv_cache_tokens", (double)rs->kv_cache_tokens);
+    cJSON_AddNumberToObject(meas, "prefill_ms", rs->prefill_ms);
+    cJSON_AddNumberToObject(meas, "decode_ms", rs->decode_ms);
+    cJSON_AddItemToObject(root, "measurement", meas);
+}
+
+static void stats_add_router(cJSON *root)
+{
+    llm_router_stats_t rs;
+    if (llm_router_get_stats(&rs) != 0)
+        return;
+
+    static const char *const k_route[] = {"complexity", "cost",   "latency",
+                                          "fallback",   "round_robin"};
+    cJSON *router = cJSON_CreateObject();
+    if (router) {
+        cJSON_AddNumberToObject(router, "total_requests", (double)rs.total_requests);
+        for (size_t i = 0; i < sizeof(k_route) / sizeof(k_route[0]); i++) {
+            char key[32];
+            snprintf(key, sizeof(key), "routed_%s", k_route[i]);
+            cJSON_AddNumberToObject(router, key, (double)rs.routed_count[i]);
+        }
+        cJSON_AddNumberToObject(router, "fallback_count", (double)rs.fallback_count);
+        cJSON_AddNumberToObject(router, "error_count", (double)rs.error_count);
+        cJSON_AddNumberToObject(router, "total_cost", rs.total_cost);
+        cJSON_AddNumberToObject(router, "total_tokens", (double)rs.total_tokens);
+        cJSON_AddItemToObject(root, "router", router);
+    }
+    stats_add_measure(root, &rs);
+}
+
+/* D2-9：超时三拆的传输侧观测。三类成因处置不同——连接未建立可无条件
+ * 重试、上游停摆仅在幂等时可重试、整轮预算耗尽不可重试；混为一个
+ * "超时"计数会掩盖根因。 */
+static void stats_add_transport(cJSON *root)
+{
+    cJSON *transport = cJSON_CreateObject();
+    if (!transport)
+        return;
+    cJSON_AddNumberToObject(transport, "connect_timeout", (double)prov_stat_get(PROV_TMO_CONNECT));
+    cJSON_AddNumberToObject(transport, "stream_stall", (double)prov_stat_get(PROV_TMO_STALL));
+    cJSON_AddNumberToObject(transport, "total_timeout", (double)prov_stat_get(PROV_TMO_TOTAL));
+    cJSON_AddItemToObject(root, "transport", transport);
+}
+
+/* D2-10：热切换观测。gen 与 mismatch 并出——只见 gen 增长而看不到被
+ * 丢弃的旧世代回包，会把强制排空误读为"切换无损"。 */
+static void stats_add_swap(llm_service_t *svc, cJSON *root)
+{
+    cJSON *swap = cJSON_CreateObject();
+    if (!swap)
+        return;
+    uint32_t gen = 0;
+    uint32_t inflight = 0;
+    uint32_t swapped = 0;
+    uint64_t mismatch = 0;
+    uint64_t drain_tmo = 0;
+    svc_swap_stat(&svc->swap, &gen, &inflight, &swapped, &mismatch, &drain_tmo);
+    cJSON_AddNumberToObject(swap, "gen", (double)gen);
+    cJSON_AddNumberToObject(swap, "inflight", (double)inflight);
+    cJSON_AddNumberToObject(swap, "swapped", (double)swapped);
+    cJSON_AddNumberToObject(swap, "gen_mismatch", (double)mismatch);
+    cJSON_AddNumberToObject(swap, "drain_timeout", (double)drain_tmo);
+    cJSON_AddNumberToObject(swap, "reload_ok", (double)svc->reload_ok);
+    cJSON_AddNumberToObject(swap, "reload_fail", (double)svc->reload_fail);
+    cJSON_AddItemToObject(root, "swap", swap);
+}
+
+/* D-1：自托管端点快照（模型/后端/并发容量/在飞/排队/后端就绪）。 */
+static void stats_add_endpoints(llm_service_t *svc, cJSON *root)
+{
+    if (!svc->registry)
+        return;
+    cJSON *eps = cJSON_CreateArray();
+    if (!eps)
+        return;
+    svc_ep_ctx_t epc = {eps};
+    provider_reg_walk(svc->registry, svc_ep_cb, &epc);
+    cJSON_AddItemToObject(root, "endpoints", eps);
+}
+
+/* D-1：最近一次失败（模型 + 错误码 + 同一码的权威描述 + 距今毫秒）。
+ * 用 llm_d 自身单调钟求差：TUI 的单调钟起点不同，传绝对时刻无法
+ * 跨进程对读。 */
+static void stats_add_last_error(llm_service_t *svc, cJSON *root)
+{
+    if (!svc->last_err_ms)
+        return;
+    cJSON *le = cJSON_CreateObject();
+    if (!le)
+        return;
+    uint64_t now = airy_time_ms();
+    cJSON_AddStringToObject(le, "model", svc->last_err_model);
+    cJSON_AddNumberToObject(le, "rc", (double)svc->last_err_rc);
+    cJSON_AddStringToObject(le, "reason", airy_err_str(svc->last_err_rc));
+    cJSON_AddNumberToObject(le, "age_ms",
+                            (double)(now > svc->last_err_ms ? now - svc->last_err_ms : 0));
+    cJSON_AddItemToObject(root, "last_error", le);
+}
+
 int llm_service_stats(llm_service_t *svc, char **out_json)
 {
     if (!svc || !out_json) {
@@ -534,24 +673,7 @@ int llm_service_stats(llm_service_t *svc, char **out_json)
     cJSON_AddNumberToObject(root, "llm_cache_size", cache_get_size(svc->cache));
     cJSON_AddNumberToObject(root, "llm_cache_capacity", cache_get_capacity(svc->cache));
 
-    /* D-7（Q19）：一次快照出四元组，调用方无需再从多个计数器拼失败率。 */
-    uint64_t rq_total, rq_ok, rq_fail, rq_timeout;
-    airy_mtx_lock(&svc->lock);
-    rq_total = svc->req_total;
-    rq_ok = svc->req_ok;
-    rq_fail = svc->req_fail;
-    rq_timeout = svc->req_timeout;
-    airy_mtx_unlock(&svc->lock);
-    cJSON *rq = cJSON_CreateObject();
-    if (rq) {
-        cJSON_AddNumberToObject(rq, "total", (double)rq_total);
-        cJSON_AddNumberToObject(rq, "ok", (double)rq_ok);
-        cJSON_AddNumberToObject(rq, "fail", (double)rq_fail);
-        cJSON_AddNumberToObject(rq, "timeout", (double)rq_timeout);
-        cJSON_AddNumberToObject(rq, "success_rate",
-                                rq_total ? (double)rq_ok / (double)rq_total : 0.0);
-        cJSON_AddItemToObject(root, "requests", rq);
-    }
+    stats_add_requests(svc, root);
 
     cache_stats_t cache_stats;
     cache_get_stats(svc->cache, &cache_stats);
@@ -560,103 +682,11 @@ int llm_service_stats(llm_service_t *svc, char **out_json)
     cJSON_AddNumberToObject(root, "llm_cache_evictions", (double)cache_stats.evictions);
     cJSON_AddNumberToObject(root, "llm_cache_hit_rate", cache_stats.hit_rate);
 
-    llm_router_stats_t rs;
-    if (llm_router_get_stats(&rs) == 0) {
-        static const char *const k_route[] = {"complexity", "cost",   "latency",
-                                              "fallback",   "round_robin"};
-        cJSON *router = cJSON_CreateObject();
-        if (router) {
-            cJSON_AddNumberToObject(router, "total_requests", (double)rs.total_requests);
-            for (size_t i = 0; i < sizeof(k_route) / sizeof(k_route[0]); i++) {
-                char key[32];
-                snprintf(key, sizeof(key), "routed_%s", k_route[i]);
-                cJSON_AddNumberToObject(router, key, (double)rs.routed_count[i]);
-            }
-            cJSON_AddNumberToObject(router, "fallback_count", (double)rs.fallback_count);
-            cJSON_AddNumberToObject(router, "error_count", (double)rs.error_count);
-            cJSON_AddNumberToObject(router, "total_cost", rs.total_cost);
-            cJSON_AddNumberToObject(router, "total_tokens", (double)rs.total_tokens);
-            cJSON_AddItemToObject(root, "router", router);
-        }
-        cJSON *meas = cJSON_CreateObject();
-        if (meas) {
-            cJSON_AddNumberToObject(meas, "lat_samples", (double)rs.lat_samples);
-            cJSON_AddNumberToObject(meas, "lat_total_ms", (double)rs.lat_total_ms);
-            cJSON_AddNumberToObject(meas, "avg_latency_ms",
-                                    rs.lat_samples ? (double)rs.lat_total_ms /
-                                                         (double)rs.lat_samples
-                                                   : 0.0);
-            cJSON_AddNumberToObject(meas, "prompt_tokens", (double)rs.prompt_tokens_sum);
-            cJSON_AddNumberToObject(meas, "cached_tokens", (double)rs.cached_tokens_sum);
-            /* G47：分列与样本数并出，禁止以 aggregate 冒充性能；判定层为端点自报。 */
-            cJSON_AddNumberToObject(meas, "meas_samples", (double)rs.meas_samples);
-            cJSON_AddNumberToObject(meas, "prefill_tokens", (double)rs.prefill_tokens);
-            cJSON_AddNumberToObject(meas, "decode_tokens", (double)rs.decode_tokens);
-            cJSON_AddNumberToObject(meas, "kv_cache_tokens", (double)rs.kv_cache_tokens);
-            cJSON_AddNumberToObject(meas, "prefill_ms", rs.prefill_ms);
-            cJSON_AddNumberToObject(meas, "decode_ms", rs.decode_ms);
-            cJSON_AddItemToObject(root, "measurement", meas);
-        }
-    }
-
-    /* D2-9：超时三拆的传输侧观测。三类成因处置不同——连接未建立可无条件
-     * 重试、上游停摆仅在幂等时可重试、整轮预算耗尽不可重试；混为一个
-     * "超时"计数会掩盖根因。 */
-    cJSON *transport = cJSON_CreateObject();
-    if (transport) {
-        cJSON_AddNumberToObject(transport, "connect_timeout",
-                                (double)prov_stat_get(PROV_TMO_CONNECT));
-        cJSON_AddNumberToObject(transport, "stream_stall",
-                                (double)prov_stat_get(PROV_TMO_STALL));
-        cJSON_AddNumberToObject(transport, "total_timeout",
-                                (double)prov_stat_get(PROV_TMO_TOTAL));
-        cJSON_AddItemToObject(root, "transport", transport);
-    }
-
-    /* D2-10：热切换观测。gen 与 mismatch 并出——只见 gen 增长而看不到被
-     * 丢弃的旧世代回包，会把强制排空误读为"切换无损"。 */
-    cJSON *swap = cJSON_CreateObject();
-    if (swap) {
-        uint32_t gen = 0;
-        uint32_t inflight = 0;
-        uint32_t swapped = 0;
-        uint64_t mismatch = 0;
-        uint64_t drain_tmo = 0;
-        svc_swap_stat(&svc->swap, &gen, &inflight, &swapped, &mismatch, &drain_tmo);
-        cJSON_AddNumberToObject(swap, "gen", (double)gen);
-        cJSON_AddNumberToObject(swap, "inflight", (double)inflight);
-        cJSON_AddNumberToObject(swap, "swapped", (double)swapped);
-        cJSON_AddNumberToObject(swap, "gen_mismatch", (double)mismatch);
-        cJSON_AddNumberToObject(swap, "drain_timeout", (double)drain_tmo);
-        cJSON_AddNumberToObject(swap, "reload_ok", (double)svc->reload_ok);
-        cJSON_AddNumberToObject(swap, "reload_fail", (double)svc->reload_fail);
-        cJSON_AddItemToObject(root, "swap", swap);
-    }
-
-    /* D-1：自托管端点快照（模型/后端/并发容量/在飞/排队/后端就绪）。 */
-    if (svc->registry) {
-        cJSON *eps = cJSON_CreateArray();
-        if (eps) {
-            svc_ep_ctx_t epc = {eps};
-            provider_reg_walk(svc->registry, svc_ep_cb, &epc);
-            cJSON_AddItemToObject(root, "endpoints", eps);
-        }
-    }
-    /* D-1：最近一次失败（模型 + 错误码 + 同一码的权威描述 + 距今毫秒）。
-     * 用 llm_d 自身单调钟求差：TUI 的单调钟起点不同，传绝对时刻无法
-     * 跨进程对读。 */
-    if (svc->last_err_ms) {
-        cJSON *le = cJSON_CreateObject();
-        if (le) {
-            uint64_t now = airy_time_ms();
-            cJSON_AddStringToObject(le, "model", svc->last_err_model);
-            cJSON_AddNumberToObject(le, "rc", (double)svc->last_err_rc);
-            cJSON_AddStringToObject(le, "reason", airy_err_str(svc->last_err_rc));
-            cJSON_AddNumberToObject(le, "age_ms",
-                                    (double)(now > svc->last_err_ms ? now - svc->last_err_ms : 0));
-            cJSON_AddItemToObject(root, "last_error", le);
-        }
-    }
+    stats_add_router(root);
+    stats_add_transport(root);
+    stats_add_swap(svc, root);
+    stats_add_endpoints(svc, root);
+    stats_add_last_error(svc, root);
 
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);

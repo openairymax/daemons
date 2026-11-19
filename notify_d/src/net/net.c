@@ -35,18 +35,9 @@
 
 atomic_int g_conns = 0;
 
-static int notify_ws_accept_key(const char *client_key, char *out_key, size_t out_size)
+/* SHA1 摘要（WS 握手专用精简实现，combined 已含 GUID）。 */
+static int notify_ws_sha1(const char *combined, unsigned char sha1[20])
 {
-    if (!client_key || !out_key || out_size < 64) {
-        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "null parameter");
-    }
-
-    char combined[256];
-    snprintf(combined, sizeof(combined), "%s%s", client_key, NOTIFY_D_WS_GUID);
-
-    unsigned char sha1[20];
-    AIRY_MEMSET(sha1, 0, sizeof(sha1));
-
     unsigned int h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE;
     unsigned int h3 = 0x10325476, h4 = 0xC3D2E1F0;
 
@@ -127,7 +118,12 @@ static int notify_ws_accept_key(const char *client_key, char *out_key, size_t ou
     sha1[17] = (unsigned char)(h4 >> 16);
     sha1[18] = (unsigned char)(h4 >> 8);
     sha1[19] = (unsigned char)(h4);
+    return 0;
+}
 
+/* SHA1 摘要转 Base64（20 字节 → 28 字符 + NUL）。 */
+static void notify_ws_b64(const unsigned char *sha1, char *out_key, size_t out_size)
+{
     static const char *b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     size_t off = 0;
 
@@ -148,6 +144,23 @@ static int notify_ws_accept_key(const char *client_key, char *out_key, size_t ou
         out_key[off++] = '=';
     }
     out_key[off] = '\0';
+}
+
+static int notify_ws_accept_key(const char *client_key, char *out_key, size_t out_size)
+{
+    if (!client_key || !out_key || out_size < 64) {
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "null parameter");
+    }
+
+    char combined[256];
+    snprintf(combined, sizeof(combined), "%s%s", client_key, NOTIFY_D_WS_GUID);
+
+    unsigned char sha1[20];
+    AIRY_MEMSET(sha1, 0, sizeof(sha1));
+    if (notify_ws_sha1(combined, sha1) != 0) {
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "SHA1 digest failed");
+    }
+    notify_ws_b64(sha1, out_key, out_size);
 
     return 0;
 }

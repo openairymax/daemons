@@ -130,17 +130,11 @@ bool interactive_approval_is_enabled(const interactive_approval_t *mgr)
     return (mgr != NULL) && mgr->enabled;
 }
 
-char *interactive_approval_block(interactive_approval_t *mgr, const char *tool,
-                                 const char *agent_id, const char *params_json,
-                                 airy_approval_outcome_t *out_outcome)
+/* 持有 mgr->lock 时构造并入链请求；失败返回 NULL。 */
+static interactive_pending_req_t *approval_new_locked(interactive_approval_t *mgr,
+                                                          const char *tool, const char *agent_id,
+                                                          const char *params_json)
 {
-    if (!mgr || !tool || !out_outcome) {
-        return NULL;
-    }
-    if (!mgr->enabled) {
-        return NULL;
-    }
-
     interactive_pending_req_t *req =
         (interactive_pending_req_t *)AIRY_CALLOC(1, sizeof(interactive_pending_req_t));
     if (!req) {
@@ -149,7 +143,6 @@ char *interactive_approval_block(interactive_approval_t *mgr, const char *tool,
     }
 
     char reqbuf[72];
-    sync_mutex_lock_ex(mgr->lock, NULL);
     uint64_t now = airy_time_wall_ms();
     snprintf(reqbuf, sizeof(reqbuf), "req_%llu_%llu", (unsigned long long)now,
              (unsigned long long)mgr->seq);
@@ -164,34 +157,59 @@ char *interactive_approval_block(interactive_approval_t *mgr, const char *tool,
     mgr->seq++;
 
     interactive_pending_req_t **pp = &mgr->head;
-    while (*pp) {
+    while (*pp)
         pp = &(*pp)->next;
-    }
     *pp = req;
 
     SVC_LOG_INFO("P0: Interactive approval pending req=%s tool='%s' agent='%s'", req->request_id,
                  tool, agent_id ? agent_id : "?");
+    return req;
+}
 
-    uint64_t deadline = airy_time_ms() + mgr->timeout_ms;
+/* 持有 mgr->lock 时等待决议至 deadline（超时即返回，由调用方置 detached）。 */
+static void approval_wait_locked(interactive_approval_t *mgr, const interactive_pending_req_t *req,
+                                 uint64_t deadline)
+{
     while (!req->resolved) {
         uint64_t now_ms = airy_time_ms();
-        if (now_ms >= deadline) {
+        if (now_ms >= deadline)
             break;
-        }
         sync_timeout_t to = {deadline - now_ms, false};
-        sync_result_t wr = sync_condition_wait_ex(mgr->cond, mgr->lock, &to);
-        if (wr != SYNC_SUCCESS) {
+        if (sync_condition_wait_ex(mgr->cond, mgr->lock, &to) != SYNC_SUCCESS)
             break;
-        }
+    }
+}
+
+/* 持有 mgr->lock 时从 pending 链摘除 req。 */
+static void approval_unlink(interactive_approval_t *mgr, interactive_pending_req_t *req)
+{
+    interactive_pending_req_t **q = &mgr->head;
+    while (*q && *q != req)
+        q = &(*q)->next;
+    if (*q)
+        *q = req->next;
+}
+
+char *interactive_approval_block(interactive_approval_t *mgr, const char *tool,
+                                 const char *agent_id, const char *params_json,
+                                 airy_approval_outcome_t *out_outcome)
+{
+    if (!mgr || !tool || !out_outcome) {
+        return NULL;
+    }
+    if (!mgr->enabled) {
+        return NULL;
     }
 
-    interactive_pending_req_t **q = &mgr->head;
-    while (*q && *q != req) {
-        q = &(*q)->next;
+    sync_mutex_lock_ex(mgr->lock, NULL);
+    interactive_pending_req_t *req = approval_new_locked(mgr, tool, agent_id, params_json);
+    if (!req) {
+        sync_mutex_unlock_ex(mgr->lock);
+        return NULL;
     }
-    if (*q) {
-        *q = req->next;
-    }
+
+    approval_wait_locked(mgr, req, airy_time_ms() + mgr->timeout_ms);
+    approval_unlink(mgr, req);
     sync_mutex_unlock_ex(mgr->lock);
 
     *out_outcome = req->outcome;

@@ -244,35 +244,33 @@ void agent_stream_free(agent_stream_t *st)
     AIRY_MEMSET(st, 0, sizeof(*st));
 }
 
-void agent_stream_feed(agent_stream_t *st, const char *data, size_t len)
+/* 冲刷 [start, end) 的正文；空区间不发事件。 */
+static void run_emit_range(agent_stream_t *st, const char *data, size_t start, size_t end)
 {
-    if (!st || !data || len == 0)
-        return;
+    if (end > start)
+        run_emit_text(st, data + start, end - start);
+}
 
-    size_t i = 0;
-    if (st->frame_tag) {
-        /* 上一 payload 留下的半帧：先补完。 */
-        i = run_frame_drain(st, data, len);
-        if (st->frame_tag || i >= len)
-            return;
+/* 处理上一 payload 末尾挂起的 RS：命中 tag 则开帧；返回 1 表示调用方立即返回。 */
+static int run_feed_prev_rs(agent_stream_t *st, const char *data, size_t len, size_t *i)
+{
+    st->prev_rs = 0;
+    if (!AIRY_LLM_STREAM_IS_TAG(data[*i])) {
+        /* 孤立 RS：不是帧起始，按正文透出（内容不丢失）。 */
+        run_emit_text(st, "\x1e", 1);
+        return 0;
     }
-    if (st->prev_rs) {
-        /* 上一 payload 末尾的 RS：由当前字节判定是否开帧。 */
-        st->prev_rs = 0;
-        if (AIRY_LLM_STREAM_IS_TAG(data[i])) {
-            st->frame_tag = data[i];
-            i++;
-            if (i >= len)
-                return;
-            i += run_frame_drain(st, data + i, len - i);
-            if (st->frame_tag || i >= len)
-                return;
-        } else {
-            /* 孤立 RS：不是帧起始，按正文透出（内容不丢失）。 */
-            run_emit_text(st, "\x1e", 1);
-        }
-    }
+    st->frame_tag = data[*i];
+    (*i)++;
+    if (*i >= len)
+        return 1;
+    *i += run_frame_drain(st, data + *i, len - *i);
+    return (st->frame_tag || *i >= len);
+}
 
+/* 正文与内嵌帧混排区段：RS+tag 开帧，其余字节按正文透出。 */
+static void run_feed_scan(agent_stream_t *st, const char *data, size_t len, size_t i)
+{
     size_t start = i;
     while (i < len) {
         if ((unsigned char)data[i] != AIRY_LLM_STREAM_RS) {
@@ -280,8 +278,7 @@ void agent_stream_feed(agent_stream_t *st, const char *data, size_t len)
             continue;
         }
         if (i + 1 < len && AIRY_LLM_STREAM_IS_TAG(data[i + 1])) {
-            if (i > start)
-                run_emit_text(st, data + start, i - start);
+            run_emit_range(st, data, start, i);
             st->frame_tag = data[i + 1];
             i += 2;
             if (i < len) {
@@ -296,20 +293,35 @@ void agent_stream_feed(agent_stream_t *st, const char *data, size_t len)
         }
         if (i + 1 >= len) {
             /* payload 末尾的 RS：可能跨 payload 开帧，挂起判定。 */
-            if (i > start)
-                run_emit_text(st, data + start, i - start);
+            run_emit_range(st, data, start, i);
             st->prev_rs = 1;
             return;
         }
         /* 孤立 RS + 非 tag 字节：两字节按正文透出。 */
-        if (i > start)
-            run_emit_text(st, data + start, i - start);
+        run_emit_range(st, data, start, i);
         run_emit_text(st, data + i, 2);
         start = i + 2;
         i += 2;
     }
-    if (i > start)
-        run_emit_text(st, data + start, i - start);
+    run_emit_range(st, data, start, i);
+}
+
+void agent_stream_feed(agent_stream_t *st, const char *data, size_t len)
+{
+    if (!st || !data || len == 0)
+        return;
+
+    size_t i = 0;
+    if (st->frame_tag) {
+        /* 上一 payload 留下的半帧：先补完。 */
+        i = run_frame_drain(st, data, len);
+        if (st->frame_tag || i >= len)
+            return;
+    }
+    if (st->prev_rs && run_feed_prev_rs(st, data, len, &i))
+        return;
+
+    run_feed_scan(st, data, len, i);
 }
 
 void agent_stream_on_chunk(const char *data, size_t len, void *ud)

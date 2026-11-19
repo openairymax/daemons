@@ -37,65 +37,84 @@ typedef struct {
  * @brief Parse a URL into scheme/host/port/path (http/https only)
  * @return 0 on success, -1 on invalid URL
  */
-static int builtin_parse_url(const char *url, builtin_url_t *u)
+/* 拆 scheme 并校验 http(s)；返回 host 起始位置，非法返回 NULL。 */
+static const char *url_parse_scheme(const char *url, builtin_url_t *u)
 {
     const char *scheme_end = strstr(url, "://");
-    if (!scheme_end || scheme_end == url) {
-        return -1;
-    }
+    if (!scheme_end || scheme_end == url)
+        return NULL;
     size_t slen = (size_t)(scheme_end - url);
-    if (slen >= sizeof(u->scheme)) {
-        return -1;
-    }
+    if (slen >= sizeof(u->scheme))
+        return NULL;
     AIRY_MEMCPY(u->scheme, url, slen);
     u->scheme[slen] = '\0';
-    if (strcmp(u->scheme, "http") != 0 && strcmp(u->scheme, "https") != 0) {
-        return -1;
-    }
+    if (strcmp(u->scheme, "http") != 0 && strcmp(u->scheme, "https") != 0)
+        return NULL;
+    return scheme_end + 3;
+}
 
-    const char *host_start = scheme_end + 3;
+/* 解析 host；返回端口/路径分界，非法返回 NULL。 */
+static const char *url_parse_host(const char *host_start, builtin_url_t *u)
+{
     const char *p = host_start;
-    while (*p && *p != ':' && *p != '/' && *p != '?') {
+    while (*p && *p != ':' && *p != '/' && *p != '?')
         p++;
-    }
     size_t hlen = (size_t)(p - host_start);
-    if (hlen == 0 || hlen >= sizeof(u->host)) {
-        return -1;
-    }
+    if (hlen == 0 || hlen >= sizeof(u->host))
+        return NULL;
     AIRY_MEMCPY(u->host, host_start, hlen);
     u->host[hlen] = '\0';
+    return p;
+}
 
-    u->port = (strcmp(u->scheme, "https") == 0) ? 443 : 80;
-    const char *path_start = p;
-    if (*p == ':') {
-        const char *port_start = p + 1;
-        const char *q = port_start;
-        while (*q && *q != '/' && *q != '?') {
-            if (*q < '0' || *q > '9') {
-                return -1;
-            }
-            q++;
-        }
-        if (q == port_start) {
-            return -1;
-        }
-        long port = strtol(port_start, NULL, 10);
-        if (port <= 0 || port > 65535) {
-            return -1;
-        }
-        u->port = (int)port;
-        path_start = q;
+/* 解析端口段（可缺省）；返回路径起点，非法返回 NULL。 */
+static const char *url_parse_port(const char *p, builtin_url_t *u)
+{
+    if (*p != ':')
+        return p;
+    const char *port_start = p + 1;
+    const char *q = port_start;
+    while (*q && *q != '/' && *q != '?') {
+        if (*q < '0' || *q > '9')
+            return NULL;
+        q++;
     }
+    if (q == port_start)
+        return NULL;
+    long port = strtol(port_start, NULL, 10);
+    if (port <= 0 || port > 65535)
+        return NULL;
+    u->port = (int)port;
+    return q;
+}
+
+/* 解析 path（缺省 "/"）；返回 0/-1。 */
+static int url_parse_path(const char *path_start, builtin_url_t *u)
+{
     if (*path_start == '\0') {
         u->path[0] = '/';
         u->path[1] = '\0';
-    } else {
-        if (strlen(path_start) >= sizeof(u->path)) {
-            return -1;
-        }
-        AIRY_MEMCPY(u->path, path_start, strlen(path_start) + 1);
+        return 0;
     }
+    if (strlen(path_start) >= sizeof(u->path))
+        return -1;
+    AIRY_MEMCPY(u->path, path_start, strlen(path_start) + 1);
     return 0;
+}
+
+static int builtin_parse_url(const char *url, builtin_url_t *u)
+{
+    const char *host_start = url_parse_scheme(url, u);
+    if (!host_start)
+        return -1;
+    const char *path_start = url_parse_host(host_start, u);
+    if (!path_start)
+        return -1;
+    u->port = (strcmp(u->scheme, "https") == 0) ? 443 : 80;
+    path_start = url_parse_port(path_start, u);
+    if (!path_start)
+        return -1;
+    return url_parse_path(path_start, u);
 }
 
 #ifndef _WIN32
@@ -155,6 +174,48 @@ static int web_fetch_via_network(const builtin_url_t *u, tool_result_t *res)
 }
 #endif
 
+/* 校验 URL 形态并解析出 scheme/host/port/path；合法返回 0。 */
+static int fetch_check_url(const char *url_str, builtin_url_t *u, tool_result_t *res)
+{
+    if (strpbrk(url_str, "'\"`$\\") != NULL)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "URL contains unsafe characters (', \", `, $, \\)");
+    if (builtin_parse_url(url_str, u) != 0)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "Invalid URL (only http:// and https:// are supported)");
+    return 0;
+}
+
+/* 剥离 curl -w 追加的状态标记并取回 HTTP 状态码。 */
+static void fetch_pop_status(char *out, long *http_status)
+{
+    char *mark = out ? strstr(out, "\n__AIRY_STATUS__:") : NULL;
+    if (!mark)
+        return;
+    *mark = '\0';
+    *http_status = strtol(mark + strlen("\n__AIRY_STATUS__:"), NULL, 10);
+}
+
+/* 按状态码落结果：4xx/5xx → IO 错误；>0 → OK；缺标记 → curl 整体失败。 */
+static void fetch_apply_status(tool_result_t *res, long http_status, int exit_code)
+{
+    if (http_status >= 400) {
+        btool_fail(res, AIRY_ERR_IO, "HTTP error status %ld", http_status);
+        res->exit_code = (int)http_status;
+        return;
+    }
+    if (http_status > 0) {
+        res->err_code = AIRY_OK;
+        res->exit_code = 0;
+        return;
+    }
+    btool_fail(res, AIRY_ERR_IO, "Web fetch failed (curl exit %d): %s", exit_code,
+               res->output ? res->output : "");
+    AIRY_FREE(res->output);
+    res->output = AIRY_STRDUP("");
+    res->exit_code = exit_code;
+}
+
 int web_fetch_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
@@ -165,13 +226,10 @@ int web_fetch_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
         return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Missing string parameter: url");
     const char *url_str = url->valuestring;
 
-    if (strpbrk(url_str, "'\"`$\\") != NULL)
-        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
-                          "URL contains unsafe characters (', \", `, $, \\)");
     builtin_url_t u;
-    if (builtin_parse_url(url_str, &u) != 0)
-        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
-                          "Invalid URL (only http:// and https:// are supported)");
+    int uerr = fetch_check_url(url_str, &u, res);
+    if (uerr != 0)
+        return uerr;
 
     /* Main path: curl child process (curl.exe ships with Windows 10+).
      * -sS silences progress but keeps errors; -L follows redirects;
@@ -211,26 +269,10 @@ int web_fetch_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
     }
 
     long http_status = 0;
-    char *mark = out ? strstr(out, "\n__AIRY_STATUS__:") : NULL;
-    if (mark) {
-        *mark = '\0';
-        http_status = strtol(mark + strlen("\n__AIRY_STATUS__:"), NULL, 10);
-    }
+    fetch_pop_status(out, &http_status);
     res->output = out ? out : AIRY_STRDUP("");
 
-    if (http_status >= 400) {
-        btool_fail(res, AIRY_ERR_IO, "HTTP error status %ld", http_status);
-        res->exit_code = (int)http_status;
-    } else if (http_status > 0) {
-        res->err_code = AIRY_OK;
-        res->exit_code = 0;
-    } else {
-        btool_fail(res, AIRY_ERR_IO, "Web fetch failed (curl exit %d): %s", exit_code,
-                   out ? out : "");
-        AIRY_FREE(res->output);
-        res->output = AIRY_STRDUP("");
-        res->exit_code = exit_code;
-    }
+    fetch_apply_status(res, http_status, exit_code);
     return AIRY_OK;
 }
 
@@ -555,6 +597,38 @@ static int web_search_via(const web_src_t *src, const char *query, int max_resul
     return rc;
 }
 
+/* 搜索编排：Bing → DuckDuckGo → 退化查询改写重试；返回最终条目数。 */
+static int search_run(const char *query, int max_results, uint64_t deadline, char *buf,
+                      size_t *buf_len, int *count)
+{
+    int got = (web_search_via(&WEB_SRC_BING, query, max_results, buf, BUILTIN_OUTPUT_CAP, buf_len,
+                              count) == 0 &&
+               *count > 0);
+    if (!got) {
+        if (!builtin_deadline_hit(deadline))
+            web_search_via(&WEB_SRC_DDG, query, max_results, buf, BUILTIN_OUTPUT_CAP, buf_len,
+                           count);
+        return *count;
+    }
+    if (!web_search_results_degraded(buf) || builtin_deadline_hit(deadline))
+        return *count;
+
+    /* Bing 命中但结果是汉字字典/词条（中文长查询分词退化）：改写查询后
+     * 重试；改写仍退化/失败则清空走 DDG 兜底（2026-08-20）。 */
+    char rq[2048];
+    int rewrote = web_search_rewrite_query(query, rq, sizeof(rq));
+    *buf_len = 0;
+    *count = 0;
+    if (rewrote && web_search_via(&WEB_SRC_BING, rq, max_results, buf, BUILTIN_OUTPUT_CAP,
+                                  buf_len, count) == 0 &&
+        *count > 0 && !web_search_results_degraded(buf))
+        return *count;
+    *buf_len = 0;
+    *count = 0;
+    web_search_via(&WEB_SRC_DDG, query, max_results, buf, BUILTIN_OUTPUT_CAP, buf_len, count);
+    return *count;
+}
+
 int web_search_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
@@ -580,31 +654,8 @@ int web_search_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
      * IPC round trip beyond the agent's 30s timeout. The stage budget
      * (timeout_ms) gates the fallbacks so the sum of retries stays within
      * the executor's per-tool budget. */
-    uint64_t deadline = builtin_deadline_ms(timeout_ms);
-    int got = (web_search_via(&WEB_SRC_BING, q->valuestring, max_results, buf, BUILTIN_OUTPUT_CAP,
-                              &buf_len, &count) == 0 &&
-               count > 0);
-    if (!got && !builtin_deadline_hit(deadline)) {
-        web_search_via(&WEB_SRC_DDG, q->valuestring, max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len,
-                       &count);
-    } else if (got && web_search_results_degraded(buf) && !builtin_deadline_hit(deadline)) {
-        /* Bing 命中但结果是汉字字典/词条（中文长查询分词退化）：改写查询
-         * 后重试；改写仍退化/失败则清空走 DDG 兜底（2026-08-20）。 */
-        char rq[2048];
-        int rewrote = web_search_rewrite_query(q->valuestring, rq, sizeof(rq));
-        buf_len = 0;
-        count = 0;
-        if (rewrote && web_search_via(&WEB_SRC_BING, rq, max_results, buf, BUILTIN_OUTPUT_CAP,
-                                      &buf_len, &count) == 0 &&
-            count > 0 && !web_search_results_degraded(buf)) {
-            /* 改写后的查询返回正常结果，采用 */
-        } else {
-            buf_len = 0;
-            count = 0;
-            web_search_via(&WEB_SRC_DDG, q->valuestring, max_results, buf, BUILTIN_OUTPUT_CAP,
-                           &buf_len, &count);
-        }
-    }
+    (void)search_run(q->valuestring, max_results, builtin_deadline_ms(timeout_ms), buf, &buf_len,
+                     &count);
 
     if (count == 0) {
         btool_soft(res, "No web results for query: %s (Bing & DuckDuckGo unreachable)",
