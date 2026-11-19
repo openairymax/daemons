@@ -63,6 +63,7 @@ extern "C" {
 #define SUP_DEFAULT_BACKOFF_MAX_MS 30000
 #define SUP_DEFAULT_MAX_ATTEMPTS 5
 #define SUP_DEFAULT_LIVENESS_TICKS 3
+#define SUP_DEFAULT_READY_MS 15000
 #define SUP_DEFAULT_ADMIT_RETRY_MS 30000
 #define SUP_TERM_GRACE_MS 5000
 
@@ -99,6 +100,8 @@ typedef struct sup_proc {
     int fail_count;         /* 连续失败次数（RUNNING 稳定后归零由 next 复活清零） */
     long long next_ms;      /* BACKOFF 最早可重启时刻（monotonic ms） */
     int dead_ticks;         /* sock 不可达连续计数（假死判定） */
+    long long ready_ms;     /* 启动宽限（毫秒），0 = 用全局缺省 */
+    long long ready_until;  /* 宽限截止（monotonic ms），0 = 无宽限 */
     long long need;         /* 常驻内存声明（字节），0 = 未声明、派生不设门槛 */
     char last_death[128];   /* 最近死因（收割时记录，V13.1 日志判据） */
 } sup_proc_t;
@@ -132,6 +135,7 @@ typedef struct sup_ctx {
     long backoff_max_ms;
     int max_attempts;
     int liveness_ticks;
+    long long startup_grace_ms; /* 全局启动宽限：探活未就绪不判假死的时长 */
     long admit_retry_ms;        /* WAIT 态重判周期：装不下的进程多久再问一次 */
     int shutdown;               /* 1 = supervisor.shutdown 已受理 */
     int no_respawn;             /* A-9：AIRY_SUPERVISOR_NO_RESPAWN=1 关自动重建 */

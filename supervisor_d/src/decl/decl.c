@@ -319,6 +319,22 @@ static void apply_mem_line(sup_ctx_t *ctx, const char *key, const char *val)
         sup_log("WARN", "%s mem declaration unreadable: '%s'", key + pl, val);
 }
 
+static void apply_ready_line(sup_ctx_t *ctx, const char *key, const char *val)
+{
+    /* AIRYRT_LAUNCH_READY_<NAME> -> 启动宽限（秒），覆盖全局缺省。
+     * 只对「启动后需长时间预热才监听端口」的进程有意义（自托管模型）。 */
+    static const char pfx[] = "AIRYRT_LAUNCH_READY_";
+    size_t pl = sizeof(pfx) - 1;
+    if (strncmp(key, pfx, pl) != 0)
+        return;
+    int i = sup_proc_find(ctx, key + pl);
+    if (i < 0)
+        return; /* 未登记的 ready 声明拒绝（fail-closed） */
+    long sec = env_long(val, 0);
+    if (sec > 0)
+        ctx->procs[i].ready_ms = (long long)sec * 1000;
+}
+
 /* 内置缺省表：仅 profile.env 无 launch 段时兜底（升级兼容） */
 int sup_decl_defaults(sup_ctx_t *ctx)
 {
@@ -359,6 +375,7 @@ int sup_decl_load(sup_ctx_t *ctx)
     ctx->backoff_max_ms = env_long("AIRYRT_SUP_BACKOFF_MAX_MS", SUP_DEFAULT_BACKOFF_MAX_MS);
     ctx->max_attempts = (int)env_long("AIRYRT_SUP_MAX_ATTEMPTS", SUP_DEFAULT_MAX_ATTEMPTS);
     ctx->liveness_ticks = (int)env_long("AIRYRT_SUP_LIVENESS_TICKS", SUP_DEFAULT_LIVENESS_TICKS);
+    ctx->startup_grace_ms = env_long("AIRYRT_SUP_READY_MS", SUP_DEFAULT_READY_MS);
     ctx->admit_retry_ms = env_long("AIRYRT_SUP_ADMIT_RETRY_MS", SUP_DEFAULT_ADMIT_RETRY_MS);
     /* A-9 回退开关：显式置 1 关闭 CORE 自动重建（排障/维护用），
      * 死因仍入 last_death，显式 sup_activate 可手工复活。 */
@@ -399,6 +416,7 @@ int sup_decl_load(sup_ctx_t *ctx)
                 apply_ep_line(ctx, key, val);
                 apply_keep_line(ctx, key, val);
                 apply_mem_line(ctx, key, val);
+                apply_ready_line(ctx, key, val);
             }
         }
     }
