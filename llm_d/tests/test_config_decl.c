@@ -211,15 +211,9 @@ static const char kFull16[] = "models:\n"
                               "    thinking: auto\n"
                               "    provider: prov\n";
 
-int main(void)
+/* 1)+2) 显式覆盖整表替换、首个声明生效；无声明则 8 位全 false。 */
+static int case_caps(const char *path)
 {
-    char path[256];
-    snprintf(path, sizeof(path), "/tmp/airy_llm_decl_%ld.yaml", (long)getpid());
-
-    printf("running config declaration surface (A7-4) regression\n");
-
-    /* 1) 显式覆盖：整表替换 + 首个显式声明生效（m2 的 response_format
-     *    不得反超 m1 的声明）。 */
     provider_config_t *provs = NULL;
     size_t n = 0;
     if (put_file(path, kOverride) != 0)
@@ -234,7 +228,6 @@ int main(void)
         free_providers(provs, n);
     }
 
-    /* 2) 无声明：8 位全 false（未声明即不发，fail-safe）。 */
     provs = NULL;
     n = 0;
     if (put_file(path, kFallback) != 0)
@@ -252,10 +245,14 @@ int main(void)
         check_bit("undecl.budget", provs[0].caps.accepts_thinking_budget, false);
         free_providers(provs, n);
     }
+    return 0;
+}
 
-    /* 3) 未知键：只忽略键，两行都保留；合法键 max_concurrent 照常生效。 */
-    provs = NULL;
-    n = 0;
+/* 3) 未知键只忽略该键，行保留，合法键照常生效。 */
+static int case_unknown_key(const char *path)
+{
+    provider_config_t *provs = NULL;
+    size_t n = 0;
     if (put_file(path, kUnknownKey) != 0)
         return 1;
     check_int("unknown.rc", svc_load_model_config_yaml(path, &provs, &n), 0);
@@ -267,167 +264,164 @@ int main(void)
         check_int("unknown.conc", provs[0].model_max_concurrent[1], 3);
         free_providers(provs, n);
     }
+    return 0;
+}
 
-    /* 4) provision/artifact 落位 model_entry_t。 */
-    {
-        if (put_file(path, kProvision) != 0)
-            return 1;
-        svc_yaml_state_t st;
-        memset(&st, 0, sizeof(st));
-        check_int("decl.rc", svc_yaml_load_state(path, &st), 0);
-        check_int("decl.count", (int)st.model_count, 1);
-        check_str("decl.provision", st.models[0].provision, "managed");
-        check_str("decl.artifact", st.models[0].artifact, "/var/airy/models/qwen2.gguf");
+/* 4)~6) provision/artifact 落位；值域外与 capabilities 裸名外键拒载该行。 */
+static int case_provision(const char *path)
+{
+    if (put_file(path, kProvision) != 0)
+        return 1;
+    svc_yaml_state_t st;
+    memset(&st, 0, sizeof(st));
+    check_int("decl.rc", svc_yaml_load_state(path, &st), 0);
+    check_int("decl.count", (int)st.model_count, 1);
+    check_str("decl.provision", st.models[0].provision, "managed");
+    check_str("decl.artifact", st.models[0].artifact, "/var/airy/models/qwen2.gguf");
+
+    memset(&st, 0, sizeof(st));
+    if (put_file(path, kBadProvision) != 0)
+        return 1;
+    check_int("badprov.rc", svc_yaml_load_state(path, &st), 0);
+    check_int("badprov.count", (int)st.model_count, 1);
+    check_str("badprov.kept", st.models[0].name, "good");
+
+    memset(&st, 0, sizeof(st));
+    if (put_file(path, kBadBit) != 0)
+        return 1;
+    check_int("badbit.rc", svc_yaml_load_state(path, &st), 0);
+    check_int("badbit.count", (int)st.model_count, 1);
+    check_str("badbit.kept", st.models[0].name, "good");
+    return 0;
+}
+
+/* 7)+8) P-A：不可读必须 fail-closed；可读但空表属装配失败。 */
+static int case_missing(const char *path)
+{
+    char missing[256];
+    snprintf(missing, sizeof(missing), "/tmp/airy_llm_nocfg_%ld.yaml", (long)getpid());
+    provider_config_t *mp = NULL;
+    size_t mn = 99;
+    check_int("noent.rc", svc_load_model_config_yaml(missing, &mp, &mn), AIRY_ERR_PARSE_ERROR);
+    check_int("noent.count", (int)mn, 0);
+
+    if (put_file(path, "") != 0)
+        return 1;
+    provider_config_t *ep = NULL;
+    size_t en = 99;
+    check_int("empty.rc", svc_load_model_config_yaml(path, &ep, &en), AIRY_ERR_STATE_ERROR);
+    check_int("empty.count", (int)en, 0);
+    return 0;
+}
+
+/* 9)+10) 容量边界行（8 键 / 16 键）与重复 capabilities 必须完整解析。 */
+static int case_full_rows(const char *path)
+{
+    svc_yaml_state_t st;
+    memset(&st, 0, sizeof(st));
+    if (put_file(path, kFull8) != 0)
+        return 1;
+    check_int("full8.rc", svc_yaml_load_state(path, &st), 0);
+    check_int("full8.count", (int)st.model_count, 1);
+    check_str("full8.name", st.models[0].name, "eight");
+    check_str("full8.provider", st.models[0].provider, "prov");
+    check_str("full8.provision", st.models[0].provision, "managed");
+    check_str("full8.cw", st.models[0].context_window, "8k");
+    check_int("full8.caps", st.models[0].has_caps, 0);
+
+    memset(&st, 0, sizeof(st));
+    if (put_file(path, kFull16) != 0)
+        return 1;
+    check_int("full16.rc", svc_yaml_load_state(path, &st), 0);
+    check_int("full16.count", (int)st.model_count, 1);
+    check_str("full16.name", st.models[0].name, "sixteen");
+    check_str("full16.provider", st.models[0].provider, "prov");
+    check_str("full16.mode", st.models[0].mode, "local");
+    check_str("full16.fmt", st.models[0].api_format, "openai");
+    check_str("full16.cw", st.models[0].context_window, "32k");
+    check_int("full16.maxout", st.models[0].max_output_tokens, 4096);
+    check_int("full16.rounds", st.models[0].tool_rounds, 70);
+    check_int("full16.vision", st.models[0].vision, 1);
+    check_str("full16.think", st.models[0].thinking, "auto");
+    check_int("full16.caps", st.models[0].has_caps, 1);
+    check_bit("full16.seed", st.models[0].caps_override.accepts_seed, true);
+    check_bit("full16.numctx", st.models[0].caps_override.accepts_num_ctx, false);
+    return 0;
+}
+
+/* 11)+11b) B-1 声明位落 provider 级；仅 context_window 时派生容量。 */
+static int case_hw_decl(const char *path)
+{
+    provider_config_t *hp = NULL;
+    size_t hn = 0;
+    if (put_file(path, kHwCaps) != 0)
+        return 1;
+    check_int("hw.rc", svc_load_model_config_yaml(path, &hp, &hn), 0);
+    check_int("hw.count", (int)hn, 1);
+    if (hp && hn == 1) {
+        check_int("hw.declared", hp[0].hw.declared, 1);
+        check_int("hw.accel", (int)hp[0].hw.accelerator, (int)AIRY_ACCEL_INTEL);
+        check_int("hw.vram", (int)(hp[0].hw.vram_bytes >> 30), 8);
+        check_int("hw.ctx", (int)hp[0].hw.max_context, 8192);
+        check_int("hw.stream", hp[0].hw.supports_stream, 1);
+        check_int("hw.tools", hp[0].hw.supports_tools, 0);
+        free_providers(hp, hn);
     }
 
-    /* 5) provision 值域外：bad 行拒载。 */
-    {
-        if (put_file(path, kBadProvision) != 0)
-            return 1;
-        svc_yaml_state_t st;
-        memset(&st, 0, sizeof(st));
-        check_int("badprov.rc", svc_yaml_load_state(path, &st), 0);
-        check_int("badprov.count", (int)st.model_count, 1);
-        check_str("badprov.kept", st.models[0].name, "good");
+    provider_config_t *cp = NULL;
+    size_t cn = 0;
+    if (put_file(path, kFull8) != 0)
+        return 1;
+    check_int("cw.rc", svc_load_model_config_yaml(path, &cp, &cn), 0);
+    check_int("cw.count", (int)cn, 1);
+    if (cp && cn == 1) {
+        check_int("cw.declared", cp[0].hw.declared, 1);
+        check_int("cw.maxctx", (int)cp[0].hw.max_context, 8192);
+        free_providers(cp, cn);
+    }
+    return 0;
+}
+
+/* 12)+13) 未声明走保守默认；非法/空值保持未知。 */
+static int case_hw_undecl(const char *path)
+{
+    provider_config_t *np = NULL;
+    size_t nn = 0;
+    if (put_file(path, kFallback) != 0)
+        return 1;
+    check_int("hwundecl.rc", svc_load_model_config_yaml(path, &np, &nn), 0);
+    if (np && nn == 1) {
+        check_int("hwundecl.declared", np[0].hw.declared, 0);
+        free_providers(np, nn);
     }
 
-    /* 6) capabilities 裸名外键：bad 行拒载。 */
-    {
-        if (put_file(path, kBadBit) != 0)
-            return 1;
-        svc_yaml_state_t st;
-        memset(&st, 0, sizeof(st));
-        check_int("badbit.rc", svc_yaml_load_state(path, &st), 0);
-        check_int("badbit.count", (int)st.model_count, 1);
-        check_str("badbit.kept", st.models[0].name, "good");
+    provider_config_t *bp = NULL;
+    size_t bn = 0;
+    if (put_file(path, kHwBad) != 0)
+        return 1;
+    check_int("hwbad.rc", svc_load_model_config_yaml(path, &bp, &bn), 0);
+    if (bp && bn == 1) {
+        check_int("hwbad.declared", bp[0].hw.declared, 1);
+        check_int("hwbad.accel", (int)bp[0].hw.accelerator, (int)AIRY_ACCEL_NONE);
+        check_int("hwbad.vram", (int)bp[0].hw.vram_bytes, 0);
+        check_int("hwbad.stream", bp[0].hw.supports_stream, -1);
+        check_int("hwbad.tools", bp[0].hw.supports_tools, -1);
+        free_providers(bp, bn);
     }
+    return 0;
+}
 
-    /* 7) P-A：文件不可读必须 fail-closed，不得回 0 冒充「加载成功但无
-     *    provider」——后者会让启动与热重载都静默带着空注册表继续。 */
-    {
-        char missing[256];
-        snprintf(missing, sizeof(missing), "/tmp/airy_llm_nocfg_%ld.yaml", (long)getpid());
-        provider_config_t *mp = NULL;
-        size_t mn = 99;
-        check_int("noent.rc", svc_load_model_config_yaml(missing, &mp, &mn),
-                  AIRY_ERR_PARSE_ERROR);
-        check_int("noent.count", (int)mn, 0);
-    }
+int main(void)
+{
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/airy_llm_decl_%ld.yaml", (long)getpid());
 
-    /* 8) P-A：可读但零模型零 provider 属装配失败（半写/空表），同样
-     *    不得以成功语义流出。 */
-    {
-        if (put_file(path, "") != 0)
-            return 1;
-        provider_config_t *ep = NULL;
-        size_t en = 99;
-        check_int("empty.rc", svc_load_model_config_yaml(path, &ep, &en), AIRY_ERR_STATE_ERROR);
-        check_int("empty.count", (int)en, 0);
-    }
+    printf("running config declaration surface (A7-4) regression\n");
 
-    /* 9) 8 键行：条目数正好等于映射初始容量，末键 provider 必须可读，
-     *    且行尾字段照常落位（容量写满不得让扫描越过数组末尾）。 */
-    {
-        if (put_file(path, kFull8) != 0)
-            return 1;
-        svc_yaml_state_t st;
-        memset(&st, 0, sizeof(st));
-        check_int("full8.rc", svc_yaml_load_state(path, &st), 0);
-        check_int("full8.count", (int)st.model_count, 1);
-        check_str("full8.name", st.models[0].name, "eight");
-        check_str("full8.provider", st.models[0].provider, "prov");
-        check_str("full8.provision", st.models[0].provision, "managed");
-        check_str("full8.cw", st.models[0].context_window, "8k");
-        check_int("full8.caps", st.models[0].has_caps, 0);
-    }
-
-    /* 10) 16 键行 + 重复 capabilities：线上崩溃形态。首个 capabilities
-     *     块生效，其余键全部照常解析。 */
-    {
-        if (put_file(path, kFull16) != 0)
-            return 1;
-        svc_yaml_state_t st;
-        memset(&st, 0, sizeof(st));
-        check_int("full16.rc", svc_yaml_load_state(path, &st), 0);
-        check_int("full16.count", (int)st.model_count, 1);
-        check_str("full16.name", st.models[0].name, "sixteen");
-        check_str("full16.provider", st.models[0].provider, "prov");
-        check_str("full16.mode", st.models[0].mode, "local");
-        check_str("full16.fmt", st.models[0].api_format, "openai");
-        check_str("full16.cw", st.models[0].context_window, "32k");
-        check_int("full16.maxout", st.models[0].max_output_tokens, 4096);
-        check_int("full16.rounds", st.models[0].tool_rounds, 70);
-        check_int("full16.vision", st.models[0].vision, 1);
-        check_str("full16.think", st.models[0].thinking, "auto");
-        check_int("full16.caps", st.models[0].has_caps, 1);
-        check_bit("full16.seed", st.models[0].caps_override.accepts_seed, true);
-        check_bit("full16.numctx", st.models[0].caps_override.accepts_num_ctx, false);
-    }
-
-    /* 11) B-1：能力位完整声明落位 provider 级（首行生效）。 */
-    {
-        if (put_file(path, kHwCaps) != 0)
-            return 1;
-        provider_config_t *hp = NULL;
-        size_t hn = 0;
-        check_int("hw.rc", svc_load_model_config_yaml(path, &hp, &hn), 0);
-        check_int("hw.count", (int)hn, 1);
-        if (hp && hn == 1) {
-            check_int("hw.declared", hp[0].hw.declared, 1);
-            check_int("hw.accel", (int)hp[0].hw.accelerator, (int)AIRY_ACCEL_INTEL);
-            check_int("hw.vram", (int)(hp[0].hw.vram_bytes >> 30), 8);
-            check_int("hw.ctx", (int)hp[0].hw.max_context, 8192);
-            check_int("hw.stream", hp[0].hw.supports_stream, 1);
-            check_int("hw.tools", hp[0].hw.supports_tools, 0);
-            free_providers(hp, hn);
-        }
-    }
-
-    /* 11b) C-1：仅声明 context_window（无 max_context）→ provider 容量取
-     *      context_window 派生值，不再让路由器端点容量落回 8192 硬编码。 */
-    {
-        if (put_file(path, kFull8) != 0)
-            return 1;
-        provider_config_t *cp = NULL;
-        size_t cn = 0;
-        check_int("cw.rc", svc_load_model_config_yaml(path, &cp, &cn), 0);
-        check_int("cw.count", (int)cn, 1);
-        if (cp && cn == 1) {
-            check_int("cw.declared", cp[0].hw.declared, 1);
-            check_int("cw.maxctx", (int)cp[0].hw.max_context, 8192);
-            free_providers(cp, cn);
-        }
-    }
-
-    /* 12) B-1：未声明能力位 → declared=0，选路走保守可用。 */
-    {
-        if (put_file(path, kFallback) != 0)
-            return 1;
-        provider_config_t *np = NULL;
-        size_t nn = 0;
-        check_int("hwundecl.rc", svc_load_model_config_yaml(path, &np, &nn), 0);
-        if (np && nn == 1) {
-            check_int("hwundecl.declared", np[0].hw.declared, 0);
-            free_providers(np, nn);
-        }
-    }
-
-    /* 13) B-1：非法/空值保持未知（accelerator=NONE、vram=0、-1）。 */
-    {
-        if (put_file(path, kHwBad) != 0)
-            return 1;
-        provider_config_t *bp = NULL;
-        size_t bn = 0;
-        check_int("hwbad.rc", svc_load_model_config_yaml(path, &bp, &bn), 0);
-        if (bp && bn == 1) {
-            check_int("hwbad.declared", bp[0].hw.declared, 1);
-            check_int("hwbad.accel", (int)bp[0].hw.accelerator, (int)AIRY_ACCEL_NONE);
-            check_int("hwbad.vram", (int)bp[0].hw.vram_bytes, 0);
-            check_int("hwbad.stream", bp[0].hw.supports_stream, -1);
-            check_int("hwbad.tools", bp[0].hw.supports_tools, -1);
-            free_providers(bp, bn);
-        }
-    }
+    if (case_caps(path) || case_unknown_key(path) || case_provision(path) ||
+        case_missing(path) || case_full_rows(path) || case_hw_decl(path) ||
+        case_hw_undecl(path))
+        return 1;
 
     remove(path);
 
