@@ -110,23 +110,15 @@ static void run_free(run_ctx_t *c)
 
 static void run_criteria_prepare(run_ctx_t *c, const cJSON *plan);
 
-/* task_state 帧：C-15 任务时间线的唯一状态出口（仅 task.submit 携带 task
- * 元数据时发帧）。run_id 取 task_id，unregister 之后仍用本地副本。
- * C-18：同一状态同时落账（progress/result），同步 task.submit 没有流式
- * 客户端也必留事件，replay(task_id) 才能还原完整时间线。 */
-static void run_task_state(run_ctx_t *c, const char *state, const char *reason)
+/* C-18 账本侧：终态落 result，过程态落 progress；paused 可续跑，不算终态。
+ * 先落账再发帧：流式帧可能因断连丢失，账本不能。
+ * D-13（E-20）：取消终态额外记录发起者与时间，replay 才能区分
+ * 用户取消与关机取消。 */
+static void run_task_ledger(run_ctx_t *c, const char *state, const char *reason)
 {
-    if (!c->task || !state || !state[0])
-        return;
     const char *key = ledger_key(c->task, c->sess);
-
-    /* 终态落 result，过程态落 progress；paused 可续跑，不算终态。
-     * 先落账再发帧：流式帧可能因断连丢失，账本不能。
-     * D-13（E-20）：取消终态额外记录发起者与时间，replay 才能区分
-     * 用户取消与关机取消。 */
     bool cancelled_state = strcmp(state, AGENT_TASK_STATE_CANCELLED) == 0;
-    bool terminal = cancelled_state ||
-                    strcmp(state, AGENT_TASK_STATE_COMPLETED) == 0 ||
+    bool terminal = cancelled_state || strcmp(state, AGENT_TASK_STATE_COMPLETED) == 0 ||
                     strcmp(state, AGENT_TASK_STATE_FAILED) == 0 ||
                     strcmp(state, AGENT_TASK_STATE_UNVERIFIED) == 0;
     if (cancelled_state)
@@ -135,27 +127,46 @@ static void run_task_state(run_ctx_t *c, const char *state, const char *reason)
         (void)ledger_result(key, c->task->plan_id, state);
     else
         (void)ledger_progress(key, c->task->plan_id, state, reason);
+}
 
-    if (c->sink && c->sink->emit) {
-        cJSON *d = cJSON_CreateObject();
-        if (!d)
-            return;
-        cJSON_AddStringToObject(d, AIRY_RS_K_TASK_ID, c->task->task_id);
-        if (c->task->plan_id[0])
-            cJSON_AddStringToObject(d, AIRY_RS_K_PLAN_ID, c->task->plan_id);
-        cJSON_AddStringToObject(d, AIRY_RS_K_STATE, state);
-        if (reason && reason[0])
-            cJSON_AddStringToObject(d, AIRY_RS_K_REASON, reason);
-        if (cancelled_state) {
-            if (c->cancel_by[0])
-                cJSON_AddStringToObject(d, AIRY_RS_K_CANCELLED_BY, c->cancel_by);
-            if (c->cancel_at_ms)
-                cJSON_AddNumberToObject(d, AIRY_RS_K_CANCELLED_AT, (double)c->cancel_at_ms);
-        }
-        const char *rid = c->run_id[0] ? c->run_id
-                                       : (c->active ? c->active->run_id : c->task->task_id);
-        agent_run_emit_event(c->sink, &c->seq, rid, c->sess, AIRY_RS_TYPE_TASK_STATE, d);
+/* task_state 帧载荷（事件信封 data 段）。 */
+static cJSON *run_task_state_data(run_ctx_t *c, const char *state, const char *reason,
+                                  bool cancelled_state)
+{
+    cJSON *d = cJSON_CreateObject();
+    if (!d)
+        return NULL;
+    cJSON_AddStringToObject(d, AIRY_RS_K_TASK_ID, c->task->task_id);
+    if (c->task->plan_id[0])
+        cJSON_AddStringToObject(d, AIRY_RS_K_PLAN_ID, c->task->plan_id);
+    cJSON_AddStringToObject(d, AIRY_RS_K_STATE, state);
+    if (reason && reason[0])
+        cJSON_AddStringToObject(d, AIRY_RS_K_REASON, reason);
+    if (cancelled_state) {
+        if (c->cancel_by[0])
+            cJSON_AddStringToObject(d, AIRY_RS_K_CANCELLED_BY, c->cancel_by);
+        if (c->cancel_at_ms)
+            cJSON_AddNumberToObject(d, AIRY_RS_K_CANCELLED_AT, (double)c->cancel_at_ms);
     }
+    return d;
+}
+
+/* task_state 帧：C-15 任务时间线的唯一状态出口（仅 task.submit 携带 task
+ * 元数据时发帧）。run_id 取 task_id，unregister 之后仍用本地副本。 */
+static void run_task_state(run_ctx_t *c, const char *state, const char *reason)
+{
+    if (!c->task || !state || !state[0])
+        return;
+    bool cancelled_state = strcmp(state, AGENT_TASK_STATE_CANCELLED) == 0;
+    run_task_ledger(c, state, reason);
+    if (!c->sink || !c->sink->emit)
+        return;
+    cJSON *d = run_task_state_data(c, state, reason, cancelled_state);
+    if (!d)
+        return;
+    const char *rid = c->run_id[0] ? c->run_id
+                                   : (c->active ? c->active->run_id : c->task->task_id);
+    agent_run_emit_event(c->sink, &c->seq, rid, c->sess, AIRY_RS_TYPE_TASK_STATE, d);
 }
 
 /* ---- 依赖 daemon 的会话域辅助（本文件独占） ---- */
@@ -316,19 +327,15 @@ static int agent_file_resolve(const char *in, char *out, size_t cap)
     return (n > 0 && (size_t)n < cap) ? 0 : -1;
 }
 
-/* 从 agent_file 路径解析 agent spec（JSON / 简单 YAML / 纯文本首行）。 */
-static cJSON *agent_spec_from_file(const char *path)
+/* 读取 agent_file 全文；失败返回 NULL（real 回填解析后的绝对路径供诊断）。 */
+static char *spec_read_file(const char *path, char *real, size_t cap)
 {
-    char real[AGENT_RUN_SOCK_BUF];
-    FILE *f;
-    cJSON *spec;
-
-    if (agent_file_resolve(path, real, sizeof(real)) != 0) {
+    if (agent_file_resolve(path, real, cap) != 0) {
         SVC_LOG_ERROR("agent.run: agent_file unresolvable (AIRY_HOME unset or path too long): %s",
                       path ? path : "(null)");
         return NULL;
     }
-    f = fopen(real, "rb");
+    FILE *f = fopen(real, "rb");
     if (!f) {
         SVC_LOG_ERROR("agent.run: agent_file unreadable: %s (input=%s)", real, path);
         return NULL;
@@ -341,19 +348,12 @@ static cJSON *agent_spec_from_file(const char *path)
     size_t n = fread(buf, 1, AGENT_RUN_AGENT_FILE_MAX, f);
     fclose(f);
     buf[n] = '\0';
+    return buf;
+}
 
-    cJSON *parsed = cJSON_Parse(buf);
-    if (parsed) {
-        if (cJSON_IsObject(parsed)) {
-            AIRY_FREE(buf);
-            return parsed;
-        }
-        cJSON_Delete(parsed);
-    }
-
-    const char *src = yaml_role_value(buf);
-    if (!src)
-        src = buf;
+/* 角色区间：从 src 起点裁掉首尾空白与引号，得到 [start,end) 区间。 */
+static void spec_role_span(const char *src, size_t *out_start, size_t *out_end)
+{
     size_t start = 0;
     while (src[start] == ' ' || src[start] == '\t')
         start++;
@@ -364,22 +364,53 @@ static cJSON *agent_spec_from_file(const char *path)
     while (end > start && (src[end - 1] == ' ' || src[end - 1] == '\t' || src[end - 1] == '"' ||
                            src[end - 1] == '\''))
         end--;
+    *out_start = start;
+    *out_end = end;
+}
 
-    spec = NULL;
-    if (end > start) {
-        spec = cJSON_CreateObject();
-        if (spec) {
-            char role[128];
-            size_t rlen = end - start;
-            AIRY_MEMCPY(role, src + start, rlen);
-            role[rlen] = '\0';
-            cJSON_AddStringToObject(spec, "role", role);
-            SVC_LOG_INFO("agent.run: agent spec built from agent_file (role=%s, file=%s)", role,
-                         real);
-        }
-    } else {
+/* 角色名提取：role 值或首行，空角色视为不可用。 */
+static cJSON *spec_role_obj(const char *buf, const char *real)
+{
+    const char *src = yaml_role_value(buf);
+    if (!src)
+        src = buf;
+    size_t start = 0;
+    size_t end = 0;
+    spec_role_span(src, &start, &end);
+    if (end <= start) {
         SVC_LOG_ERROR("agent.run: agent_file contains no usable role: %s", real);
+        return NULL;
     }
+
+    cJSON *spec = cJSON_CreateObject();
+    if (!spec)
+        return NULL;
+    char role[128];
+    size_t rlen = end - start;
+    AIRY_MEMCPY(role, src + start, rlen);
+    role[rlen] = '\0';
+    cJSON_AddStringToObject(spec, "role", role);
+    SVC_LOG_INFO("agent.run: agent spec built from agent_file (role=%s, file=%s)", role, real);
+    return spec;
+}
+
+/* 从 agent_file 路径解析 agent spec（JSON / 简单 YAML / 纯文本首行）。 */
+static cJSON *agent_spec_from_file(const char *path)
+{
+    char real[AGENT_RUN_SOCK_BUF];
+    char *buf = spec_read_file(path, real, sizeof(real));
+    if (!buf)
+        return NULL;
+
+    cJSON *parsed = cJSON_Parse(buf);
+    if (parsed && cJSON_IsObject(parsed)) {
+        AIRY_FREE(buf);
+        return parsed;
+    }
+    if (parsed)
+        cJSON_Delete(parsed);
+
+    cJSON *spec = spec_role_obj(buf, real);
     AIRY_FREE(buf);
     return spec;
 }
@@ -569,6 +600,77 @@ static void run_plan_steps(run_ctx_t *c, const cJSON *plan)
     }
 }
 
+/* 计划宣告：决策链事件 + plan 帧。计划帧先于任何工具执行：旧顺序在
+ * run_loop 之后才发 plan，客户端只能做事后回显，无法支撑「执行中」的步骤进度。 */
+static void run_plan_announce(run_ctx_t *c, const cJSON *plan, const char *plan_str)
+{
+    cJSON *evt = cJSON_CreateObject();
+    if (evt) {
+        char pbuf[1024];
+        AIRY_STRNCPY_TERM(pbuf, plan_str, sizeof(pbuf));
+        cJSON_AddStringToObject(evt, "event", "plan");
+        cJSON_AddStringToObject(evt, "plan", pbuf);
+        agent_record_event(ledger_key(c->task, c->sess), "chain", evt);
+        cJSON_Delete(evt);
+    }
+
+    cJSON *ps = cJSON_CreateObject();
+    if (!ps)
+        return;
+    char plbuf[2048];
+    AIRY_STRNCPY_TERM(plbuf, plan_str, sizeof(plbuf));
+    cJSON_AddStringToObject(ps, AIRY_RS_K_PLAN, plbuf);
+    if (c->task) {
+        cJSON_AddStringToObject(ps, AIRY_RS_K_TASK_ID, c->task->task_id);
+        if (c->task->plan_id[0])
+            cJSON_AddStringToObject(ps, AIRY_RS_K_PLAN_ID, c->task->plan_id);
+    }
+    const cJSON *steps = cJSON_IsObject(plan) ? cJSON_GetObjectItem(plan, "steps") : plan;
+    if (cJSON_IsArray(steps))
+        cJSON_AddNumberToObject(ps, AIRY_RS_K_STEP_COUNT, cJSON_GetArraySize(steps));
+    agent_run_emit_event(c->sink, &c->seq, c->active->run_id, c->sess, AIRY_RS_TYPE_PLAN, ps);
+}
+
+/* 计划注入：system 首部承接 DAG，user 收原文 prompt，历史仅供指代消解。 */
+static void run_plan_messages(run_ctx_t *c, const char *plan_str)
+{
+    cJSON *messages = (c->history && cJSON_IsArray(c->history) &&
+                       cJSON_GetArraySize((cJSON *)c->history) > 0)
+                          ? cJSON_Duplicate(c->history, 1)
+                          : cJSON_CreateArray();
+    if (!messages)
+        return;
+    cJSON *sys = cJSON_CreateObject();
+    if (sys) {
+        char content[8192];
+        int sn = snprintf(content, sizeof(content),
+                          "You are executing a task under the AgentRT "
+                          "dual-thinking system (GCCP goal confirmation + "
+                          "GRAD plan critique). A verified action plan has "
+                          "been produced. Follow this DAG plan strictly:\n%s\n"
+                          "【轮次边界】历史消息（若有）仅供指代消解；回答必须"
+                          "直接针对本任务的最后一条用户消息，禁止延续历史"
+                          "主题作答。",
+                          plan_str);
+        cJSON_AddStringToObject(sys, "content",
+                                (sn > 0 && sn < (int)sizeof(content))
+                                    ? content
+                                    : "Execute the user request following "
+                                      "the verified action plan.");
+        cJSON_AddStringToObject(sys, "role", "system");
+        cJSON_AddItemToArray(messages, sys);
+    }
+    cJSON *usr = cJSON_CreateObject();
+    if (usr) {
+        cJSON_AddStringToObject(usr, "role", "user");
+        cJSON_AddStringToObject(usr, "content", c->prompt);
+        cJSON_AddItemToArray(messages, usr);
+    }
+    run_task_state(c, AGENT_TASK_STATE_EXECUTING, NULL);
+    run_loop(c, messages);
+    cJSON_Delete(messages);
+}
+
 /* 双思考 DAG 计划：先宣告计划与步骤再执行（C-15 顺序修复）；计划注入
  * system 首部，并以轮次边界约束防止模型延续历史主题作答。 */
 static void run_plan(run_ctx_t *c, const cJSON *plan)
@@ -580,73 +682,10 @@ static void run_plan(run_ctx_t *c, const cJSON *plan)
     /* C-17：计划到手即确定生效判据（请求自带或节点 postcondition 派生），
      * 使执行阶段与收尾阶段看到同一份判据。 */
     run_criteria_prepare(c, plan);
-
-    cJSON *evt = cJSON_CreateObject();
-    if (evt) {
-        char pbuf[1024];
-        AIRY_STRNCPY_TERM(pbuf, plan_str, sizeof(pbuf));
-        cJSON_AddStringToObject(evt, "event", "plan");
-        cJSON_AddStringToObject(evt, "plan", pbuf);
-        agent_record_event(ledger_key(c->task, c->sess), "chain", evt);
-        cJSON_Delete(evt);
-    }
-
-    /* 计划帧先于任何工具执行：旧顺序在 run_loop 之后才发 plan，客户端
-     * 只能做事后回显，无法支撑「执行中」的步骤进度。 */
-    cJSON *ps = cJSON_CreateObject();
-    if (ps) {
-        char plbuf[2048];
-        AIRY_STRNCPY_TERM(plbuf, plan_str, sizeof(plbuf));
-        cJSON_AddStringToObject(ps, AIRY_RS_K_PLAN, plbuf);
-        if (c->task) {
-            cJSON_AddStringToObject(ps, AIRY_RS_K_TASK_ID, c->task->task_id);
-            if (c->task->plan_id[0])
-                cJSON_AddStringToObject(ps, AIRY_RS_K_PLAN_ID, c->task->plan_id);
-        }
-        const cJSON *steps =
-            cJSON_IsObject(plan) ? cJSON_GetObjectItem(plan, "steps") : plan;
-        if (cJSON_IsArray(steps))
-            cJSON_AddNumberToObject(ps, AIRY_RS_K_STEP_COUNT, cJSON_GetArraySize(steps));
-        agent_run_emit_event(c->sink, &c->seq, c->active->run_id, c->sess, AIRY_RS_TYPE_PLAN, ps);
-    }
+    run_plan_announce(c, plan, plan_str);
     run_plan_steps(c, plan);
     run_task_state(c, AGENT_TASK_STATE_PLANNED, NULL);
-
-    cJSON *messages = (c->history && cJSON_IsArray(c->history) &&
-                       cJSON_GetArraySize((cJSON *)c->history) > 0)
-                          ? cJSON_Duplicate(c->history, 1)
-                          : cJSON_CreateArray();
-    if (messages) {
-        cJSON *sys = cJSON_CreateObject();
-        if (sys) {
-            char content[8192];
-            int sn = snprintf(content, sizeof(content),
-                              "You are executing a task under the AgentRT "
-                              "dual-thinking system (GCCP goal confirmation + "
-                              "GRAD plan critique). A verified action plan has "
-                              "been produced. Follow this DAG plan strictly:\n%s\n"
-                              "【轮次边界】历史消息（若有）仅供指代消解；回答必须"
-                              "直接针对本任务的最后一条用户消息，禁止延续历史"
-                              "主题作答。",
-                              plan_str);
-            cJSON_AddStringToObject(sys, "content",
-                                    (sn > 0 && sn < (int)sizeof(content))
-                                        ? content
-                                        : "Execute the user request following "
-                                          "the verified action plan.");
-            cJSON_AddStringToObject(sys, "role", "system");
-            cJSON_AddItemToArray(messages, sys);
-        }
-        cJSON *usr = cJSON_CreateObject();
-        if (usr) {
-            cJSON_AddStringToObject(usr, "role", "user");
-            cJSON_AddStringToObject(usr, "content", c->prompt);
-            cJSON_AddItemToArray(messages, usr);
-        }
-        run_task_state(c, AGENT_TASK_STATE_EXECUTING, NULL);
-        run_loop(c, messages);
-        cJSON_Delete(messages);
-    }
+    run_plan_messages(c, plan_str);
     AIRY_FREE(plan_str);
 }
 
@@ -911,14 +950,9 @@ static cJSON *run_usage_obj(const run_ctx_t *c)
     return u;
 }
 
-/* 组装 result：字段契约与旧 gateway 一致（CLI/TUI/SDK 兼容）。 */
-static cJSON *run_fill(run_ctx_t *c)
+/* 契约字段：会话/任务元数据、终态、失败载荷、用量与续跑令牌。 */
+static void run_fill_meta(run_ctx_t *c, cJSON *result)
 {
-    cJSON *result = cJSON_CreateObject();
-    if (!result) {
-        run_free(c);
-        return NULL;
-    }
     cJSON_AddStringToObject(result, "session_id", c->sess);
     /* task 元数据与事件信封同源：客户端用同一 task_id 关联结果与时间线。 */
     if (c->task) {
@@ -960,28 +994,133 @@ static cJSON *run_fill(run_ctx_t *c)
     }
     cJSON_AddNumberToObject(result, "tokens_used", (double)c->tokens);
     cJSON_AddNumberToObject(result, "cost_usd", c->cost);
+}
+
+/* 轨迹与思考链：tool_trace 整棵移交；交互轮问题集按成功与否决定是否引导。 */
+static void run_fill_trace(run_ctx_t *c, cJSON *result)
+{
     /* 思考链不再随 result 直出：仅经 message 帧 reasoning 字段按需（Alt+E）下发。 */
     cJSON_AddItemToObject(result, "tool_trace", c->trace ? c->trace : cJSON_CreateArray());
     c->trace = NULL;
-    if (c->think) {
-        /* 交互轮仅在成功时要求继续（失败/熔断轮不得引导用户进入第二段）。 */
-        if (c->gccp_round && c->rc == 0) {
-            const cJSON *qstr = cJSON_GetObjectItem(c->think, "gccp_questions");
-            cJSON_AddBoolToObject(result, "interaction_required", 1);
-            if (cJSON_IsString(qstr) && qstr->valuestring) {
-                cJSON *q = cJSON_Parse(qstr->valuestring);
-                if (q)
-                    cJSON_AddItemToObject(result, "gccp_questions", q);
-                else
-                    cJSON_AddStringToObject(result, "gccp_questions", qstr->valuestring);
-            }
+    if (!c->think)
+        return;
+    /* 交互轮仅在成功时要求继续（失败/熔断轮不得引导用户进入第二段）。 */
+    if (c->gccp_round && c->rc == 0) {
+        const cJSON *qstr = cJSON_GetObjectItem(c->think, "gccp_questions");
+        cJSON_AddBoolToObject(result, "interaction_required", 1);
+        if (cJSON_IsString(qstr) && qstr->valuestring) {
+            cJSON *q = cJSON_Parse(qstr->valuestring);
+            if (q)
+                cJSON_AddItemToObject(result, "gccp_questions", q);
+            else
+                cJSON_AddStringToObject(result, "gccp_questions", qstr->valuestring);
         }
-        cJSON_AddItemToObject(result, "thinking", c->think);
-        c->think = NULL;
     }
+    cJSON_AddItemToObject(result, "thinking", c->think);
+    c->think = NULL;
+}
+
+/* 组装 result：字段契约与旧 gateway 一致（CLI/TUI/SDK 兼容）。 */
+static cJSON *run_fill(run_ctx_t *c)
+{
+    cJSON *result = cJSON_CreateObject();
+    if (!result) {
+        run_free(c);
+        return NULL;
+    }
+    run_fill_meta(c, result);
+    run_fill_trace(c, result);
     if (c->rc == 0 && !c->gccp_round)
         agent_persist(c->sess, c->prompt, c->text ? c->text : "");
     return result;
+}
+
+/* task 终态帧与 run_end.status 同源：paused 表示可凭 resume_token 继续，
+ * 客户端不得把 paused 当失败渲染；交互轮已单独发过 paused，不重复。 */
+static void run_tail_state(run_ctx_t *c)
+{
+    if (!c->task || c->gccp_round)
+        return;
+    const char *ts =
+        c->cancelled ? AGENT_TASK_STATE_CANCELLED : run_state_name(c->rc, c->cancelled);
+    run_task_state(c, ts, NULL);
+}
+
+/* C-17：判据无法取证时终态是 unverified，但正文仍需交付——否则用户拿到
+ * 结论却看不到内容，无从判断是否需要补判据。 */
+static void run_tail_msg(run_ctx_t *c)
+{
+    if (c->rc != 0 && c->rc != AGENT_RUN_RC_UNVERIFIED)
+        return;
+    if (c->gccp_round || !c->text)
+        return;
+    cJSON *msg = cJSON_CreateObject();
+    if (!msg)
+        return;
+    cJSON_AddStringToObject(msg, AIRY_RS_K_ROLE, "assistant");
+    cJSON_AddStringToObject(msg, AIRY_RS_K_CONTENT, c->text);
+    /* 思考链随 message 下发但不作为对话内容：客户端仅按需（Alt+E）取用。 */
+    if (c->reason && c->reason[0])
+        cJSON_AddStringToObject(msg, AIRY_RS_K_REASONING, c->reason);
+    agent_run_emit_event(c->sink, &c->seq, c->run_id, c->sess, AIRY_RS_TYPE_MESSAGE, msg);
+}
+
+static void run_tail_end(run_ctx_t *c, const cJSON *res, const cJSON *rt, bool resumable)
+{
+    cJSON *end = cJSON_CreateObject();
+    if (!end)
+        return;
+    cJSON_AddStringToObject(end, AIRY_RS_K_STATUS, run_state_name(c->rc, c->cancelled));
+    cJSON_AddNumberToObject(end, AIRY_RS_K_DURATION, (double)(airy_time_ms() - c->run_start_ms));
+    cJSON_AddNumberToObject(end, AIRY_RS_K_THINK_MS, (double)c->think_ms);
+    cJSON_AddNumberToObject(end, AIRY_RS_K_LLM_MS, (double)c->llm_ms);
+    cJSON_AddNumberToObject(end, AIRY_RS_K_TOOL_MS, (double)c->tool_ms);
+    cJSON_AddNumberToObject(end, AIRY_RS_K_USE_TICKS, (double)c->tokens);
+    cJSON_AddNumberToObject(end, AIRY_RS_K_ROUNDS_USED, c->rounds_used);
+    cJSON_AddNumberToObject(end, AIRY_RS_K_ROUNDS_LIMIT, c->rounds_limit);
+    if (resumable)
+        cJSON_AddStringToObject(end, AIRY_RS_K_RESUME_TOKEN, rt->valuestring);
+    /* C-17：复核证据随终态帧下发（成功亦包含 ok=true），客户端据此逐条
+     * 呈现判据结果，不再依赖正文字样推断完成。 */
+    if (c->verify)
+        cJSON_AddItemToObject(end, AIRY_RS_K_VERIFICATION, cJSON_Duplicate(c->verify, 1));
+    /* D-10/D-11：终态帧与 result 同源，失败载荷与 usage 一处装配两处下发。 */
+    if (c->rc != 0 && !c->cancelled) {
+        cJSON *fail = run_fail_obj(c);
+        if (fail)
+            cJSON_AddItemToObject(end, AIRY_RS_K_FAILURE, fail);
+    }
+    cJSON *usage = run_usage_obj(c);
+    if (usage)
+        cJSON_AddItemToObject(end, AIRY_RS_K_USAGE, usage);
+    const cJSON *tr = res ? cJSON_GetObjectItem(res, AIRY_RS_K_TOOL_TRACE) : NULL;
+    if (cJSON_IsArray(tr) && cJSON_GetArraySize(tr) > 0)
+        cJSON_AddItemToObject(end, AIRY_RS_K_TOOL_TRACE, cJSON_Duplicate(tr, 1));
+    agent_run_emit_event(c->sink, &c->seq, c->run_id, c->sess, AIRY_RS_TYPE_RUN_END, end);
+}
+
+static void run_tail_err(run_ctx_t *c, const cJSON *rt, bool resumable)
+{
+    cJSON *err = cJSON_CreateObject();
+    if (!err)
+        return;
+    cJSON_AddNumberToObject(err, AIRY_RS_K_CODE, -32603);
+    cJSON_AddNumberToObject(err, AIRY_RS_K_ERROR_CODE, c->rc);
+    /* 明细优先：上游失败只在这里能还原成可操作信息（哪一层、什么码、
+     * provider 原话），不回落到整类兜底文案。 */
+    cJSON_AddStringToObject(err, AIRY_RS_K_MSG,
+                            c->fail_msg[0] ? c->fail_msg
+                                           : ((c->text && c->text[0]) ? c->text
+                                                                      : run_rc_msg(c->rc)));
+    cJSON_AddBoolToObject(err, AIRY_RS_K_RECOVER, 1);
+    cJSON_AddNumberToObject(err, AIRY_RS_K_ROUNDS_USED, c->rounds_used);
+    cJSON_AddNumberToObject(err, AIRY_RS_K_ROUNDS_LIMIT, c->rounds_limit);
+    if (resumable)
+        cJSON_AddStringToObject(err, AIRY_RS_K_RESUME_TOKEN, rt->valuestring);
+    cJSON *fail = run_fail_obj(c);
+    if (fail)
+        cJSON_AddItemToObject(err, AIRY_RS_K_FAILURE, fail);
+    agent_run_emit_event(c->sink, &c->seq, c->run_id, c->sess, AIRY_RS_TYPE_ERROR, err);
 }
 
 /* 流式收尾：message → run_end → error（顺序即客户端可见时序）。
@@ -993,96 +1132,109 @@ static void run_tail(run_ctx_t *c, const cJSON *res)
      * 直接返回，决策链只留 run_result，看板与回放永远停在 running，与
      * 流式路径形成两套口径。落账无条件，发帧由 run_task_state 自行判断。 */
     if (!c->sink || !c->sink->emit) {
-        if (c->task && !c->gccp_round) {
-            const char *ts = c->cancelled ? AGENT_TASK_STATE_CANCELLED
-                                          : run_state_name(c->rc, c->cancelled);
-            run_task_state(c, ts, NULL);
-        }
+        run_tail_state(c);
         return;
     }
-
     /* 续跑令牌已在 run_fill 移交 result，终态帧从那里取同一份文本：
      * run_end 与 error 都必须带，客户端才知道暂停后凭何继续。 */
     const cJSON *rt = res ? cJSON_GetObjectItem(res, AIRY_RS_K_RESUME_TOKEN) : NULL;
     const bool resumable = cJSON_IsString(rt) && rt->valuestring && rt->valuestring[0];
 
-    /* C-17：判据无法取证时终态是 unverified，但正文仍需交付——否则用户
-     * 拿到结论却看不到内容，无从判断是否需要补判据。 */
-    if ((c->rc == 0 || c->rc == AGENT_RUN_RC_UNVERIFIED) && !c->gccp_round && c->text) {
-        cJSON *msg = cJSON_CreateObject();
-        if (msg) {
-            cJSON_AddStringToObject(msg, AIRY_RS_K_ROLE, "assistant");
-            cJSON_AddStringToObject(msg, AIRY_RS_K_CONTENT, c->text);
-            /* 思考链随 message 下发但不作为对话内容：客户端仅按需（Alt+E）取用。 */
-            if (c->reason && c->reason[0])
-                cJSON_AddStringToObject(msg, AIRY_RS_K_REASONING, c->reason);
-            agent_run_emit_event(c->sink, &c->seq, c->run_id, c->sess, AIRY_RS_TYPE_MESSAGE, msg);
-        }
-    }
+    run_tail_msg(c);
+    run_tail_state(c);
+    run_tail_end(c, res, rt, resumable);
+    if (c->rc != 0 && !c->cancelled)
+        run_tail_err(c, rt, resumable);
+}
 
-    /* task 终态帧与 run_end.status 同源：paused 表示可凭 resume_token 继续，
-     * 客户端不得把 paused 当失败渲染；交互轮已单独发过 paused，不重复。 */
-    if (c->task && !c->gccp_round) {
-        const char *ts = c->cancelled ? AGENT_TASK_STATE_CANCELLED
-                                      : run_state_name(c->rc, c->cancelled);
-        run_task_state(c, ts, NULL);
-    }
+/* D-11：显式给出 agent_file 却解析不了，必须失败而非按默认 spec 继续——
+ * 静默降级会让调用方以为指定了角色，实际跑的是别的角色。 */
+static int exec_spec(run_ctx_t *c)
+{
+    if (c->agent_spec || !c->agent_file)
+        return 0;
+    c->spec_owned = agent_spec_from_file(c->agent_file);
+    if (!c->spec_owned)
+        return 1;
+    c->agent_spec = c->spec_owned;
+    return 0;
+}
 
-    cJSON *end = cJSON_CreateObject();
-    if (end) {
-        cJSON_AddStringToObject(end, AIRY_RS_K_STATUS,
-                                run_state_name(c->rc, c->cancelled));
-        cJSON_AddNumberToObject(end, AIRY_RS_K_DURATION,
-                                (double)(airy_time_ms() - c->run_start_ms));
-        cJSON_AddNumberToObject(end, AIRY_RS_K_THINK_MS, (double)c->think_ms);
-        cJSON_AddNumberToObject(end, AIRY_RS_K_LLM_MS, (double)c->llm_ms);
-        cJSON_AddNumberToObject(end, AIRY_RS_K_TOOL_MS, (double)c->tool_ms);
-        cJSON_AddNumberToObject(end, AIRY_RS_K_USE_TICKS, (double)c->tokens);
-        cJSON_AddNumberToObject(end, AIRY_RS_K_ROUNDS_USED, c->rounds_used);
-        cJSON_AddNumberToObject(end, AIRY_RS_K_ROUNDS_LIMIT, c->rounds_limit);
-        if (resumable)
-            cJSON_AddStringToObject(end, AIRY_RS_K_RESUME_TOKEN, rt->valuestring);
-        /* C-17：复核证据随终态帧下发（成功亦包含 ok=true），客户端据此
-         * 逐条呈现判据结果，不再依赖正文字样推断完成。 */
-        if (c->verify)
-            cJSON_AddItemToObject(end, AIRY_RS_K_VERIFICATION, cJSON_Duplicate(c->verify, 1));
-        /* D-10/D-11：终态帧与 result 同源，失败载荷与 usage 一处装配两处下发。 */
-        if (c->rc != 0 && !c->cancelled) {
-            cJSON *fail = run_fail_obj(c);
-            if (fail)
-                cJSON_AddItemToObject(end, AIRY_RS_K_FAILURE, fail);
-        }
-        cJSON *usage = run_usage_obj(c);
-        if (usage)
-            cJSON_AddItemToObject(end, AIRY_RS_K_USAGE, usage);
-        const cJSON *tr = res ? cJSON_GetObjectItem(res, AIRY_RS_K_TOOL_TRACE) : NULL;
-        if (cJSON_IsArray(tr) && cJSON_GetArraySize(tr) > 0)
-            cJSON_AddItemToObject(end, AIRY_RS_K_TOOL_TRACE, cJSON_Duplicate(tr, 1));
-        agent_run_emit_event(c->sink, &c->seq, c->run_id, c->sess, AIRY_RS_TYPE_RUN_END, end);
-    }
+/* 主执行：显式角色走编排，否则走思考链。 */
+static void exec_body(run_ctx_t *c)
+{
+    if (exec_spec(c))
+        c->rc = AIRY_ENOENT;
+    else if (c->agent_spec)
+        run_orch(c);
+    else
+        run_think(c);
+}
 
-    if (c->rc != 0 && !c->cancelled) {
-        cJSON *err = cJSON_CreateObject();
-        if (err) {
-            cJSON_AddNumberToObject(err, AIRY_RS_K_CODE, -32603);
-            cJSON_AddNumberToObject(err, AIRY_RS_K_ERROR_CODE, c->rc);
-            /* 明细优先：上游失败只在这里能还原成可操作信息（哪一层、什么码、
-             * provider 原话），不回落到整类兜底文案。 */
-            cJSON_AddStringToObject(err, AIRY_RS_K_MSG,
-                                    c->fail_msg[0] ? c->fail_msg
-                                                   : ((c->text && c->text[0]) ? c->text
-                                                                              : run_rc_msg(c->rc)));
-            cJSON_AddBoolToObject(err, AIRY_RS_K_RECOVER, 1);
-            cJSON_AddNumberToObject(err, AIRY_RS_K_ROUNDS_USED, c->rounds_used);
-            cJSON_AddNumberToObject(err, AIRY_RS_K_ROUNDS_LIMIT, c->rounds_limit);
-            if (resumable)
-                cJSON_AddStringToObject(err, AIRY_RS_K_RESUME_TOKEN, rt->valuestring);
-            cJSON *fail = run_fail_obj(c);
-            if (fail)
-                cJSON_AddItemToObject(err, AIRY_RS_K_FAILURE, fail);
-            agent_run_emit_event(c->sink, &c->seq, c->run_id, c->sess, AIRY_RS_TYPE_ERROR, err);
-        }
+/* D-13（E-20）：注销前取走取消追溯，终态落账与 task_state 帧共用。 */
+static void exec_cancel(run_ctx_t *c)
+{
+    c->cancelled = agent_run_is_cancelled(c->active);
+    if (!c->cancelled)
+        return;
+    const char *by = NULL;
+    run_cancel_meta(c->active, &by, &c->cancel_at_ms);
+    if (by && by[0])
+        AIRY_STRNCPY_TERM(c->cancel_by, by, sizeof(c->cancel_by));
+}
+
+/* 终态缺口：空输出 → EMPTY；task 轮无判据 → unverified。
+ * 完成判据外部化（C-17）：空输出已判 EMPTY，无需再复核；task 模式一条
+ * 判据都拿不到时记 unverified——可交付但不得冒充 completed。 */
+static void verdict_gap(run_ctx_t *c)
+{
+    /* 无输出终态（0.1.21 L-9）：编排成功但终局正文为空，不是「成功但空白」。
+     * GCCP 交互轮以问题集为产物、取消轮由取消语义覆盖，二者不判空。 */
+    if (c->rc != 0 || c->cancelled || c->gccp_round)
+        return;
+    if (!c->text || !c->text[0]) {
+        c->rc = AGENT_RUN_RC_EMPTY;
+        return;
     }
+    if (c->task && strcmp(c->task->mode, AGENT_TASK_MODE_TASK) == 0 &&
+        (!c->criteria || !c->criteria[0]))
+        c->rc = AGENT_RUN_RC_UNVERIFIED;
+}
+
+/* 终态判定：缺口先补齐，有判据的 task 轮必须经 verifier 复核，
+ * 「模型说完成」不进入终态判定。
+ * R16：判据取证通过后再做语义复核（产物 vs 目标），判定作为执行事件落链。 */
+static void exec_verdict(run_ctx_t *c)
+{
+    verdict_gap(c);
+    if (c->rc != 0 || c->cancelled || c->gccp_round || !c->criteria || !c->criteria[0])
+        return;
+    run_verify(c);
+    if (c->rc == 0)
+        run_review(c);
+}
+
+/* 收尾：先落 run_id 副本再注销，装配 result 后发终态帧。 */
+static int exec_finish(run_ctx_t *c, cJSON **out_result)
+{
+    /* unregister 会释放 active：run_id 先落地本地副本，下方发帧禁止再触达
+     * active。UAF 实锤（2026-09-09 0.1.13 实机回归）：释放后的 run_id 缓冲
+     * 被响应文本分配复用，message/run_end 帧 run_id 被污染为内容片段。 */
+    AIRY_STRNCPY_TERM(c->run_id, c->active->run_id, sizeof(c->run_id));
+    agent_run_unregister(c->active);
+    c->active = NULL;
+    SVC_LOG_INFO("agent.run done (session=%s, rc=%d, tokens=%llu, cost=%.4f)", c->sess, c->rc,
+                 (unsigned long long)c->tokens, c->cost);
+
+    cJSON *result = run_fill(c);
+    if (!result)
+        return -1;
+
+    run_tail(c, result);
+    *out_result = result;
+    int ret = c->cancelled ? 1 : c->rc;
+    run_free(c);
+    return ret;
 }
 
 int agent_run_execute(const char *prompt, const char *model, const cJSON *history,
@@ -1097,7 +1249,6 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
         return -1;
 
     run_ctx_t c = {0};
-    int spec_bad = 0;
     c.prompt = prompt;
     c.model = model;
     c.history = history;
@@ -1121,71 +1272,13 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
     }
 
     run_announce(&c);
-    if (!c.agent_spec && c.agent_file) {
-        c.spec_owned = agent_spec_from_file(c.agent_file);
-        /* D-11：显式给出 agent_file 却解析不了，必须失败而非按默认 spec
-         * 继续——静默降级会让调用方以为指定了角色，实际跑的是别的角色。 */
-        if (!c.spec_owned)
-            spec_bad = 1;
-        else
-            c.agent_spec = c.spec_owned;
-    }
-    if (spec_bad)
-        c.rc = AIRY_ENOENT;
-    else if (c.agent_spec)
-        run_orch(&c);
-    else
-        run_think(&c);
-
-    c.cancelled = agent_run_is_cancelled(c.active);
-    /* D-13（E-20）：注销前取走取消追溯，终态落账与 task_state 帧共用。 */
-    if (c.cancelled) {
-        const char *by = NULL;
-        run_cancel_meta(c.active, &by, &c.cancel_at_ms);
-        if (by && by[0])
-            AIRY_STRNCPY_TERM(c.cancel_by, by, sizeof(c.cancel_by));
-    }
-    /* 无输出终态（0.1.21 L-9）：编排成功但终局正文为空，不是「成功但空白」。
-     * GCCP 交互轮以问题集为产物、取消轮由取消语义覆盖，二者不判空。 */
-    if (c.rc == 0 && !c.cancelled && !c.gccp_round && (!c.text || !c.text[0]))
-        c.rc = AGENT_RUN_RC_EMPTY;
-
-    /* 完成判据外部化（C-17）：有判据的 task 轮在收尾前必须经 verifier 复核，
-     * 「模型说完成」不进入终态判定。空输出已判 EMPTY，无需再复核。task 模式
-     * 一条判据都拿不到时记 unverified——可交付但不得冒充 completed。 */
-    if (c.rc == 0 && !c.cancelled && !c.gccp_round && c.task &&
-        strcmp(c.task->mode, AGENT_TASK_MODE_TASK) == 0 &&
-        (!c.criteria || !c.criteria[0]))
-        c.rc = AGENT_RUN_RC_UNVERIFIED;
-    if (c.rc == 0 && !c.cancelled && !c.gccp_round && c.criteria && c.criteria[0])
-        run_verify(&c);
-
-    /* R16：判据取证通过后再做语义复核（产物 vs 目标），判定作为执行事件
-     * 落链；终裁拒绝按未达判据收尾。 */
-    if (c.rc == 0 && !c.cancelled && !c.gccp_round && c.criteria && c.criteria[0])
-        run_review(&c);
+    exec_body(&c);
+    exec_cancel(&c);
+    exec_verdict(&c);
 
     /* 终态必写决策链（0.1.21 L-9）：旧行为只在成功时写 run_result，失败与
      * 取消在链上无终局，看板与回放永远停在 running，只能靠日志猜结果。
      * GCCP 交互轮不是终态，由 run_chain 内部跳过 run_result。 */
     run_chain(&c);
-
-    /* unregister 会释放 active：run_id 先落地本地副本，下方发帧禁止再触达
-     * active。UAF 实锤（2026-09-09 0.1.13 实机回归）：释放后的 run_id 缓冲
-     * 被响应文本分配复用，message/run_end 帧 run_id 被污染为内容片段。 */
-    AIRY_STRNCPY_TERM(c.run_id, c.active->run_id, sizeof(c.run_id));
-    agent_run_unregister(c.active);
-    c.active = NULL;
-    SVC_LOG_INFO("agent.run done (session=%s, rc=%d, tokens=%llu, cost=%.4f)", c.sess, c.rc,
-                 (unsigned long long)c.tokens, c.cost);
-
-    cJSON *result = run_fill(&c);
-    if (!result)
-        return -1;
-
-    run_tail(&c, result);
-    *out_result = result;
-    int ret = c.cancelled ? 1 : c.rc;
-    run_free(&c);
-    return ret;
+    return exec_finish(&c, out_result);
 }
