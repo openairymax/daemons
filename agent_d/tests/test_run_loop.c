@@ -239,16 +239,21 @@ static void test_fail_desc(void)
           "desc: unknown failure defaults to agent inspect");
 }
 
-/* D-10：审批拒绝在熔断路径上留痕，失败载荷据此与普通工具故障区分。 */
+/* D-10：审批拒绝在熔断路径上留痕，失败载荷据此与普通工具故障区分。
+ * R10：拒绝属于「不可原样重发、需人工放行」，与预算（可续跑）分属两条
+ * 策略，客户端只按 retryable/next_action 分流。 */
 static void test_denied_flag(void)
 {
-    run_ctx_t r;
+    loop_ctx_t r;
+    agent_fail_desc_t d;
     AIRY_MEMSET(&r, 0, sizeof(r));
     CHECK(r.denied == 0, "denied: initial state clear");
     r.denied = 1;
-    CHECK(strcmp(agent_fail_desc(AGENT_RUN_RC_TOOL_FUSE, r.denied).reason,
-                 AIRY_RS_REASON_DENIED) == 0,
-          "denied: fuse carries denial attribution");
+    d = agent_fail_desc(AGENT_RUN_RC_TOOL_FUSE, r.denied);
+    CHECK(strcmp(d.origin, AIRY_RS_ORIGIN_TOOL) == 0, "denied: attributed to tool origin");
+    CHECK(strcmp(d.reason, AIRY_RS_REASON_DENIED) == 0, "denied: fuse carries denial attribution");
+    CHECK(d.retryable == 0, "denied: not safe to resend unchanged");
+    CHECK(strcmp(d.next_action, AIRY_RS_NEXT_INSPECT) == 0, "denied: needs human approval");
 }
 
 /* C-14：同工具同参数连败达到阈值即强制换路——闸门必须在第二次相同失败后
@@ -301,7 +306,7 @@ static void test_resume_token(void)
 
     agent_run_loop_args_t args = {.prompt = prompt};
     agent_run_loop_result_t out = {0};
-    run_ctx_t r = {.args = &args, .out = &out, .sess = "sess_test"};
+    loop_ctx_t r = {.args = &args, .out = &out, .sess = "sess_test"};
     r.trace = cJSON_CreateArray();
     for (int i = 0; i < 20; i++) {
         cJSON *it = cJSON_CreateObject();
@@ -342,7 +347,7 @@ static void test_resume_roundtrip(void)
         return;
     agent_run_loop_args_t args = {.prompt = prompt};
     agent_run_loop_result_t out = {0};
-    run_ctx_t r = {.args = &args, .out = &out, .sess = "sess_rt"};
+    loop_ctx_t r = {.args = &args, .out = &out, .sess = "sess_rt"};
     r.trace = cJSON_CreateArray();
     cJSON *it = cJSON_CreateObject();
     cJSON_AddStringToObject(it, "tool", "shell_run");
@@ -510,7 +515,7 @@ static void test_alt_switch(void)
 static void test_alt_retry(void)
 {
     cJSON *cat = cJSON_Parse("[{\"function\":{\"name\":\"priv_exec\"}}]");
-    run_ctx_t r;
+    loop_ctx_t r;
     agent_run_loop_result_t out;
     agent_run_loop_args_t la;
     alt_ev_t ev;
