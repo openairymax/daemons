@@ -221,6 +221,60 @@ static airy_cancel_token_t *run_tok(const agent_run_session_t *s)
     return s ? (airy_cancel_token_t *)&s->cancel : NULL;
 }
 
+/* 组装 execute_tool 参数；分配失败返回 NULL。 */
+static char *run_tool_params(const char *name, const char *args_json, bool allow_dangerous)
+{
+    cJSON *params = cJSON_CreateObject();
+    if (!params)
+        return NULL;
+    cJSON_AddStringToObject(params, "tool_id", name);
+    cJSON_AddBoolToObject(params, "allow_dangerous", allow_dangerous);
+    cJSON *pargs = cJSON_Parse(args_json && args_json[0] ? args_json : "{}");
+    if (!pargs)
+        pargs = cJSON_CreateObject();
+    cJSON_AddItemToObject(params, "params", pargs);
+    char *str = cJSON_PrintUnformatted(params);
+    cJSON_Delete(params);
+    return str;
+}
+
+/* 结果分诊：成败以 err_code 为准（缺失才回落 success 布尔），且「成功但产出为空」
+ * 不再记成功——空正文记成功会让回执与事实脱节；业务错误透传原始 error 与码。 */
+static char *run_tool_text(cJSON *result, int *out_code, int *out_ok)
+{
+    cJSON *err_code = cJSON_GetObjectItem(result, "err_code");
+    cJSON *success = cJSON_GetObjectItem(result, "success");
+    cJSON *output = cJSON_GetObjectItem(result, "output");
+    cJSON *error = cJSON_GetObjectItem(result, "error");
+    cJSON *ecode = cJSON_GetObjectItem(result, "error_code");
+    int reported_ok = cJSON_IsNumber(err_code)
+                          ? err_code->valueint == 0
+                          : (cJSON_IsNumber(success) && success->valueint != 0);
+    int has_output = cJSON_IsString(output) && output->valuestring && output->valuestring[0];
+
+    *out_ok = reported_ok && has_output;
+    if (reported_ok && !has_output)
+        return AIRY_STRDUP("Error: tool reported success with empty output");
+    if (*out_ok)
+        return AIRY_STRDUP(output->valuestring);
+    const char *e =
+        cJSON_IsString(error) && error->valuestring ? error->valuestring : "execution failed";
+    int code = cJSON_IsNumber(ecode) ? ecode->valueint : 0;
+    char diag[768];
+    airy_err_t ec = AIRY_ERR_UNKNOWN;
+    if (airy_err_json_get(result, NULL, &ec, diag, sizeof(diag), NULL) == 0 && diag[0]) {
+        e = diag;
+        code = (int)ec;
+    }
+    char buf[1024];
+    *out_code = code;
+    if (code != 0)
+        snprintf(buf, sizeof(buf), "Error: %s (code: %d)", e, code);
+    else
+        snprintf(buf, sizeof(buf), "Error: %s", e);
+    return AIRY_STRDUP(buf);
+}
+
 /* 单个工具执行：tool_d.execute_tool（结果文本化，失败转 Error: 前缀）。
  * out_code 只回填工具服务自报的错误码（成功/未报则为 0）：C-16 用它识别
  * EPERM/EACCES（策略拒绝）与 ENOTSUP（无处理器），据此撤销目录条目；
@@ -233,17 +287,7 @@ static int run_execute_tool(const char *name, const char *args_json, char **out_
 {
     *out_text = NULL;
     *out_code = 0;
-    cJSON *params = cJSON_CreateObject();
-    if (!params)
-        return -1;
-    cJSON_AddStringToObject(params, "tool_id", name);
-    cJSON_AddBoolToObject(params, "allow_dangerous", allow_dangerous);
-    cJSON *pargs = cJSON_Parse(args_json && args_json[0] ? args_json : "{}");
-    if (!pargs)
-        pargs = cJSON_CreateObject();
-    cJSON_AddItemToObject(params, "params", pargs);
-    char *params_str = cJSON_PrintUnformatted(params);
-    cJSON_Delete(params);
+    char *params_str = run_tool_params(name, args_json, allow_dangerous);
     if (!params_str)
         return -1;
 
@@ -265,49 +309,14 @@ static int run_execute_tool(const char *name, const char *args_json, char **out_
         *out_text = AIRY_STRDUP("Tool service returned invalid response");
         return -1;
     }
-    char *text = NULL;
     /* daemon_rpc_call 已解包 JSON-RPC 外层：resp 即 {"success","err_code",
      * "output","error","exit_code","error_code"}（与 cli_chat_tools.c 同源；
-     * 兼容未解包信封——有 "result" 先下钻）。C-2：成败以 err_code 为准
-     * （缺失才回落 success 布尔），且「成功但产出为空」不再记成功——空正文
-     * 记成功会让回执与事实脱节；工具业务错误一律透传原始 error 文案与码。 */
+     * 兼容未解包信封——有 "result" 先下钻）。 */
     cJSON *result = cJSON_GetObjectItem(root, "result");
     if (!cJSON_IsObject(result))
         result = root;
     int tool_ok = 0;
-    if (result) {
-        cJSON *err_code = cJSON_GetObjectItem(result, "err_code");
-        cJSON *success = cJSON_GetObjectItem(result, "success");
-        cJSON *output = cJSON_GetObjectItem(result, "output");
-        cJSON *error = cJSON_GetObjectItem(result, "error");
-        cJSON *ecode = cJSON_GetObjectItem(result, "error_code");
-        int reported_ok = cJSON_IsNumber(err_code) ? err_code->valueint == 0
-                                                  : (cJSON_IsNumber(success) && success->valueint != 0);
-        int has_output = cJSON_IsString(output) && output->valuestring && output->valuestring[0];
-        tool_ok = reported_ok && has_output;
-        if (reported_ok && !has_output) {
-            text = AIRY_STRDUP("Error: tool reported success with empty output");
-        } else if (tool_ok) {
-            text = AIRY_STRDUP(output->valuestring);
-        } else {
-            const char *e =
-                cJSON_IsString(error) && error->valuestring ? error->valuestring : "execution failed";
-            int code = cJSON_IsNumber(ecode) ? ecode->valueint : 0;
-            char diag[768];
-            airy_err_t ec = AIRY_ERR_UNKNOWN;
-            if (airy_err_json_get(result, NULL, &ec, diag, sizeof(diag), NULL) == 0 && diag[0]) {
-                e = diag;
-                code = (int)ec;
-            }
-            char buf[1024];
-            *out_code = code;
-            if (code != 0)
-                snprintf(buf, sizeof(buf), "Error: %s (code: %d)", e, code);
-            else
-                snprintf(buf, sizeof(buf), "Error: %s", e);
-            text = AIRY_STRDUP(buf);
-        }
-    }
+    char *text = result ? run_tool_text(result, out_code, &tool_ok) : NULL;
     if (!text)
         text = AIRY_STRDUP("Tool execution returned no result");
     *out_text = text;
@@ -1097,161 +1106,191 @@ static int run_alt_try(loop_ctx_t *r, run_alt_t *alt, run_exec_fn exec, char **o
     return -1;
 }
 
-/* 单条工具调用：tool_start → 执行 → 连败计数 → tool_end → 回填 messages /
- * 台账 / trace（后者供最终响应）。返回熔断是否触发。 */
-static int run_tool_one(loop_ctx_t *r, cJSON *tc)
+/* 单次工具调用的中间态：让「解析 / 拒绝 / 执行 / 记账 / 落盘」各自成函数，
+ * 避免单函数承担全部分支（R18 复杂度压降）。 */
+typedef struct {
+    const char *tname;
+    const char *targs;
+    const char *tid;
+    uint64_t sig;
+    int blocked;
+    int erc;
+    char *res;
+    cJSON *fbev;
+    char note[256];
+    const char *why; /* 换路原因：指向 note 或 NULL */
+} run_tc_t;
+
+/* 解析本次调用并广播 tool_start，随后算出调用签名与重复闸门。 */
+static void run_tc_head(loop_ctx_t *r, run_tc_t *c, cJSON *tc)
 {
     cJSON *fn = cJSON_GetObjectItem(tc, "function");
     cJSON *fname = fn ? cJSON_GetObjectItem(fn, "name") : NULL;
     cJSON *fargs = fn ? cJSON_GetObjectItem(fn, "arguments") : NULL;
     cJSON *tcid = cJSON_GetObjectItem(tc, "id");
-    const char *tname = cJSON_IsString(fname) ? fname->valuestring : "";
-    const char *targs = cJSON_IsString(fargs) ? fargs->valuestring : "{}";
-    const char *tid = cJSON_IsString(tcid) ? tcid->valuestring : "";
     char buf[160];
 
-    run_fit(buf, sizeof(buf), targs);
+    c->tname = cJSON_IsString(fname) ? fname->valuestring : "";
+    c->targs = cJSON_IsString(fargs) ? fargs->valuestring : "{}";
+    c->tid = cJSON_IsString(tcid) ? tcid->valuestring : "";
+    run_fit(buf, sizeof(buf), c->targs);
     cJSON *ev = cJSON_CreateObject();
     if (ev) {
-        cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL, tname);
-        cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL_ID, tid);
+        cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL, c->tname);
+        cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL_ID, c->tid);
         cJSON_AddStringToObject(ev, AIRY_RS_K_ARGS, buf);
     }
     run_ev_send(r, AIRY_RS_TYPE_TOOL_START, ev);
+    c->sig = run_call_sig(c->tname, c->targs);
+    c->blocked = run_repeat_blocked(r->fail_sig, r->fail_repeat, c->sig);
+}
 
-    const uint64_t sig = run_call_sig(tname, targs);
-    const int blocked = run_repeat_blocked(r->fail_sig, r->fail_repeat, sig);
-    char note[256];
-    const char *switch_reason = NULL;
+/* C-16：派发面与下发面同源。模型可能凭历史记忆调用本轮目录外的工具
+ * （已撤销或不存在的），这里不执行并回填可行动原因。 */
+static void run_tc_miss(loop_ctx_t *r, run_tc_t *c)
+{
+    const char *why = cat_block(r->cat_denied, c->tname);
 
-    char *res = NULL;
-    int erc;
-    cJSON *fbev = NULL;
-    if (!run_cat_has(r->catalog, tname)) {
-        /* C-16：派发面与下发面同源。模型可能凭历史记忆调用本轮目录外
-         * 的工具（已撤销或不存在的），这里不执行并回填可行动原因。 */
-        const char *why = cat_block(r->cat_denied, tname);
-        erc = -1;
-        snprintf(note, sizeof(note),
-                 "Error: tool \"%s\" is not available in this run's catalog (reason: %s); "
-                 "choose a tool from the current tool list or ask the user.",
-                 tname, why ? why : "not_listed");
-        res = AIRY_STRDUP(note);
-        snprintf(note, sizeof(note), "tool %s not in catalog; dispatch refused", tname);
-        switch_reason = note;
-    } else if (blocked) {
-        /* 同一调用已连败两次：不再执行，换路要求直接作为工具结果回传，
-         * 模型下一轮必须换参数、换工具或询问用户，而不是原样重试。 */
-        erc = -1;
-        snprintf(note, sizeof(note),
-                 "Error: identical call to %s rejected after %d consecutive failures with the "
-                 "same arguments; change the arguments, switch tools, or ask the user before "
-                 "retrying.",
-                 tname, r->fail_repeat);
-        res = AIRY_STRDUP(note);
-        snprintf(note, sizeof(note),
-                 "identical call %s blocked after %d failures; strategy switch required", tname,
-                 r->fail_repeat);
-        switch_reason = note;
-    } else {
-        int code = 0;
-        uint64_t t0 = airy_time_ms();
-        erc = run_execute_tool(tname, targs, &res, &code, r->args->allow_dangerous,
-                               run_tok(r->args->session));
-        r->out->tool_ms += airy_time_ms() - t0;
-        /* R11：在途取消。结果已无意义，不再计失败、不换路、不回填消息；
-         * 以 canceled 收尾本轮，由外层按取消终止整次 run。 */
-        if (r->args->session && agent_run_is_cancelled(r->args->session)) {
-            r->user_cancel = 1;
-            ev = cJSON_CreateObject();
-            if (ev) {
-                cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL_ID, tid);
-                cJSON_AddStringToObject(ev, AIRY_RS_K_STATUS, "canceled");
-                cJSON_AddStringToObject(ev, AIRY_RS_K_RESULT_HASH, "");
-            }
-            run_ev_send(r, AIRY_RS_TYPE_TOOL_END, ev);
-            AIRY_FREE(res);
-            return r->fused;
-        }
-        /* 工具自报不可用（策略拒绝 / 无处理器）：撤销目录条目并记原因。
-         * tool_create 的新工具不必在此追加，下一轮目录采样自然可见。 */
-        if (erc != 0 && code != 0) {
-            /* D-10：审批/策略拒绝单独留痕，失败归因可区分「工具坏了」与
-             * 「人没批」。 */
-            if (code == AIRY_ERR_PERMISSION_DENIED || code == AIRY_EPERM ||
-                code == AIRY_EACCES)
-                r->denied = 1;
-            run_cat_revoke(r, tname, code);
-        }
-        /* C-25：失败且不属策略拒绝时，按等价表换路一次；开关关闭则保持
-         * 旧语义（只计数）。无替代时把原因写进 switch_reason，复盘可见。 */
-        if (erc != 0 && !run_alt_deny(code) && run_alt_enabled()) {
-            run_alt_t alt;
-            if (run_alt_plan(tname, targs, &alt) && run_cat_has(r->catalog, alt.tool)) {
-                erc = run_alt_try(r, &alt, run_execute_tool, &res, &fbev);
-                snprintf(note, sizeof(note), "%s failed; switched to %s", tname, alt.tool);
-                switch_reason = note;
-            } else {
-                snprintf(note, sizeof(note),
-                         "no equivalent tool for %s; arguments must change or the user must be "
-                         "asked",
-                         tname);
-                switch_reason = note;
-            }
-            run_alt_free(&alt);
-        }
+    c->erc = -1;
+    snprintf(c->note, sizeof(c->note),
+             "Error: tool \"%s\" is not available in this run's catalog (reason: %s); "
+             "choose a tool from the current tool list or ask the user.",
+             c->tname, why ? why : "not_listed");
+    c->res = AIRY_STRDUP(c->note);
+    snprintf(c->note, sizeof(c->note), "tool %s not in catalog; dispatch refused", c->tname);
+    c->why = c->note;
+}
+
+/* 同一调用已连败两次：不再执行，换路要求直接作为工具结果回传，模型下一轮
+ * 必须换参数、换工具或询问用户，而不是原样重试。 */
+static void run_tc_block(loop_ctx_t *r, run_tc_t *c)
+{
+    c->erc = -1;
+    snprintf(c->note, sizeof(c->note),
+             "Error: identical call to %s rejected after %d consecutive failures with the "
+             "same arguments; change the arguments, switch tools, or ask the user before "
+             "retrying.",
+             c->tname, r->fail_repeat);
+    c->res = AIRY_STRDUP(c->note);
+    snprintf(c->note, sizeof(c->note),
+             "identical call %s blocked after %d failures; strategy switch required", c->tname,
+             r->fail_repeat);
+    c->why = c->note;
+}
+
+/* R11：在途取消。结果已无意义，以 canceled 收尾本轮，由外层按取消终止整次 run。 */
+static void run_tc_cancel(loop_ctx_t *r, run_tc_t *c)
+{
+    cJSON *ev = cJSON_CreateObject();
+    if (ev) {
+        cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL_ID, c->tid);
+        cJSON_AddStringToObject(ev, AIRY_RS_K_STATUS, "canceled");
+        cJSON_AddStringToObject(ev, AIRY_RS_K_RESULT_HASH, "");
     }
+    run_ev_send(r, AIRY_RS_TYPE_TOOL_END, ev);
+}
 
-    /* C-1 连败计数：本次失败仍完整入账/推送后再判断熔断出口。被换路闸门
-     * 拒绝的调用尚未真正执行，不计入熔断，避免替模型把 run 直接判死。 */
-    if (!blocked && run_fail_streak_bump(&r->streak, erc)) {
+/* 真实执行 + 目录撤销 + C-25 等价换路；返回 1 表示已按取消终止（结果不入账）。 */
+static int run_tc_exec(loop_ctx_t *r, run_tc_t *c)
+{
+    int code = 0;
+    uint64_t t0 = airy_time_ms();
+
+    c->erc = run_execute_tool(c->tname, c->targs, &c->res, &code, r->args->allow_dangerous,
+                              run_tok(r->args->session));
+    r->out->tool_ms += airy_time_ms() - t0;
+    if (r->args->session && agent_run_is_cancelled(r->args->session)) {
+        r->user_cancel = 1;
+        run_tc_cancel(r, c);
+        AIRY_FREE(c->res);
+        c->res = NULL;
+        return 1;
+    }
+    /* 工具自报不可用（策略拒绝 / 无处理器）：撤销目录条目并记原因。
+     * tool_create 的新工具不必在此追加，下一轮目录采样自然可见。 */
+    if (c->erc != 0 && code != 0) {
+        /* D-10：审批/策略拒绝单独留痕，失败归因可区分「工具坏了」与「人没批」。 */
+        if (code == AIRY_ERR_PERMISSION_DENIED || code == AIRY_EPERM || code == AIRY_EACCES)
+            r->denied = 1;
+        run_cat_revoke(r, c->tname, code);
+    }
+    /* C-25：失败且不属策略拒绝时，按等价表换路一次；开关关闭则保持旧语义
+     * （只计数）。无替代时把原因写进 why，复盘可见。 */
+    if (c->erc == 0 || run_alt_deny(code) || !run_alt_enabled())
+        return 0;
+    run_alt_t alt;
+    if (run_alt_plan(c->tname, c->targs, &alt) && run_cat_has(r->catalog, alt.tool)) {
+        c->erc = run_alt_try(r, &alt, run_execute_tool, &c->res, &c->fbev);
+        snprintf(c->note, sizeof(c->note), "%s failed; switched to %s", c->tname, alt.tool);
+        c->why = c->note;
+    } else {
+        snprintf(c->note, sizeof(c->note),
+                 "no equivalent tool for %s; arguments must change or the user must be asked",
+                 c->tname);
+        c->why = c->note;
+    }
+    run_alt_free(&alt);
+    return 0;
+}
+
+/* C-1 连败计数：失败仍完整入账/推送后再判断熔断出口。被闸门拒绝的调用
+ * 尚未真正执行，不计入熔断，避免替模型把 run 直接判死。 */
+static void run_tc_acct(loop_ctx_t *r, run_tc_t *c)
+{
+    if (!c->blocked && run_fail_streak_bump(&r->streak, c->erc)) {
         r->fused = 1;
-        snprintf(r->fuse, sizeof(r->fuse), "%s: %s", tname, res ? res : "");
+        snprintf(r->fuse, sizeof(r->fuse), "%s: %s", c->tname, c->res ? c->res : "");
         r->fuse[utf8_prefix_len(r->fuse, strlen(r->fuse))] = '\0';
     }
-    if (!blocked)
-        run_repeat_bump(&r->fail_sig, &r->fail_repeat, sig, erc);
-    if (!switch_reason && erc != 0 && r->fail_repeat == AGENT_RUN_TOOL_SWITCH_REPEAT) {
+    if (!c->blocked)
+        run_repeat_bump(&r->fail_sig, &r->fail_repeat, c->sig, c->erc);
+    if (!c->why && c->erc != 0 && r->fail_repeat == AGENT_RUN_TOOL_SWITCH_REPEAT) {
         /* 第二次相同失败：本步即标注原因，复盘能看出下一步为何被拒。 */
-        snprintf(note, sizeof(note),
+        snprintf(c->note, sizeof(c->note),
                  "identical call %s failed %d times in a row; next identical call will be rejected",
-                 tname, r->fail_repeat);
-        switch_reason = note;
+                 c->tname, r->fail_repeat);
+        c->why = c->note;
     }
+}
 
-    AIRY_STRNCPY_TERM(buf, res ? res : "", sizeof(buf));
+/* 回填 messages / 台账 / trace（后者供最终响应），并在工具边界落检查点。
+ * 回填预算（C-23）：长输出按 8 KB 头尾保留，超出部分以标记替代，避免整段
+ * 塞回上下文挤掉后续轮次；预算与 UTF-8 边界由 string SSoT 统一裁决。 */
+static void run_tc_rec(loop_ctx_t *r, run_tc_t *c)
+{
+    char buf[160];
+    cJSON *ev;
+
+    AIRY_STRNCPY_TERM(buf, c->res ? c->res : "", sizeof(buf));
     buf[utf8_prefix_len(buf, strlen(buf))] = '\0';
     ev = cJSON_CreateObject();
     if (ev) {
-        cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL_ID, tid);
-        cJSON_AddStringToObject(ev, AIRY_RS_K_STATUS, erc == 0 ? "ok" : "error");
+        cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL_ID, c->tid);
+        cJSON_AddStringToObject(ev, AIRY_RS_K_STATUS, c->erc == 0 ? "ok" : "error");
         cJSON_AddStringToObject(ev, AIRY_RS_K_RESULT_HASH, buf);
     }
     run_ev_send(r, AIRY_RS_TYPE_TOOL_END, ev);
 
-    /* 回填预算（C-23）：长输出按 8 KB 头尾保留，超出部分以标记替代，
-     * 避免整段塞回上下文挤掉后续轮次；预算与 UTF-8 边界由 string SSoT
-     * 统一裁决，本处只负责取用。 */
-    char *content = airy_text_budget(res ? res : "Tool execution failed", 0);
+    char *content = airy_text_budget(c->res ? c->res : "Tool execution failed", 0);
     if (!content)
         content = AIRY_STRDUP("Tool execution failed");
 
     cJSON *msg = cJSON_CreateObject();
     cJSON_AddStringToObject(msg, "role", "tool");
-    cJSON_AddStringToObject(msg, "tool_call_id", tid);
+    cJSON_AddStringToObject(msg, "tool_call_id", c->tid);
     cJSON_AddStringToObject(msg, "content", content ? content : "Tool execution failed");
     cJSON_AddItemToArray(r->messages, msg);
     agent_ledger_add(&r->lg, "tool_result", content, 0, msg);
 
     cJSON *tr = cJSON_CreateObject();
-    cJSON_AddStringToObject(tr, "tool", tname);
-    cJSON_AddStringToObject(tr, "arguments", targs);
+    cJSON_AddStringToObject(tr, "tool", c->tname);
+    cJSON_AddStringToObject(tr, "arguments", c->targs);
     cJSON_AddStringToObject(tr, "result", content ? content : "");
-    cJSON_AddNumberToObject(tr, "ok", erc == 0 ? 1 : 0);
-    if (switch_reason)
-        cJSON_AddStringToObject(tr, "switch_reason", switch_reason);
-    if (fbev)
-        cJSON_AddItemToObject(tr, "fallback", fbev);
+    cJSON_AddNumberToObject(tr, "ok", c->erc == 0 ? 1 : 0);
+    if (c->why)
+        cJSON_AddStringToObject(tr, "switch_reason", c->why);
+    if (c->fbev)
+        cJSON_AddItemToObject(tr, "fallback", c->fbev);
     cJSON_AddItemToArray(r->trace, tr);
 
     /* D-12：工具边界即检查点。令牌只含边界前的步骤摘要，守护重启后客户端
@@ -1262,12 +1301,30 @@ static int run_tool_one(loop_ctx_t *r, cJSON *tc)
             const char *key = r->run_id ? r->run_id : r->sess;
             if (key && key[0])
                 agent_ckpt_save(key, r->sess, r->out->rounds_used, r->out->rounds_limit,
-                                cJSON_GetArraySize(r->trace), tname, tok);
+                                cJSON_GetArraySize(r->trace), c->tname, tok);
             AIRY_FREE(tok);
         }
     }
     AIRY_FREE(content);
-    AIRY_FREE(res);
+    AIRY_FREE(c->res);
+    c->res = NULL;
+}
+
+/* 单条工具调用：tool_start → 执行 → 连败计数 → tool_end → 回填 messages /
+ * 台账 / trace（后者供最终响应）。返回熔断是否触发。 */
+static int run_tool_one(loop_ctx_t *r, cJSON *tc)
+{
+    run_tc_t c = {0};
+
+    run_tc_head(r, &c, tc);
+    if (!run_cat_has(r->catalog, c.tname))
+        run_tc_miss(r, &c);
+    else if (c.blocked)
+        run_tc_block(r, &c);
+    else if (run_tc_exec(r, &c))
+        return r->fused;
+    run_tc_acct(r, &c);
+    run_tc_rec(r, &c);
     return r->fused;
 }
 
@@ -1305,70 +1362,139 @@ static int run_step(loop_ctx_t *r)
     return AGENT_RUN_RC_TOOL_FUSE;
 }
 
-int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result_t *out)
+/* 运行态初始化：绑定参数/产物并装配消息、目录、拒绝表与种子。 */
+static int run_loop_init(loop_ctx_t *r, const agent_run_loop_args_t *args,
+                         agent_run_loop_result_t *out)
 {
-    loop_ctx_t r = {0};
-    int rc = -1;
-    int more = 0;
-    int cancelled = 0;
-    if (!args || !out)
-        return -1;
+    AIRY_MEMSET(r, 0, sizeof(*r));
     AIRY_MEMSET(out, 0, sizeof(*out));
-    r.args = args;
-    r.out = out;
-    r.sess = args->session ? args->session->session_id : NULL;
-    r.run_id = args->session ? args->session->run_id : NULL;
-    snprintf(r.llm_sock, sizeof(r.llm_sock), "%s", airy_runtime_dir_socket("llm.sock"));
-    agent_ledger_init(&r.lg, r.sess);
+    r->args = args;
+    r->out = out;
+    r->sess = args->session ? args->session->session_id : NULL;
+    r->run_id = args->session ? args->session->run_id : NULL;
+    snprintf(r->llm_sock, sizeof(r->llm_sock), "%s", airy_runtime_dir_socket("llm.sock"));
+    agent_ledger_init(&r->lg, r->sess);
 
-    r.trace = cJSON_CreateArray();
-    r.catalog = cJSON_CreateArray();
-    r.cat_denied = cJSON_CreateArray();
-    if (!r.trace || !r.catalog || !r.cat_denied || run_seed(&r) != 0) {
-        cJSON_Delete(r.messages);
-        cJSON_Delete(r.trace);
-        cJSON_Delete(r.catalog);
-        cJSON_Delete(r.cat_denied);
-        return -1;
-    }
+    r->trace = cJSON_CreateArray();
+    r->catalog = cJSON_CreateArray();
+    r->cat_denied = cJSON_CreateArray();
+    if (r->trace && r->catalog && r->cat_denied && run_seed(r) == 0)
+        return 0;
+    cJSON_Delete(r->messages);
+    cJSON_Delete(r->trace);
+    cJSON_Delete(r->catalog);
+    cJSON_Delete(r->cat_denied);
+    return -1;
+}
 
-    const int limit = rounds_resolve(args->rounds);
-    out->rounds_limit = limit;
-    int used = 0;
+/* 主轮次推进；返回终局码，*more 表示预算耗尽时模型仍在推进。 */
+static int run_loop_rounds(loop_ctx_t *r, agent_run_loop_result_t *out, int limit, int *used,
+                           int *more, int *cancelled)
+{
+    int rc = -1;
+
     for (int i = 0; i < limit; i++) {
-        used = i + 1;
+        *used = i + 1;
         /* 边界检查点与令牌复用同一轮次口径：先更新产物再进轮。 */
-        out->rounds_used = used;
-        if (agent_run_is_cancelled(args->session)) {
-            SVC_LOG_INFO("agent.run: cancelled by user (session=%s)", r.sess ? r.sess : "?");
+        out->rounds_used = *used;
+        if (agent_run_is_cancelled(r->args->session)) {
+            SVC_LOG_INFO("agent.run: cancelled by user (session=%s)", r->sess ? r->sess : "?");
             rc = 1;
-            cancelled = 1;
-            more = 0;
+            *cancelled = 1;
+            *more = 0;
             break;
         }
-        agent_ledger_fit(&r.lg, r.messages);
+        agent_ledger_fit(&r->lg, r->messages);
 
         /* C-16：每轮采样一次工具目录（≤1 次 list_tools），失败回落静态
          * bootstrap 并以 catalog_source=static 事件对客户端可见。 */
-        run_catalog_load(&r);
-        int st = run_step(&r);
+        run_catalog_load(r);
+        int st = run_step(r);
         if (st != 1) {
             rc = st;
-            more = 0;
+            *more = 0;
             break;
         }
-        more = 1;
+        *more = 1;
     }
+    return rc;
+}
 
-    if (rc == AGENT_RUN_RC_TOOL_FUSE && r.fused) {
-        /* affected_node 只留工具 id；附带错误文本由 trace 承载。 */
-        const char *sep = strchr(r.fuse, ':');
-        size_t n = sep ? (size_t)(sep - r.fuse) : strlen(r.fuse);
-        if (n >= sizeof(out->fail_node))
-            n = sizeof(out->fail_node) - 1;
-        AIRY_MEMCPY(out->fail_node, r.fuse, n);
-        out->fail_node[n] = '\0';
+/* affected_node 只留工具 id；附带错误文本由 trace 承载。 */
+static void run_loop_fuse(const loop_ctx_t *r, agent_run_loop_result_t *out)
+{
+    if (!r->fused)
+        return;
+    const char *sep = strchr(r->fuse, ':');
+    size_t n = sep ? (size_t)(sep - r->fuse) : strlen(r->fuse);
+    if (n >= sizeof(out->fail_node))
+        n = sizeof(out->fail_node) - 1;
+    AIRY_MEMCPY(out->fail_node, r->fuse, n);
+    out->fail_node[n] = '\0';
+}
+
+/* D-12：终态收口。暂停（含预算耗尽与可重试的 provider 故障）保留可续跑
+ * 条目并写入含已执行步骤的令牌；其余终态删除条目。退出排水期由检查点
+ * 模块保留为 paused。 */
+static void run_loop_ckpt(loop_ctx_t *r, agent_run_loop_result_t *out, int cancelled, int rc)
+{
+    const char *key = r->run_id ? r->run_id : r->sess;
+    bool paused;
+
+    if (!key || !key[0])
+        return;
+    paused = !cancelled && rc != 0 && rc != AGENT_RUN_RC_UNMET &&
+             rc != AGENT_RUN_RC_TOOL_FUSE && rc != AGENT_RUN_RC_UNVERIFIED;
+    if (paused && !out->resume_token) {
+        /* 故障暂停同样要能把最后一个工具边界交还客户端，否则只能重跑。 */
+        out->resume_token = run_resume_emit(r);
     }
+    if (paused && out->resume_token) {
+        agent_ckpt_save(key, r->sess, out->rounds_used, out->rounds_limit,
+                        cJSON_GetArraySize(r->trace), "", out->resume_token);
+        agent_ckpt_pend(key);
+    } else {
+        agent_ckpt_done(key);
+    }
+}
+
+/* 终局码（含取消与预算耗尽）移交产物，失败路径就地释放；计量已直写 out。 */
+static int run_loop_fin(loop_ctx_t *r, agent_run_loop_result_t *out, int rc)
+{
+    agent_ledger_free(&r->lg);
+    cJSON_Delete(r->messages);
+    cJSON_Delete(r->catalog);
+    cJSON_Delete(r->cat_denied);
+    if (rc >= 0 || rc == AIRY_EBUDGET) {
+        out->trace = r->trace;
+        out->text = r->text;
+        out->reason = r->reason;
+        return rc;
+    }
+    cJSON_Delete(r->trace);
+    AIRY_FREE(r->text);
+    AIRY_FREE(r->reason);
+    return rc;
+}
+
+int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result_t *out)
+{
+    loop_ctx_t r;
+    int rc;
+    int more = 0;
+    int cancelled = 0;
+    int used = 0;
+
+    if (!args || !out)
+        return -1;
+    if (run_loop_init(&r, args, out) != 0)
+        return -1;
+
+    const int limit = rounds_resolve(args->rounds);
+    out->rounds_limit = limit;
+    rc = run_loop_rounds(&r, out, limit, &used, &more, &cancelled);
+    if (rc == AGENT_RUN_RC_TOOL_FUSE && r.fused)
+        run_loop_fuse(&r, out);
     out->fail_denied = r.denied;
 
     out->rounds_used = used;
@@ -1382,40 +1508,6 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
         /* 暂停即可续跑：令牌自包含已执行步骤与待续目标，客户端不必重发历史。 */
         out->resume_token = run_resume_emit(&r);
     }
-
-    /* D-12：终态收口。暂停（含预算耗尽与可重试的 provider 故障）保留可续跑
-     * 条目并写入含已执行步骤的令牌；其余终态删除条目。退出排水期由检查点
-     * 模块保留为 paused。 */
-    const char *ck_key = r.run_id ? r.run_id : r.sess;
-    if (ck_key && ck_key[0]) {
-        bool paused = !cancelled && rc != 0 && rc != AGENT_RUN_RC_UNMET &&
-                      rc != AGENT_RUN_RC_TOOL_FUSE && rc != AGENT_RUN_RC_UNVERIFIED;
-        if (paused && !out->resume_token) {
-            /* 故障暂停同样要能把最后一个工具边界交还客户端，否则只能重跑。 */
-            out->resume_token = run_resume_emit(&r);
-        }
-        if (paused && out->resume_token) {
-            agent_ckpt_save(ck_key, r.sess, out->rounds_used, out->rounds_limit,
-                            cJSON_GetArraySize(r.trace), "", out->resume_token);
-            agent_ckpt_pend(ck_key);
-        } else {
-            agent_ckpt_done(ck_key);
-        }
-    }
-
-    agent_ledger_free(&r.lg);
-    cJSON_Delete(r.messages);
-    cJSON_Delete(r.catalog);
-    cJSON_Delete(r.cat_denied);
-    /* 终局码（含取消与预算耗尽）移交产物，失败路径就地释放；计量已直写 out。 */
-    if (rc >= 0 || rc == AIRY_EBUDGET) {
-        out->trace = r.trace;
-        out->text = r.text;
-        out->reason = r.reason;
-        return rc;
-    }
-    cJSON_Delete(r.trace);
-    AIRY_FREE(r.text);
-    AIRY_FREE(r.reason);
-    return rc;
+    run_loop_ckpt(&r, out, cancelled, rc);
+    return run_loop_fin(&r, out, rc);
 }
