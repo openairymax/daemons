@@ -54,7 +54,17 @@ int rounds_resolve(int requested)
 }
 
 /* D-10：按原始退出码分类失败。只描述语义，不改码；retryable 表示原样重发
- * 是否安全，next_action 给出客户端下一步（重试/续跑/人工介入）。 */
+ * 是否安全，next_action 给出客户端下一步（重试/续跑/人工介入）。
+ *
+ * 重试策略（客户端一律读载荷字段，不得按文案自行推断）：
+ *   成因             origin    reason            retryable  next_action
+ *   预算耗尽         agent     budget            1          resume
+ *   工具熔断         tool      tool              0          inspect
+ *   审批拒绝         tool      denied            0          inspect
+ *   上游不可达       provider  provider          1          retry
+ *   上游可达但报错   provider  provider_error    0          inspect
+ * retryable 只表示「原样重发是否安全」，不等于能推进：budget 必须用令牌
+ * 续跑，重发同一 prompt 只会再耗一轮预算；denied 需人工放行后重提。 */
 agent_fail_desc_t agent_fail_desc(int rc, int denied)
 {
     agent_fail_desc_t d = {AIRY_RS_ORIGIN_AGENT, AIRY_RS_REASON_AGENT, 0,
@@ -363,7 +373,7 @@ typedef struct {
     cJSON *cat_denied;
     const char *cat_src;
     uint64_t cat_hash;
-} run_ctx_t;
+} loop_ctx_t;
 
 /* 首条 system：工具路径锚点契约（缺陷 #4）声明 fs_* 与 shell_run 的相对
  * 路径以 tool_d 工作目录为基准、回执回显绝对路径；0.1.18 B1 轮次归属约束
@@ -476,7 +486,7 @@ static char *run_seed_render(const cJSON *p)
 
 /* 首条 user 内容：令牌可用则以续跑摘要替代原始诉求；令牌损坏时退化为按原始
  * 诉求重新开始（失去断点但不阻断对话），并留下告警供排查。 */
-static char *run_seed_content(run_ctx_t *r)
+static char *run_seed_content(loop_ctx_t *r)
 {
     const char *tok = r->args->resume_token;
     if (tok && tok[0]) {
@@ -493,7 +503,7 @@ static char *run_seed_content(run_ctx_t *r)
 /* 初始消息集与台账入口锚点：history 非空则整体复制，否则以 prompt 构造
  * 首条 user 消息。入口记账取首条真实 user 消息——注入的 system 前置不算
  * 入口，否则被保护的是提示词样板而非用户诉求。 */
-static int run_seed(run_ctx_t *r)
+static int run_seed(loop_ctx_t *r)
 {
     const cJSON *h = r->args->history;
     if (h && cJSON_IsArray(h) && cJSON_GetArraySize(h) > 0)
@@ -527,7 +537,7 @@ static int run_seed(run_ctx_t *r)
 }
 
 /* reasoning 跨轮累积：各轮以换行连接；扩容失败保留已有内容不阻断。 */
-static void run_reason_add(run_ctx_t *r, const char *add)
+static void run_reason_add(loop_ctx_t *r, const char *add)
 {
     size_t old = r->reason ? strlen(r->reason) : 0, cap = old + strlen(add) + 2;
     char *np = (char *)AIRY_REALLOC(r->reason, cap);
@@ -538,14 +548,14 @@ static void run_reason_add(run_ctx_t *r, const char *add)
 }
 
 /* 事件投递：agent_run_emit_event 自行处理无 sink / 建包失败时的载荷释放。 */
-static void run_ev_send(run_ctx_t *r, const char *type, cJSON *ev)
+static void run_ev_send(loop_ctx_t *r, const char *type, cJSON *ev)
 {
     agent_run_emit_event(r->args->sink, &r->seq, r->run_id, r->sess, type, ev);
 }
 
 /* 单轮 LLM：建参 → 流式收流 → 取产物 → 回填 assistant 消息与台账。
  * 返回 1 终局回复（正文已移交 r->text）、0 有待执行工具、-1 失败。 */
-static int run_llm_round(run_ctx_t *r, cJSON **tool_calls)
+static int run_llm_round(loop_ctx_t *r, cJSON **tool_calls)
 {
     *tool_calls = NULL;
     char *params = run_build_llm_params(r->args->model, r->messages, r->catalog,
@@ -731,7 +741,7 @@ static void run_cat_deny(cJSON *denied, const char *name, const char *reason)
 
 /* 目录快照事件：tools 是本轮真正下发给模型的工具名，available 是可用条数，
  * denied 逐条带原因。catalog_source 区分实时目录与静态 bootstrap。 */
-static void run_cat_emit(run_ctx_t *r)
+static void run_cat_emit(loop_ctx_t *r)
 {
     if (!r->catalog || !r->cat_src)
         return;
@@ -761,7 +771,7 @@ static void run_cat_emit(run_ctx_t *r)
 }
 
 /* 目录指纹：来源 + 可见集 + 不可用集。指纹不变说明目录没变，不重复推送。 */
-static uint64_t run_cat_sig(const run_ctx_t *r)
+static uint64_t run_cat_sig(const loop_ctx_t *r)
 {
     uint64_t h = run_call_sig(r->cat_src ? r->cat_src : "", "");
     const cJSON *it = NULL;
@@ -786,7 +796,7 @@ static uint64_t run_cat_sig(const run_ctx_t *r)
 /* tool_d 不可达时的 bootstrap：静态 SSoT 只保证模型仍有工具可用，事件必须
  * 标 catalog_source=static（判据允许的唯一例外，且必须对客户端可见）。
  * 会话内已撤销的工具在 bootstrap 中同样剔除。 */
-static void run_catalog_static(run_ctx_t *r)
+static void run_catalog_static(loop_ctx_t *r)
 {
     cJSON *src = cJSON_Parse(AIRY_TOOLS_JSON_SOURCE);
     if (!src)
@@ -804,7 +814,7 @@ static void run_catalog_static(run_ctx_t *r)
 
 /* 每轮唯一的一次目录采样：include_denied 一次取全，避免两次调用产生两份
  * 不一致快照；不可用条目在此分流进 cat_denied，绝不进 catalog。 */
-static void run_catalog_load(run_ctx_t *r)
+static void run_catalog_load(loop_ctx_t *r)
 {
     if (!r->catalog || !r->cat_denied)
         return;
@@ -869,7 +879,7 @@ static void run_catalog_load(run_ctx_t *r)
 /* 工具自报策略拒绝 / 无处理器：立即移出本轮目录并记原因，下一轮重新采样
  * 时不再回到可见集。传输失败与业务错误（参数非法等）不撤销——那是调用
  * 问题，不是工具不可用。 */
-static void run_cat_revoke(run_ctx_t *r, const char *name, int code)
+static void run_cat_revoke(loop_ctx_t *r, const char *name, int code)
 {
     const char *reason = NULL;
     switch (code) {
@@ -962,7 +972,7 @@ static cJSON *run_resume_steps(const cJSON *trace, int keep)
 
 /* 续跑令牌载荷：做到哪（步骤摘要）+ 还差什么（待续正文）+ 原始诉求与计量。
  * 服务端无状态，客户端凭令牌原地续跑，无需重发全量历史。 */
-static char *run_resume_pack(const run_ctx_t *r, int keep)
+static char *run_resume_pack(const loop_ctx_t *r, int keep)
 {
     cJSON *p = cJSON_CreateObject();
     if (!p)
@@ -992,7 +1002,7 @@ static char *run_resume_pack(const run_ctx_t *r, int keep)
 
 /* 续跑令牌生成（C-14）：成品受 TOKEN_MAX 硬约束。步骤摘要可裁剪，超限时
  * 先砍步骤数量再重编；砍到零仍放不下才放弃令牌（正文与 trace 不受影响）。 */
-static char *run_resume_emit(const run_ctx_t *r)
+static char *run_resume_emit(const loop_ctx_t *r)
 {
     int keep = cJSON_GetArraySize(r->trace);
     if (keep > AGENT_RUN_RESUME_STEP_MAX)
@@ -1015,7 +1025,7 @@ static char *run_resume_emit(const run_ctx_t *r)
 typedef int (*run_exec_fn)(const char *name, const char *args, char **out, int *code,
                            bool allow_dangerous);
 
-static int run_alt_try(run_ctx_t *r, run_alt_t *alt, run_exec_fn exec, char **out, cJSON **fbev)
+static int run_alt_try(loop_ctx_t *r, run_alt_t *alt, run_exec_fn exec, char **out, cJSON **fbev)
 {
     char fit[160];
     run_fit(fit, sizeof(fit), alt->args);
@@ -1074,7 +1084,7 @@ static int run_alt_try(run_ctx_t *r, run_alt_t *alt, run_exec_fn exec, char **ou
 
 /* 单条工具调用：tool_start → 执行 → 连败计数 → tool_end → 回填 messages /
  * 台账 / trace（后者供最终响应）。返回熔断是否触发。 */
-static int run_tool_one(run_ctx_t *r, cJSON *tc)
+static int run_tool_one(loop_ctx_t *r, cJSON *tc)
 {
     cJSON *fn = cJSON_GetObjectItem(tc, "function");
     cJSON *fname = fn ? cJSON_GetObjectItem(fn, "name") : NULL;
@@ -1234,7 +1244,7 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
 /* 单轮推进：一轮 LLM 收流 + 本轮全部工具调用。返回 1 继续下一轮、0 终局
  * 回复已就绪（正文在 r->text）、-1 失败、熔断返回 AGENT_RUN_RC_TOOL_FUSE
  * （收尾文案写入 r->text）。 */
-static int run_step(run_ctx_t *r)
+static int run_step(loop_ctx_t *r)
 {
     cJSON *calls = NULL;
     char msg[384];
@@ -1265,7 +1275,7 @@ static int run_step(run_ctx_t *r)
 
 int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result_t *out)
 {
-    run_ctx_t r = {0};
+    loop_ctx_t r = {0};
     int rc = -1;
     int more = 0;
     int cancelled = 0;
