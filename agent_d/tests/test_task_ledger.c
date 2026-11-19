@@ -213,6 +213,128 @@ static void replay_check(const char *home)
 }
 
 
+/* 主键选择：task_id 优先，chat 回退 session，双空返回 NULL。 */
+static void ledger_case_key(const agent_run_task_meta_t *meta)
+{
+    CHECK(ledger_key(meta, "sess-x") == meta->task_id, "key must prefer task_id");
+    CHECK(ledger_key(NULL, "sess-x") != NULL &&
+              strcmp(ledger_key(NULL, "sess-x"), "sess-x") == 0,
+          "key must fall back to session_id");
+    CHECK(ledger_key(NULL, NULL) == NULL, "empty key must be NULL");
+}
+
+/* blueprint 与 progress：目标/判据提交时冻结，过程态只落 progress。 */
+static void ledger_case_plan(const char *home, const agent_run_task_meta_t *meta)
+{
+    char base[320];
+    char dir[400];
+    snprintf(base, sizeof(base), "%s/data/agentrt/hall/default/task-ledger-1", home);
+
+    CHECK(ledger_plan(meta->task_id, meta->plan_id, "build the hall", "board shows terminal") ==
+              0,
+          "blueprint write failed");
+    snprintf(dir, sizeof(dir), "%s/blueprint", base);
+    char *body = read_event(dir);
+    CHECK(body && strstr(body, "\"event\":\"blueprint\""), "blueprint event missing");
+    CHECK(body && strstr(body, "build the hall"), "blueprint goal missing");
+    CHECK(body && strstr(body, "\"task_id\":\"task-ledger-1\""), "blueprint task_id missing");
+    free(body);
+
+    CHECK(ledger_progress(meta->task_id, meta->plan_id, "submitted", NULL) == 0,
+          "progress(submitted) failed");
+    CHECK(ledger_progress(meta->task_id, meta->plan_id, "planned", NULL) == 0,
+          "progress(planned) failed");
+    CHECK(ledger_progress(meta->task_id, meta->plan_id, "executing", NULL) == 0,
+          "progress(executing) failed");
+    snprintf(dir, sizeof(dir), "%s/progress", base);
+    CHECK(count_events(dir) == 3, "progress count=%d want=3", count_events(dir));
+    body = read_event(dir);
+    CHECK(body && strstr(body, "\"state\":\"executing\""), "latest progress state wrong");
+    CHECK(body && strstr(body, "\"progress\":0.5"), "progress ratio missing");
+    free(body);
+}
+
+/* 失败与完成：终态必须落 result，且 progress 一律为 1。 */
+static void ledger_case_terminal(const char *home, const agent_run_task_meta_t *meta)
+{
+    char base[320];
+    char dir[400];
+    snprintf(base, sizeof(base), "%s/data/agentrt/hall/default/task-ledger-1", home);
+
+    CHECK(ledger_issue(meta->task_id, -5, "tool loop exhausted") == 0, "issue write failed");
+    snprintf(dir, sizeof(dir), "%s/issue", base);
+    char *body = read_event(dir);
+    CHECK(body && strstr(body, "\"event\":\"issue\""), "issue event missing");
+    CHECK(body && strstr(body, "\"rc\":-5"), "issue rc missing");
+    CHECK(body && strstr(body, "tool loop exhausted"), "issue reason missing");
+    free(body);
+
+    CHECK(ledger_result(meta->task_id, meta->plan_id, "completed") == 0,
+          "result write failed");
+    snprintf(dir, sizeof(dir), "%s/result", base);
+    body = read_event(dir);
+    CHECK(body && strstr(body, "\"state\":\"completed\""), "terminal state missing");
+    CHECK(body && strstr(body, "\"progress\":1"), "terminal progress wrong");
+    free(body);
+
+    /* 失败同属终态：progress 必须是 1，不能回退到 0——看板按最新事件
+     * 覆盖，回退会把已失败任务显示成未开始。 */
+    CHECK(ledger_result("task-ledger-fail", "plan-ledger-1", "failed") == 0,
+          "failed result write failed");
+    snprintf(dir, sizeof(dir), "%s/data/agentrt/hall/default/task-ledger-fail/result", home);
+    body = read_event(dir);
+    CHECK(body && strstr(body, "\"state\":\"failed\""), "failed state missing");
+    CHECK(body && strstr(body, "\"progress\":1"), "failed terminal progress must be 1");
+    free(body);
+}
+
+/* 取消终态（D-13 / E-20）：state=cancelled 且必须带发起者与时间，
+ * 回放才能区分用户取消与关机批量取消。空主键不得产生无主目录。 */
+static void ledger_case_cancel(const char *home)
+{
+    char dir[400];
+    CHECK(ledger_cancel("task-ledger-cxl", "plan-ledger-1", "cli", 1737000000123ULL) == 0,
+          "cancel result write failed");
+    snprintf(dir, sizeof(dir), "%s/data/agentrt/hall/default/task-ledger-cxl/result", home);
+    char *body = read_event(dir);
+    CHECK(body && strstr(body, "\"state\":\"cancelled\""), "cancel state missing");
+    CHECK(body && strstr(body, "\"cancelled_by\":\"cli\""), "cancel initiator missing");
+    CHECK(body && strstr(body, "\"cancelled_at\":1737000000123"), "cancel timestamp missing");
+    CHECK(body && strstr(body, "\"progress\":1"), "cancel terminal progress must be 1");
+    free(body);
+
+    CHECK(ledger_result(NULL, NULL, "failed") != 0, "empty key must be rejected");
+    CHECK(ledger_progress("", NULL, "executing", NULL) != 0, "empty key must be rejected");
+}
+
+/* 重启回放：子进程内存态清零，只凭磁盘账本还原全链并续写事件。 */
+static void ledger_case_restart(const char *self)
+{
+    pid_t pid = fork();
+    if (pid == 0) {
+        char exe[512];
+        ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+        if (n <= 0) {
+            /* macOS 无 /proc：ctest 以绝对路径启动子进程，argv[0] 即可执行体。 */
+            n = snprintf(exe, sizeof(exe), "%s", self);
+        }
+        if (n <= 0)
+            _exit(127);
+        exe[n] = '\0';
+        execl(exe, exe, "--replay-check", (char *)NULL);
+        _exit(127);
+    }
+    CHECK(pid > 0, "fork for restart replay failed");
+    if (pid <= 0)
+        return;
+    int st = 0;
+    if (waitpid(pid, &st, 0) != pid)
+        g_failures++;
+    else
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0, "restart replay child failed (status=%d)",
+              st);
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1 && strcmp(argv[1], "--replay-check") == 0) {
@@ -238,115 +360,11 @@ int main(int argc, char **argv)
     snprintf(meta.task_id, sizeof(meta.task_id), "task-ledger-1");
     snprintf(meta.plan_id, sizeof(meta.plan_id), "plan-ledger-1");
 
-    /* 1. 主键选择：task_id 优先，chat 回退 session，双空返回 NULL。 */
-    CHECK(ledger_key(&meta, "sess-x") == meta.task_id, "key must prefer task_id");
-    CHECK(ledger_key(NULL, "sess-x") != NULL &&
-              strcmp(ledger_key(NULL, "sess-x"), "sess-x") == 0,
-          "key must fall back to session_id");
-    CHECK(ledger_key(NULL, NULL) == NULL, "empty key must be NULL");
-
-    char base[320];
-    snprintf(base, sizeof(base), "%s/data/agentrt/hall/default/task-ledger-1", home);
-    char dir[400];
-    char *body;
-
-    /* 2. blueprint：目标与成功判据在提交时冻结。 */
-    CHECK(ledger_plan(meta.task_id, meta.plan_id, "build the hall",
-                                      "board shows terminal") == 0,
-          "blueprint write failed");
-    snprintf(dir, sizeof(dir), "%s/blueprint", base);
-    body = read_event(dir);
-    CHECK(body && strstr(body, "\"event\":\"blueprint\""), "blueprint event missing");
-    CHECK(body && strstr(body, "build the hall"), "blueprint goal missing");
-    CHECK(body && strstr(body, "\"task_id\":\"task-ledger-1\""), "blueprint task_id missing");
-    free(body);
-
-    /* 3. progress：过程态落 progress，终态落 result。 */
-    CHECK(ledger_progress(meta.task_id, meta.plan_id, "submitted", NULL) == 0,
-          "progress(submitted) failed");
-    CHECK(ledger_progress(meta.task_id, meta.plan_id, "planned", NULL) == 0,
-          "progress(planned) failed");
-    CHECK(ledger_progress(meta.task_id, meta.plan_id, "executing", NULL) == 0,
-          "progress(executing) failed");
-    snprintf(dir, sizeof(dir), "%s/progress", base);
-    CHECK(count_events(dir) == 3, "progress count=%d want=3", count_events(dir));
-    body = read_event(dir);
-    CHECK(body && strstr(body, "\"state\":\"executing\""), "latest progress state wrong");
-    CHECK(body && strstr(body, "\"progress\":0.5"), "progress ratio missing");
-    free(body);
-
-    /* 4. issue：失败/取消必须留下 rc + reason。 */
-    CHECK(ledger_issue(meta.task_id, -5, "tool loop exhausted") == 0,
-          "issue write failed");
-    snprintf(dir, sizeof(dir), "%s/issue", base);
-    body = read_event(dir);
-    CHECK(body && strstr(body, "\"event\":\"issue\""), "issue event missing");
-    CHECK(body && strstr(body, "\"rc\":-5"), "issue rc missing");
-    CHECK(body && strstr(body, "tool loop exhausted"), "issue reason missing");
-    free(body);
-
-    /* 5. result：终态事件在原目录同源落盘。 */
-    CHECK(ledger_result(meta.task_id, meta.plan_id, "completed") == 0,
-          "result write failed");
-    snprintf(dir, sizeof(dir), "%s/result", base);
-    body = read_event(dir);
-    CHECK(body && strstr(body, "\"state\":\"completed\""), "terminal state missing");
-    CHECK(body && strstr(body, "\"progress\":1"), "terminal progress wrong");
-    free(body);
-
-    /* 5b. 失败/取消同属终态：progress 必须是 1，不能回退到 0——
-     *     看板按最新事件覆盖，回退会把已失败任务显示成未开始。 */
-    CHECK(ledger_result("task-ledger-fail", "plan-ledger-1", "failed") == 0,
-          "failed result write failed");
-    snprintf(dir, sizeof(dir), "%s/data/agentrt/hall/default/task-ledger-fail/result", home);
-    body = read_event(dir);
-    CHECK(body && strstr(body, "\"state\":\"failed\""), "failed state missing");
-    CHECK(body && strstr(body, "\"progress\":1"), "failed terminal progress must be 1");
-    free(body);
-
-    /* 5c. 取消终态（D-13 / E-20）：state=cancelled 且必须带发起者与
-     *     时间，回放才能区分用户取消与关机批量取消。 */
-    CHECK(ledger_cancel("task-ledger-cxl", "plan-ledger-1", "cli", 1737000000123ULL) ==
-              0,
-          "cancel result write failed");
-    snprintf(dir, sizeof(dir), "%s/data/agentrt/hall/default/task-ledger-cxl/result", home);
-    body = read_event(dir);
-    CHECK(body && strstr(body, "\"state\":\"cancelled\""), "cancel state missing");
-    CHECK(body && strstr(body, "\"cancelled_by\":\"cli\""), "cancel initiator missing");
-    CHECK(body && strstr(body, "\"cancelled_at\":1737000000123"), "cancel timestamp missing");
-    CHECK(body && strstr(body, "\"progress\":1"), "cancel terminal progress must be 1");
-    free(body);
-
-    /* 6. 空主键不产生无主目录。 */
-    CHECK(ledger_result(NULL, NULL, "failed") != 0, "empty key must be rejected");
-    CHECK(ledger_progress("", NULL, "executing", NULL) != 0,
-          "empty key must be rejected");
-
-    /* 7. 重启回放：exec 自身为新进程（内存态清零），只凭磁盘账本还原
-     *    blueprint→progress×3→issue→result 全链，并续写第 7 条事件。 */
-    pid_t pid = fork();
-    if (pid == 0) {
-        char exe[512];
-        ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-        if (n <= 0) {
-            /* macOS 无 /proc：ctest 以绝对路径启动子进程，argv[0] 即可执行体。 */
-            n = snprintf(exe, sizeof(exe), "%s", argv[0]);
-        }
-        if (n <= 0)
-            _exit(127);
-        exe[n] = '\0';
-        execl(exe, exe, "--replay-check", (char *)NULL);
-        _exit(127);
-    }
-    CHECK(pid > 0, "fork for restart replay failed");
-    if (pid > 0) {
-        int st = 0;
-        if (waitpid(pid, &st, 0) != pid)
-            g_failures++;
-        else
-            CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0,
-                  "restart replay child failed (status=%d)", st);
-    }
+    ledger_case_key(&meta);
+    ledger_case_plan(home, &meta);
+    ledger_case_terminal(home, &meta);
+    ledger_case_cancel(home);
+    ledger_case_restart(argv[0]);
 
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", home);
     if (system(cmd) != 0)
