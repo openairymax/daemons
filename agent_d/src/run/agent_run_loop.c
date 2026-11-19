@@ -200,6 +200,8 @@ static char *run_fail_text(int rc)
 {
     char buf[512];
     const char *s;
+    if (rc == AIRY_ERR_CANCELED)
+        return AIRY_STRDUP("Error: tool call canceled by user");
     if (rc == 0)
         rc = AIRY_ERR_PROTOCOL;
     s = airy_err_str(rc);
@@ -212,12 +214,22 @@ static char *run_fail_text(int rc)
     return AIRY_STRDUP(buf);
 }
 
+/* 会话取消令牌的唯一取用点。令牌只被等待循环读取，对 const 会话取地址不
+ * 破坏不可变约定；没有会话（纯执行路径）时退化为阻塞调用。 */
+static airy_cancel_token_t *run_tok(const agent_run_session_t *s)
+{
+    return s ? (airy_cancel_token_t *)&s->cancel : NULL;
+}
+
 /* 单个工具执行：tool_d.execute_tool（结果文本化，失败转 Error: 前缀）。
  * out_code 只回填工具服务自报的错误码（成功/未报则为 0）：C-16 用它识别
  * EPERM/EACCES（策略拒绝）与 ENOTSUP（无处理器），据此撤销目录条目；
- * 传输层失败不填码，避免把「服务不可达」误判成策略拒绝。 */
+ * 传输层失败不填码，避免把「服务不可达」误判成策略拒绝。
+ *
+ * R11：session 的取消令牌随调用下探。取消时客户端立即脱身，不等工具预算
+ * 跑满；tool_d 侧按自身执行预算收尾，回执因连接关闭而丢弃，不影响审计。 */
 static int run_execute_tool(const char *name, const char *args_json, char **out_text,
-                            int *out_code, bool allow_dangerous)
+                            int *out_code, bool allow_dangerous, airy_cancel_token_t *tok)
 {
     *out_text = NULL;
     *out_code = 0;
@@ -238,7 +250,8 @@ static int run_execute_tool(const char *name, const char *args_json, char **out_
     char sock[AGENT_RUN_SOCK_BUF];
     snprintf(sock, sizeof(sock), "%s", airy_runtime_dir_socket("tool.sock"));
     char *resp = NULL;
-    int rc = daemon_rpc_call(sock, "execute_tool", params_str, &resp, AGENT_RUN_TOOL_TIMEOUT_MS);
+    int rc = daemon_rpc_call_cancelable(sock, "execute_tool", params_str, &resp,
+                                        AGENT_RUN_TOOL_TIMEOUT_MS, tok, NULL, NULL);
     AIRY_FREE(params_str);
     if (rc != AIRY_SUCCESS || !resp) {
         AIRY_FREE(resp);
@@ -347,7 +360,7 @@ static int run_repeat_blocked(uint64_t last, int repeat, uint64_t sig)
     return repeat >= AGENT_RUN_TOOL_SWITCH_REPEAT && sig == last;
 }
 
-typedef struct {
+typedef struct loop_ctx_s {
     const agent_run_loop_args_t *args;
     agent_run_loop_result_t *out;
     cJSON *messages;
@@ -373,6 +386,7 @@ typedef struct {
     cJSON *cat_denied;
     const char *cat_src;
     uint64_t cat_hash;
+    int user_cancel; /* R11：在途工具调用被用户取消，本轮立即收口 */
 } loop_ctx_t;
 
 /* 首条 system：工具路径锚点契约（缺陷 #4）声明 fs_* 与 shell_run 的相对
@@ -1023,7 +1037,7 @@ static char *run_resume_emit(const loop_ctx_t *r)
  * 替代工具失败后不再连锁换路（避免把一次失败放大成一次搜索）。策略拒绝类
  * 错误码由调用方过滤，替代工具必须在当前目录内才执行。 */
 typedef int (*run_exec_fn)(const char *name, const char *args, char **out, int *code,
-                           bool allow_dangerous);
+                           bool allow_dangerous, airy_cancel_token_t *tok);
 
 static int run_alt_try(loop_ctx_t *r, run_alt_t *alt, run_exec_fn exec, char **out, cJSON **fbev)
 {
@@ -1040,7 +1054,8 @@ static int run_alt_try(loop_ctx_t *r, run_alt_t *alt, run_exec_fn exec, char **o
     char *res = NULL;
     int code = 0;
     uint64_t t0 = airy_time_ms();
-    int rc = exec(alt->tool, alt->args, &res, &code, r->args->allow_dangerous);
+    int rc = exec(alt->tool, alt->args, &res, &code, r->args->allow_dangerous,
+                  run_tok(r->args->session));
     r->out->tool_ms += airy_time_ms() - t0;
     if (rc != 0 && code != 0)
         run_cat_revoke(r, alt->tool, code);
@@ -1141,8 +1156,23 @@ static int run_tool_one(loop_ctx_t *r, cJSON *tc)
     } else {
         int code = 0;
         uint64_t t0 = airy_time_ms();
-        erc = run_execute_tool(tname, targs, &res, &code, r->args->allow_dangerous);
+        erc = run_execute_tool(tname, targs, &res, &code, r->args->allow_dangerous,
+                               run_tok(r->args->session));
         r->out->tool_ms += airy_time_ms() - t0;
+        /* R11：在途取消。结果已无意义，不再计失败、不换路、不回填消息；
+         * 以 canceled 收尾本轮，由外层按取消终止整次 run。 */
+        if (r->args->session && agent_run_is_cancelled(r->args->session)) {
+            r->user_cancel = 1;
+            ev = cJSON_CreateObject();
+            if (ev) {
+                cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL_ID, tid);
+                cJSON_AddStringToObject(ev, AIRY_RS_K_STATUS, "canceled");
+                cJSON_AddStringToObject(ev, AIRY_RS_K_RESULT_HASH, "");
+            }
+            run_ev_send(r, AIRY_RS_TYPE_TOOL_END, ev);
+            AIRY_FREE(res);
+            return r->fused;
+        }
         /* 工具自报不可用（策略拒绝 / 无处理器）：撤销目录条目并记原因。
          * tool_create 的新工具不必在此追加，下一轮目录采样自然可见。 */
         if (erc != 0 && code != 0) {
@@ -1258,10 +1288,12 @@ static int run_step(loop_ctx_t *r)
         return st;
 
     int n = cJSON_GetArraySize(calls);
-    for (int k = 0; k < n && !r->fused; k++)
+    for (int k = 0; k < n && !r->fused && !r->user_cancel; k++)
         run_tool_one(r, cJSON_GetArrayItem(calls, k));
     cJSON_Delete(calls);
-    if (!r->fused)
+    /* R11：取消不是故障。返回 1 让主循环在下一轮起点按取消收口，
+     * 不记熔断、不产出失败载荷。 */
+    if (r->user_cancel || !r->fused)
         return 1;
 
     /* C-1 熔断终局：止损退出（不再消耗 LLM 轮次），原因经 text 回传，

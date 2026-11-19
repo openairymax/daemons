@@ -446,9 +446,11 @@ static struct {
     int rc;
 } g_fake;
 
-static int fake_exec(const char *name, const char *args, char **out, int *code, bool allow_dangerous)
+static int fake_exec(const char *name, const char *args, char **out, int *code, bool allow_dangerous,
+                     airy_cancel_token_t *tok)
 {
     (void)allow_dangerous;
+    (void)tok;
     g_fake.calls++;
     AIRY_STRNCPY_TERM(g_fake.tool, name, sizeof(g_fake.tool));
     AIRY_STRNCPY_TERM(g_fake.args, args, sizeof(g_fake.args));

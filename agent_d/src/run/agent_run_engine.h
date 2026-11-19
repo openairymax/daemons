@@ -28,6 +28,7 @@
 #include <cjson/cJSON.h>
 
 #include "airy_budget.h"
+#include "cancel_token.h"
 
 /* C-15 统一任务编排入口契约（mode/状态/预算/task 元数据） */
 #include "agent_task_contract.h"
@@ -106,6 +107,9 @@ typedef struct agent_run_session_s {
      * 落账与 task_state 帧都要带，否则无法区分用户取消与关机取消。 */
     char cancel_by[AGENT_RUN_SESSION_ID_LEN];
     uint64_t cancel_at_ms;
+    /* R11：取消下探到在途调用。cancelled 只挡住下一轮，工具调用本身阻塞在
+     * RPC 上，必须由令牌把取消送进等待循环，否则取消要等到工具预算耗尽。 */
+    airy_cancel_token_t cancel;
     struct agent_run_session_s *next;
 } agent_run_session_t;
 
