@@ -21,6 +21,7 @@
 
 #include "airy_llm_stream.h"
 #include "airy_memory.h"
+#include "err_class.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
@@ -135,14 +136,25 @@ static void run_take_usage(agent_stream_t *st)
 }
 
 /* 'E'：整条流失败。丢弃已聚合的正文/思考/工具，避免调用方把部分内容
- * 当作可用回复（与 coreloopthree 同一语义）。 */
+ * 当作可用回复（与 coreloopthree 同一语义）。
+ *
+ * L-8：信封 code 只是 JSON-RPC 协议码（-32603 / -32602），真实上游错误码
+ * 在 error.data.err（ErrorModel v1）。两码分开保存：协议码决定文案归因，
+ * 真实码决定可重试性（传输/瞬时 vs 配置类）。 */
 static void run_take_error(agent_stream_t *st)
 {
     cJSON *root = cJSON_Parse(st->frame);
     cJSON *err = root ? cJSON_GetObjectItem(root, "error") : NULL;
     cJSON *code = err ? cJSON_GetObjectItem(err, "code") : NULL;
     cJSON *msg = err ? cJSON_GetObjectItem(err, "message") : NULL;
+    cJSON *data = err ? cJSON_GetObjectItem(err, "data") : NULL;
+    airy_err_t real = 0;
+
     st->error_code = cJSON_IsNumber(code) ? code->valueint : -32602;
+    st->upstream_code = 0;
+    if (cJSON_IsObject(data) && airy_err_json_get(data, NULL, &real, NULL, 0, NULL) == 0 &&
+        real != 0)
+        st->upstream_code = (int)real;
     AIRY_STRNCPY_TERM(st->error_msg,
                       (cJSON_IsString(msg) && msg->valuestring) ? msg->valuestring
                                                                 : "LLM stream error",
@@ -376,5 +388,6 @@ void agent_stream_take(agent_stream_t *st, agent_stream_result_t *out)
     out->completion_tokens = st->completion_tokens;
     out->cost = st->cost;
     out->error_code = st->error_code;
+    out->upstream_code = st->upstream_code;
     AIRY_STRNCPY_TERM(out->error_msg, st->error_msg, sizeof(out->error_msg));
 }

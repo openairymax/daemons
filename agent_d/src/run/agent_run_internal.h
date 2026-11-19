@@ -115,6 +115,7 @@ typedef struct {
      * 否则整条链路只剩一句兜底文案，客户端无法归类。 */
     char fail_msg[256];
     int fail_transport; /* 上游失败是否为传输层（决定是否可对用户说「不可达」） */
+    int fail_code;      /* 'E' 帧携带的真实上游码（0 = 未携带，仅有协议码） */
 } agent_run_loop_result_t;
 
 /** D-10 失败语义分类（纯函数，无分配）。 */
@@ -162,6 +163,7 @@ typedef struct {
     uint64_t completion_tokens; /* 'U' 帧 completion 分量，未报为 0 */
     double cost;       /* 'U' 帧费用 */
     int error_code;    /* 'E' 帧错误码；0 表示无错误帧 */
+    int upstream_code; /* 'E' 帧 data.err 的真实上游码；0 表示未携带（如参数拒绝） */
     char error_msg[AGENT_STREAM_ERR_LEN];
 } agent_stream_result_t;
 
@@ -190,6 +192,7 @@ typedef struct {
     uint64_t completion_tokens;
     double cost;
     int error_code;
+    int upstream_code;
     char error_msg[AGENT_STREAM_ERR_LEN];
 } agent_stream_t;
 
