@@ -73,6 +73,10 @@ typedef struct {
     uint64_t tokens_out;  /* D-11：completion 分量（provider 实报） */
     char fail_node[128];  /* D-10：熔断工具 id（affected_node） */
     int fail_denied;      /* D-10：失败前出现过审批/策略拒绝 */
+    /* 上游失败明细（LLM 传输错误 / 'E' 帧码与文案）：终态错误帧优先采用，
+     * 客户端据此区分「不可达 / 鉴权 / 超时 / 模型名错误」。 */
+    char fail_msg[256];
+    int fail_transport;   /* 上游失败是否为传输层（决定能否说「不可达」） */
     uint64_t think_ms;
     uint64_t llm_ms;
     uint64_t tool_ms;
@@ -409,6 +413,8 @@ static void run_loop(run_ctx_t *c, const cJSON *history)
     c->tokens_out = lr.tokens_out;
     AIRY_STRNCPY_TERM(c->fail_node, lr.fail_node, sizeof(c->fail_node));
     c->fail_denied = lr.fail_denied;
+    AIRY_STRNCPY_TERM(c->fail_msg, lr.fail_msg, sizeof(c->fail_msg));
+    c->fail_transport = lr.fail_transport;
 }
 
 /* 会话槽位 + 模型解析：调用方给定合法 sess_ ID 时沿用，否则生成新 ID。
@@ -438,10 +444,22 @@ static int run_open(run_ctx_t *c)
     cJSON *err = cJSON_CreateObject();
     if (err) {
         cJSON_AddNumberToObject(err, AIRY_RS_K_CODE, -32603);
+        cJSON_AddNumberToObject(err, AIRY_RS_K_ERROR_CODE, AIRY_ENOENT);
         cJSON_AddStringToObject(err, AIRY_RS_K_MSG,
                                 "no model configured: set $AIRY_CONFIG_DIR/model.yaml "
                                 "or AIRY_AGENT_MODEL");
         cJSON_AddBoolToObject(err, AIRY_RS_K_RECOVER, 0);
+        /* 结构化失败载荷：retryable=false 且 origin=config，客户端据此显示
+         * 「去配置模型」而不是「重试」——重试在无模型时永远不会成功。 */
+        cJSON *fail = cJSON_CreateObject();
+        if (fail) {
+            cJSON_AddStringToObject(fail, AIRY_RS_K_ORIGIN, AIRY_RS_ORIGIN_CONFIG);
+            cJSON_AddStringToObject(fail, AIRY_RS_K_REASON, AIRY_RS_REASON_CONFIG);
+            cJSON_AddNumberToObject(fail, AIRY_RS_K_CODE, AIRY_ENOENT);
+            cJSON_AddBoolToObject(fail, AIRY_RS_K_RETRYABLE, 0);
+            cJSON_AddStringToObject(fail, AIRY_RS_K_NEXT_ACTION, AIRY_RS_NEXT_INSPECT);
+            cJSON_AddItemToObject(err, AIRY_RS_K_FAILURE, fail);
+        }
         agent_run_emit_event(c->sink, &c->seq, c->active->run_id, c->sess, AIRY_RS_TYPE_ERROR, err);
     }
     agent_run_unregister(c->active);
@@ -790,6 +808,21 @@ static cJSON *run_fail_obj(const run_ctx_t *c)
 
     if (!f)
         return NULL;
+    /* 上游失败按实际错误类别再细分：只有传输层才说「不可达」；可达但被拒
+     * （鉴权/模型名/配额/5xx）归 provider_error 且不可原样重试，避免把配置
+     * 错误误导成网络故障。 */
+    if (c->rc == AGENT_RUN_RC_LLM_FAIL) {
+        d.origin = AIRY_RS_ORIGIN_PROVIDER;
+        if (c->fail_transport) {
+            d.reason = AIRY_RS_REASON_PROVIDER;
+            d.retryable = 1;
+            d.next_action = AIRY_RS_NEXT_RETRY;
+        } else {
+            d.reason = AIRY_RS_REASON_PROVIDER_ERR;
+            d.retryable = 0;
+            d.next_action = AIRY_RS_NEXT_INSPECT;
+        }
+    }
     if (!c->fail_node[0] && cJSON_IsString(id) && id->valuestring[0])
         node = id->valuestring;
     cJSON_AddStringToObject(f, AIRY_RS_K_ORIGIN, d.origin);
@@ -990,8 +1023,12 @@ static void run_tail(run_ctx_t *c, const cJSON *res)
         if (err) {
             cJSON_AddNumberToObject(err, AIRY_RS_K_CODE, -32603);
             cJSON_AddNumberToObject(err, AIRY_RS_K_ERROR_CODE, c->rc);
+            /* 明细优先：上游失败只在这里能还原成可操作信息（哪一层、什么码、
+             * provider 原话），不回落到整类兜底文案。 */
             cJSON_AddStringToObject(err, AIRY_RS_K_MSG,
-                                    (c->text && c->text[0]) ? c->text : run_rc_msg(c->rc));
+                                    c->fail_msg[0] ? c->fail_msg
+                                                   : ((c->text && c->text[0]) ? c->text
+                                                                              : run_rc_msg(c->rc)));
             cJSON_AddBoolToObject(err, AIRY_RS_K_RECOVER, 1);
             cJSON_AddNumberToObject(err, AIRY_RS_K_ROUNDS_USED, c->rounds_used);
             cJSON_AddNumberToObject(err, AIRY_RS_K_ROUNDS_LIMIT, c->rounds_limit);
