@@ -14,10 +14,28 @@ set(AGENT_TEST_SOURCES
     test_service.c
     test_run_ledger.c
     test_run_loop.c
+    test_run_open.c
     test_run_stream.c
     test_task_orchestrate.c
     test_task_ledger.c
     test_turn_ckpt.c
+)
+
+# 引擎闭环符号：white-box include 的测试已自带被包含单元，其余单元在此同编。
+# agent_run_loop.c / agent_run_exec.c 互斥地由 test_run_loop / test_run_open
+# 以 include 方式引入，避免同符号重复定义。
+set(AGENT_RUN_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_engine.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_ledger.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_stream.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_task_ledger.c
+    # C-25: 等价工具表（run loop 换路判定）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_alt.c
+    # D-12: 工具边界检查点（run loop 调用 pend/done）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_turn_ckpt.c
+    # C-17: exec 收尾依赖判据派生与复核入口
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_verify.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_task_orchestrate.c
 )
 
 set(AGENT_COMMON_INCLUDES
@@ -49,18 +67,16 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
     # white-box include 引擎源的测试需同编引擎闭环符号（engine/ledger/stream）。
     if(TEST_NAME STREQUAL "test_run_loop")
         target_sources(test_agent_${TEST_NAME} PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_engine.c
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_ledger.c
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_stream.c
+            ${AGENT_RUN_CORE_SOURCES}
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_exec.c
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_task_ledger.c
-            # C-25: 等价工具表（run loop 换路判定）
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_alt.c
-            # D-12: 工具边界检查点（run loop 调用 pend/done）
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_turn_ckpt.c
-            # C-17: exec 收尾依赖判据派生与复核入口
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_verify.c
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_task_orchestrate.c
+        )
+    endif()
+
+    # 失败载荷契约直测：包含 exec 源，需同编其调用的工具循环闭环。
+    if(TEST_NAME STREQUAL "test_run_open")
+        target_sources(test_agent_${TEST_NAME} PRIVATE
+            ${AGENT_RUN_CORE_SOURCES}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_loop.c
         )
     endif()
 
