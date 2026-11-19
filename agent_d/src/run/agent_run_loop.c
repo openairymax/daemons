@@ -98,6 +98,14 @@ agent_fail_desc_t agent_fail_desc(int rc, int denied)
         d.retryable = 1;
         d.next_action = AIRY_RS_NEXT_RETRY;
         break;
+    case AGENT_RUN_RC_LLM_FAIL:
+        /* 上游失败：配置错（鉴权/模型名）重试无用，但传输与 5xx 可重试。
+         * 明细在 fail_msg，客户端据此选择「修复配置」或「重试」。 */
+        d.origin = AIRY_RS_ORIGIN_PROVIDER;
+        d.reason = AIRY_RS_REASON_PROVIDER;
+        d.retryable = 1;
+        d.next_action = AIRY_RS_NEXT_RETRY;
+        break;
     default:
         break;
     }
@@ -561,10 +569,25 @@ static int run_llm_round(run_ctx_t *r, cJSON **tool_calls)
     agent_stream_take(&st, &sr);
     agent_stream_free(&st);
     if (lrc != AIRY_SUCCESS || sr.error_code != 0) {
+        /* 上游失败必须带着原始码与文案离开本函数：以前只记日志并返回 -1，
+         * 终态帧只能兜底成「tool loop exhausted or LLM service error」，
+         * 客户端把它渲染成「未知错误」。 */
+        int ec = sr.error_code ? sr.error_code : lrc;
+        const char *detail = sr.error_msg[0] ? sr.error_msg : airy_err_str(ec);
+        int transport = ec > 0 && airy_err_class_of(ec) == AIRY_ERR_CLASS_TRANSPORT;
+        if (!detail || !detail[0])
+            detail = "no detail from provider";
+        r->out->fail_transport = transport;
+        if (transport)
+            snprintf(r->out->fail_msg, sizeof(r->out->fail_msg),
+                     "LLM service unreachable (code=%d): %s", ec, detail);
+        else
+            snprintf(r->out->fail_msg, sizeof(r->out->fail_msg),
+                     "LLM request failed (code=%d): %s", ec, detail);
         SVC_LOG_ERROR("agent.run: llm stream failed (rc=%d, ec=%d, msg=%s, session=%s)", lrc,
                       sr.error_code, sr.error_msg, r->sess ? r->sess : "?");
         run_stream_result_free(&sr);
-        return -1;
+        return AGENT_RUN_RC_LLM_FAIL;
     }
 
     r->out->tokens += sr.tokens;
@@ -1216,10 +1239,13 @@ static int run_step(run_ctx_t *r)
     cJSON *calls = NULL;
     char msg[384];
     int st = run_llm_round(r, &calls);
-    if (st < 0)
-        return -1;
-    if (st > 0)
+    /* run_llm_round：1 终局正文、0 有待执行工具、其余为终局失败码
+     * （-1 内部错误 / AGENT_RUN_RC_LLM_FAIL 上游）。失败码原样上抛，
+     * 不可压成 -1，否则错误明细与分类在终态帧处丢失。 */
+    if (st == 1)
         return 0;
+    if (st != 0)
+        return st;
 
     int n = cJSON_GetArraySize(calls);
     for (int k = 0; k < n && !r->fused; k++)

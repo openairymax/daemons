@@ -111,6 +111,10 @@ typedef struct {
     int rounds_limit;  /* 本轮生效轮次上限 */
     char fail_node[128]; /* 熔断工具 id（D-10 affected_node），无熔断为空 */
     int fail_denied;     /* D-10：失败前出现过审批/策略拒绝 */
+    /* 上游失败明细（LLM 传输错误 / 'E' 帧码与文案）：终态错误帧优先采用，
+     * 否则整条链路只剩一句兜底文案，客户端无法归类。 */
+    char fail_msg[256];
+    int fail_transport; /* 上游失败是否为传输层（决定是否可对用户说「不可达」） */
 } agent_run_loop_result_t;
 
 /** D-10 失败语义分类（纯函数，无分配）。 */

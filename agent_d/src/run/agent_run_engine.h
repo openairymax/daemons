@@ -74,6 +74,11 @@ extern "C" {
 /* 判据无法取证（C-17 回退）：verifier 连续不可达，复核未能执行。既非通过
  * 也非失败，状态记为 unverified，不得显示 completed。 */
 #define AGENT_RUN_RC_UNVERIFIED 8
+/* LLM 上游失败（0.1.22 D-10 收口）：complete_stream 传输失败或 'E' 帧携带
+ * 非零错误码。此前与内部错误共用 -1，终态只能兜底成「tool loop exhausted
+ * or LLM service error」，客户端无法区分「服务不可达 / 鉴权失败 / 超时」，
+ * 一律渲染为「未知错误」。独立 rc 使失败语义可分类，明细经 fail_msg 透传。 */
+#define AGENT_RUN_RC_LLM_FAIL 9
 /* 流式 LLM 调用的双窗口：TIMEOUT_MS 是相邻两段数据之间的最大沉默时间
  * （每收一段即重置），TOTAL_MS 是整条流的硬上限。只有前者会把持续吐 token
  * 的长推理在 90s 处腰斩——那是「卡住后报错」的直接来源。

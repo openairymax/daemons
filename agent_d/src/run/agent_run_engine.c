@@ -165,8 +165,12 @@ const char *run_rc_msg(int rc)
         return "agent.run failed: success criteria not met (see verification)";
     case AGENT_RUN_RC_UNVERIFIED:
         return "agent.run unverified: criteria check unavailable (verifier down)";
+    case AGENT_RUN_RC_LLM_FAIL:
+        /* 明细（码 + provider 文案）由 fail_msg 承载并优先下发；此处只是
+         * 兜底摘要，保持可被客户端归类为 provider 维度。 */
+        return "agent.run failed: model service error (see failure detail)";
     default:
-        return "agent.run failed: tool loop exhausted or LLM service error";
+        return "agent.run failed: internal error (see daemon log)";
     }
 }
 
