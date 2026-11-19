@@ -280,6 +280,28 @@ static int svc_user_model_cfg(const char *user_path, char *out_model, size_t mod
     return (um[0] || up[0]) ? 0 : AIRY_ERR_NOT_FOUND;
 }
 
+/* 显式入参优先于配置文件：调用方给出的 base 即本次请求的锚点。 */
+static void resolve_seed(const char *base_model, const char *base_provider, char *out_model,
+                         size_t model_sz, char *out_provider, size_t prov_sz)
+{
+    if (base_model && base_model[0])
+        AIRY_STRNCPY_TERM(out_model, base_model, model_sz);
+    if (base_provider && base_provider[0] && out_provider && prov_sz > 0)
+        AIRY_STRNCPY_TERM(out_provider, base_provider, prov_sz);
+}
+
+/* 用户配置文件覆盖：路径拼接失败即跳过，不改变已锚定的值。 */
+static void resolve_user_cfg(char *out_model, size_t model_sz, char *out_provider, size_t prov_sz)
+{
+    const char *cfg_dir = airy_config_dir();
+    if (!cfg_dir || !cfg_dir[0])
+        return;
+    char user_path[1024];
+    int plen = snprintf(user_path, sizeof(user_path), "%s/model.yaml", cfg_dir);
+    if (plen > 0 && plen < (int)sizeof(user_path))
+        svc_user_model_cfg(user_path, out_model, model_sz, out_provider, prov_sz);
+}
+
 int svc_model_defaults_resolve(const char *base_model, const char *base_provider, char *out_model,
                                size_t model_sz, char *out_provider, size_t prov_sz)
 {
@@ -290,18 +312,8 @@ int svc_model_defaults_resolve(const char *base_model, const char *base_provider
     if (out_provider && prov_sz > 0)
         out_provider[0] = '\0';
 
-    if (base_model && base_model[0])
-        AIRY_STRNCPY_TERM(out_model, base_model, model_sz);
-    if (base_provider && base_provider[0] && out_provider && prov_sz > 0)
-        AIRY_STRNCPY_TERM(out_provider, base_provider, prov_sz);
-
-    const char *cfg_dir = airy_config_dir();
-    if (cfg_dir && cfg_dir[0]) {
-        char user_path[1024];
-        int plen = snprintf(user_path, sizeof(user_path), "%s/model.yaml", cfg_dir);
-        if (plen > 0 && plen < (int)sizeof(user_path))
-            svc_user_model_cfg(user_path, out_model, model_sz, out_provider, prov_sz);
-    }
+    resolve_seed(base_model, base_provider, out_model, model_sz, out_provider, prov_sz);
+    resolve_user_cfg(out_model, model_sz, out_provider, prov_sz);
 
     const char *env_model = getenv("AIRY_AGENT_MODEL");
     if (env_model && env_model[0])
@@ -381,6 +393,52 @@ int svc_model_defaults_models0_from_yaml(const char *path, svc_model_llm_config_
     return rc;
 }
 
+/* 去重追加：容量满或已存在即丢弃，保持首次出现顺序。 */
+static void ids_add(char ids[][SVC_MODEL_ID_MAX], size_t cap, size_t *out_n, const char *id)
+{
+    if (*out_n >= cap)
+        return;
+    for (size_t k = 0; k < *out_n; ++k) {
+        if (strcmp(ids[k], id) == 0)
+            return;
+    }
+    AIRY_STRNCPY_TERM(ids[(*out_n)++], id, SVC_MODEL_ID_MAX);
+}
+
+/* 简化 llm 段优先：存在且非空时 llm_d 只展开这一个 provider。 */
+static size_t ids_from_llm(struct yaml_node *root, char ids[][SVC_MODEL_ID_MAX], size_t cap)
+{
+    if (cap == 0)
+        return 0;
+    struct yaml_node *llm = yaml_get(root, "llm");
+    if (!llm || llm->type != YAML_NODE_MAPPING)
+        return 0;
+    const char *one = yaml_as_string(yaml_get(llm, "model"), "");
+    if (!one || !one[0])
+        return 0;
+    AIRY_STRNCPY_TERM(ids[0], one, SVC_MODEL_ID_MAX);
+    return 1;
+}
+
+/* models[] 表逐行取 model_id，与 llm 段结果合并去重。 */
+static size_t ids_from_models(struct yaml_node *root, char ids[][SVC_MODEL_ID_MAX], size_t cap,
+                              size_t n)
+{
+    struct yaml_node *models = yaml_get(root, "models");
+    if (!models || models->type != YAML_NODE_SEQUENCE)
+        return n;
+    for (size_t i = 0; i < models->sequence.count && n < cap; ++i) {
+        struct yaml_node *item = yaml_get_index(models, i);
+        if (!item || item->type != YAML_NODE_MAPPING)
+            continue;
+        const char *id = yaml_as_string(yaml_get(item, "model_id"), "");
+        if (!id || !id[0])
+            continue;
+        ids_add(ids, cap, &n, id);
+    }
+    return n;
+}
+
 int model_ids_from_yaml(const char *path, char ids[][SVC_MODEL_ID_MAX], size_t cap,
                             size_t *out_n)
 {
@@ -392,36 +450,12 @@ int model_ids_from_yaml(const char *path, char ids[][SVC_MODEL_ID_MAX], size_t c
     if (!doc)
         return AIRY_ERR_IO;
 
-    /* 简化 llm 段优先：存在且非空时 llm_d 只展开这一个 provider。 */
-    struct yaml_node *llm = yaml_get(yaml_root(doc), "llm");
-    if (llm && llm->type == YAML_NODE_MAPPING) {
-        const char *one = yaml_as_string(yaml_get(llm, "model"), "");
-        if (one && one[0]) {
-            AIRY_STRNCPY_TERM(ids[0], one, SVC_MODEL_ID_MAX);
-            *out_n = 1;
-        }
-    }
-
-    struct yaml_node *models = yaml_get(yaml_root(doc), "models");
-    if (models && models->type == YAML_NODE_SEQUENCE) {
-        for (size_t i = 0; i < models->sequence.count && *out_n < cap; ++i) {
-            struct yaml_node *item = yaml_get_index(models, i);
-            if (!item || item->type != YAML_NODE_MAPPING)
-                continue;
-            const char *id = yaml_as_string(yaml_get(item, "model_id"), "");
-            if (!id || !id[0])
-                continue;
-            size_t k = 0;
-            for (; k < *out_n; ++k) {
-                if (strcmp(ids[k], id) == 0)
-                    break;
-            }
-            if (k == *out_n)
-                AIRY_STRNCPY_TERM(ids[(*out_n)++], id, SVC_MODEL_ID_MAX);
-        }
-    }
+    struct yaml_node *root = yaml_root(doc);
+    size_t n = ids_from_llm(root, ids, cap);
+    n = ids_from_models(root, ids, cap, n);
     yaml_destroy(doc);
-    return *out_n > 0 ? 0 : AIRY_ERR_NOT_FOUND;
+    *out_n = n;
+    return n > 0 ? 0 : AIRY_ERR_NOT_FOUND;
 }
 
 /* 槽位表：角色名 / 废弃 think 键 / 新 env / 废弃 env 一一对齐，三处索引
@@ -603,6 +637,91 @@ static int slot_pad(char *o, size_t cap, size_t *off, unsigned done,
     return 0;
 }
 
+/* 段头判定：顶层 "slots:" 行（可带注释尾随）。 */
+static int slot_is_head(const char *q, size_t trim)
+{
+    return trim >= 6 && strncmp(q, "slots:", 6) == 0 &&
+           (trim == 6 || q[6] == ' ' || q[6] == '\t');
+}
+
+/* 重写游标：输出缓冲、已完成槽位与只读输入。 */
+typedef struct {
+    char *out;
+    size_t cap;
+    size_t off;
+    const svc_model_slots_t *slots;
+    unsigned done;
+} slot_w_t;
+
+/* 段切换：进入 slots: 段；遇到新的顶层键时补齐剩余槽位并退出该段。 */
+static int slot_section(slot_w_t *w, const char *q, size_t trim, int top, int *in_slots,
+                        int *found)
+{
+    if (!top)
+        return 0;
+    if (slot_is_head(q, trim)) {
+        *in_slots = 1;
+        *found = 1;
+        return 0;
+    }
+    if (*in_slots && trim > 0) {
+        if (slot_pad(w->out, w->cap, &w->off, w->done, w->slots) != 0)
+            return -1;
+        *in_slots = 0;
+    }
+    return 0;
+}
+
+/* 单行重写：段内命中槽位键则就地替换值，其余行原样搬运。 */
+static int slot_walk_line(slot_w_t *w, const char *p, const char *le, const char *next,
+                          int *in_slots, int *found)
+{
+    const char *q = p;
+    while (q < le && (*q == ' ' || *q == '\t'))
+        q++;
+    size_t trim = (size_t)(le - q);
+    if (trim > 0 && q[trim - 1] == '\r')
+        trim--;
+    int top = (q == p);
+
+    if (slot_section(w, q, trim, top, in_slots, found) != 0)
+        return -1;
+    if (*in_slots && !top) {
+        int role = slot_key_at(q, q + trim);
+        if (role >= 0) {
+            unsigned r = (unsigned)role;
+            if (slot_line(w->out, w->cap, &w->off, r, svc_slot_get(w->slots, r)) != 0)
+                return -1;
+            w->done |= 1u << r;
+            return 0;
+        }
+    }
+    return slot_put(w->out, w->cap, &w->off, p, (size_t)(next - p));
+}
+
+/* 行切分：返回下一行起点，le 回填本行结束（不含换行）。 */
+static const char *slot_next_line(const char *p, const char *end, const char **le)
+{
+    const char *nl = (const char *)memchr(p, '\n', (size_t)(end - p));
+    *le = nl ? nl : end;
+    return nl ? nl + 1 : end;
+}
+
+/* 收尾：补齐段尾槽位；全文没有 slots 段时在末尾追加一整段。 */
+static int slot_finish(slot_w_t *w, int in_slots, int found)
+{
+    if (in_slots && slot_pad(w->out, w->cap, &w->off, w->done, w->slots) != 0)
+        return -1;
+    if (found)
+        return 0;
+    if (w->off > 0 && w->out[w->off - 1] != '\n' &&
+        slot_put(w->out, w->cap, &w->off, "\n", 1) != 0)
+        return -1;
+    if (slot_put(w->out, w->cap, &w->off, "slots:\n", 7) != 0)
+        return -1;
+    return slot_pad(w->out, w->cap, &w->off, 0, w->slots);
+}
+
 int svc_slot_save(const char *path, const svc_model_slots_t *slots)
 {
     if (!path || !path[0] || !slots)
@@ -629,64 +748,26 @@ int svc_slot_save(const char *path, const svc_model_slots_t *slots)
         AIRY_FREE(src);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
-    size_t off = 0;
     out[0] = '\0';
 
-    unsigned done = 0;
+    slot_w_t w = {out, cap, 0, slots, 0};
     int in_slots = 0;
     int found = 0;
     const char *p = src;
     const char *end = src + n;
 
     while (p < end) {
-        const char *nl = (const char *)memchr(p, '\n', (size_t)(end - p));
-        const char *le = nl ? nl : end;
-        const char *next = nl ? nl + 1 : end;
-        const char *q = p;
-        while (q < le && (*q == ' ' || *q == '\t'))
-            q++;
-        size_t trim = (size_t)(le - q);
-        if (trim > 0 && q[trim - 1] == '\r')
-            trim--;
-        int top = (q == p);
-
-        if (top && trim >= 6 && strncmp(q, "slots:", 6) == 0 &&
-            (trim == 6 || q[6] == ' ' || q[6] == '\t')) {
-            in_slots = 1;
-            found = 1;
-        } else if (in_slots && top && trim > 0) {
-            if (slot_pad(out, cap, &off, done, slots) != 0)
-                goto fail;
-            in_slots = 0;
-        }
-
-        if (in_slots && !top) {
-            int role = slot_key_at(q, q + trim);
-            if (role >= 0) {
-                if (slot_line(out, cap, &off, (unsigned)role, svc_slot_get(slots, (unsigned)role)) !=
-                    0)
-                    goto fail;
-                done |= 1u << role;
-                p = next;
-                continue;
-            }
-        }
-        if (slot_put(out, cap, &off, p, (size_t)(next - p)) != 0)
+        const char *le = NULL;
+        const char *next = slot_next_line(p, end, &le);
+        if (slot_walk_line(&w, p, le, next, &in_slots, &found) != 0)
             goto fail;
         p = next;
     }
 
-    if (in_slots && slot_pad(out, cap, &off, done, slots) != 0)
+    if (slot_finish(&w, in_slots, found) != 0)
         goto fail;
-    if (!found) {
-        if (off > 0 && out[off - 1] != '\n' && slot_put(out, cap, &off, "\n", 1) != 0)
-            goto fail;
-        if (slot_put(out, cap, &off, "slots:\n", 7) != 0 ||
-            slot_pad(out, cap, &off, 0, slots) != 0)
-            goto fail;
-    }
 
-    rc = airy_io_write_file(path, out, off);
+    rc = airy_io_write_file(path, out, w.off);
     AIRY_FREE(out);
     AIRY_FREE(src);
     return rc == 0 ? 0 : AIRY_ERR_IO;
