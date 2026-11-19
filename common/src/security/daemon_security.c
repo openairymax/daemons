@@ -101,7 +101,9 @@ static void sanitize_string(char *output, const char *input, size_t max_len)
 
 int daemon_security_init(const daemon_security_config_t *config, airy_err_t *error)
 {
-    (void)error; /* error reporting via SVC_LOG; out-param reserved */
+    if (error) {
+        *error = AIRY_OK;
+    }
     ensure_mutex_initialized();
     airy_mtx_lock(&g_security_mutex);
     if (g_security_ctx.initialized) {
@@ -157,10 +159,22 @@ int daemon_security_init(const daemon_security_config_t *config, airy_err_t *err
             g_security_ctx.vault = vault;
             SVC_LOG_INFO("daemon_security: vault provider opened");
         } else {
-            g_security_ctx.vault_enabled = false;
+            /* 显式要求 vault 却打不开（如生产缺口令）不是降级条件：
+             * 静默关掉存储会让守护带着无凭据能力继续跑，故障要等到
+             * 首个取凭证请求才暴露。此处直接失败，由引导层拒启。 */
+            if (g_security_ctx.audit_fp) {
+                fclose(g_security_ctx.audit_fp);
+                g_security_ctx.audit_fp = NULL;
+            }
+            AIRY_MEMSET(&g_security_ctx, 0, sizeof(g_security_ctx));
+            airy_mtx_unlock(&g_security_mutex);
             SVC_LOG_ERROR("daemon_security: vault provider open FAILED (rc=%d) "
-                          "— credential storage disabled (fail-closed)",
+                          "— refusing to initialize (fail-closed)",
                           (int)vault_rc);
+            if (error) {
+                *error = vault_rc;
+            }
+            return -1;
         }
     } else if (g_security_ctx.vault_enabled) {
         g_security_ctx.vault_enabled = false;
