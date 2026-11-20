@@ -199,6 +199,24 @@ static approval_gate_verdict_t gate_acl_ok(const tool_metadata_t *meta,
     return APPROVAL_GATE_ALLOWED;
 }
 
+/* 交互审批统一入口：返回 1=已放行 0=继续（未决） -1=已拒绝，
+ * 放行分支的审批来源标记与审计日志只在此处落地一次。 */
+static int gate_ask(approval_gate_t *gate, const char *agent_id, const tool_metadata_t *meta,
+                    const char *params_json, char *approval, size_t cap,
+                    const tool_approval_detail_t *detail, char **out_reason)
+{
+    switch (ask_via_interactive(gate, agent_id, meta, params_json, out_reason)) {
+    case INTERACTIVE_ALLOWED:
+        approval_set(approval, cap, "interactive");
+        log_approved(meta, detail);
+        return 1;
+    case INTERACTIVE_DENIED:
+        return -1;
+    default:
+        return 0;
+    }
+}
+
 /* D-9 高危逐次审批：未显式放行且非 warn 档时必须交互确认，否则 fail-closed。 */
 static approval_gate_verdict_t gate_risk_high(approval_gate_t *gate, const char *agent_id,
                                               const tool_metadata_t *meta,
@@ -207,27 +225,23 @@ static approval_gate_verdict_t gate_risk_high(approval_gate_t *gate, const char 
                                               const tool_approval_detail_t *detail,
                                               char **out_reason)
 {
-    switch (ask_via_interactive(gate, agent_id, meta, params_json, out_reason)) {
-    case INTERACTIVE_ALLOWED:
-        approval_set(approval, cap, "interactive");
-        log_approved(meta, detail);
+    int r = gate_ask(gate, agent_id, meta, params_json, approval, cap, detail, out_reason);
+    if (r > 0)
         return APPROVAL_GATE_ALLOWED;
-    case INTERACTIVE_DENIED:
+    if (r < 0)
         return APPROVAL_GATE_DENIED;
-    case INTERACTIVE_CONTINUE:
-    default:
-        SVC_LOG_ERROR("High-risk tool '%s' denied (fail-closed): %s; pass allow_dangerous "
-                      "or set AIRY_TOOL_RISK_APPROVAL_MODE=warn",
-                      meta->id ? meta->id : "?", risk_reason[0] ? risk_reason : "policy");
-        if (out_reason) {
-            char msg[256];
-            snprintf(msg, sizeof(msg),
-                     "High-risk tool '%s' requires approval (%s); pass allow_dangerous",
-                     meta->id ? meta->id : "?", risk_reason[0] ? risk_reason : "policy");
-            *out_reason = AIRY_STRDUP(msg);
-        }
-        return APPROVAL_GATE_DENIED;
+
+    SVC_LOG_ERROR("High-risk tool '%s' denied (fail-closed): %s; pass allow_dangerous "
+                  "or set AIRY_TOOL_RISK_APPROVAL_MODE=warn",
+                  meta->id ? meta->id : "?", risk_reason[0] ? risk_reason : "policy");
+    if (out_reason) {
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+                 "High-risk tool '%s' requires approval (%s); pass allow_dangerous",
+                 meta->id ? meta->id : "?", risk_reason[0] ? risk_reason : "policy");
+        *out_reason = AIRY_STRDUP(msg);
     }
+    return APPROVAL_GATE_DENIED;
 }
 
 /* 静态审批拒绝：交互审批开启时给用户一次放行机会，否则按拒绝理由收尾。 */
@@ -237,17 +251,11 @@ static approval_gate_verdict_t gate_acl_deny(approval_gate_t *gate, const char *
                                              const tool_approval_detail_t *detail,
                                              char **out_reason)
 {
-    switch (ask_via_interactive(gate, agent_id, meta, params_json, out_reason)) {
-    case INTERACTIVE_ALLOWED:
-        approval_set(approval, cap, "interactive");
-        log_approved(meta, detail);
+    int r = gate_ask(gate, agent_id, meta, params_json, approval, cap, detail, out_reason);
+    if (r > 0)
         return APPROVAL_GATE_ALLOWED;
-    case INTERACTIVE_DENIED:
+    if (r < 0)
         return APPROVAL_GATE_DENIED;
-    case INTERACTIVE_CONTINUE:
-    default:
-        break;
-    }
 
     SVC_LOG_ERROR("Tool approval denied for '%s': %s", meta->name ? meta->name : "?",
                   detail->reason);
