@@ -3,18 +3,19 @@
 
 /**
  * @file agent_review.h
- * @brief 执行中语义复核出口：把 run 产物交 think_d 做 t2 语义审查与 t1-f 终裁。
+ * @brief 执行中语义复核出口：把 run 产物交 think_d 做整链复核并取回判定。
  *
  * 机制与策略分离：复核管线（确定性门禁 → t2 → t1-f）与降级链在 coreloopthree
- * （execution_review），语义判断策略与提示词在 think_d（think.review）。本文件
- * 是二者在生产侧的挂载点：agent_d 决定「何时复核、判定如何收尾」，语义档位
- * 的模型与口径由 think_d 持有；think_d 不可达或未配置模型时管线自行降级。
+ * （execution_review），由 think_d 在本进程内驱动；语义判断策略与提示词同样在
+ * think_d（think.review）。本文件只声明执行体侧的挂载点：agent_d 决定「何时
+ * 复核、判定如何收尾」，不链接机制库、不持有提示词；think_d 不可达或未配置
+ * 模型时返回 SKIP，调用方保持既有结果。
  */
 
 #ifndef AGENT_REVIEW_H
 #define AGENT_REVIEW_H
 
-#include "execution_review.h"
+#include "airy_rt.h"
 
 #include <stddef.h>
 
@@ -27,7 +28,7 @@ typedef struct {
 } agent_review_result_t;
 
 /**
- * @brief 对一次 run 的产物做语义复核。
+ * @brief 对一次 run 的产物做整链语义复核。
  * @param goal 蓝图/任务目标（借用，可 NULL）
  * @param body 产物正文（借用，必填；空正文由门禁直接拒绝）
  * @param artifact_json 产物结构 JSON 串（借用，可 NULL，缺省用正文）
