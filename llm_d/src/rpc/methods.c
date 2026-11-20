@@ -653,32 +653,22 @@ static int llm_stream_callback(const char *chunk, void *user_data)
 static void llm_stream_send_error_frame(airy_sock_t fd, int id, int code, int upstream,
                                         const char *message)
 {
-    cJSON *root = cJSON_CreateObject();
-    cJSON *err;
+    cJSON *idj;
+    cJSON *data = NULL;
     char *body;
     char *frame;
     size_t blen;
 
-    if (!root)
-        return;
-    cJSON_AddStringToObject(root, "jsonrpc", "2.0");
-    err = cJSON_AddObjectToObject(root, "error");
-    if (!err) {
-        cJSON_Delete(root);
-        return;
-    }
-    cJSON_AddNumberToObject(err, "code", code);
-    cJSON_AddStringToObject(err, "message", message ? message : "");
     if (upstream != 0) {
-        cJSON *data = cJSON_AddObjectToObject(err, "data");
-        if (data)
+        data = cJSON_CreateObject();
+        if (data) {
             (void)airy_err_json_put(data, airy_err_class_of((airy_err_t)upstream),
                                     (airy_err_t)upstream, message, NULL);
+        }
     }
-    cJSON_AddNumberToObject(root, "id", id);
-
-    body = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
+    idj = cJSON_CreateNumber(id);
+    body = jsonrpc_create_error_response(idj, code, message ? message : "", data);
+    cJSON_Delete(idj);
     if (!body)
         return;
 
