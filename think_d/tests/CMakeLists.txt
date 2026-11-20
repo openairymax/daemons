@@ -85,6 +85,15 @@ think_add_test(test_think_evolve_map.c)
 think_add_test(test_review_schema.c)
 
 # 0.1.21 R16：执行中复核整链由本 daemon 承载（pipeline 档回归）。
+# review_svc.c 属生成的装配清单（modules/sources.cmake，编入 think_d），
+# 测试直接编入同一源复现 daemon 内整链；仅此处补其私有头路径。
 think_add_test(test_review_pipe.c)
+target_sources(test_think_test_review_pipe PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/review/review_svc.c
+)
+target_include_directories(test_think_test_review_pipe PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../llm_d/include
+    ${CJSON_INCLUDE_DIRS}
+)
 
 enable_testing()
