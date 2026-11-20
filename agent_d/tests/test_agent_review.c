@@ -5,11 +5,12 @@
  * @file test_agent_review.c
  * @brief R16 语义复核挂载点回归：真实 AF_UNIX 假 think_d 往返，非桩。
  *
- * 三条断言分别守护：
- *   T1 管线真的被驱动——t2 判 DRIFT、t1-f 判接受 → DRIFT（未注入 ops 时
- *      机制只会给出 SKIP，用例即转红）；
- *   T2 终裁拒绝——t1-f 判拒绝 → REJECT；
- *   T3 不可达降级——无 think_d 时返回 SKIP 且不阻塞调用方。
+ * 各断言守护：
+ *   T1 挂载点真的走 pipeline 档——请求体必须携带 mode=pipeline，否则
+ *      think_d 侧整链复核不会被驱动；
+ *   T2 判定搬运——DRIFT 与 REJECT 原样回到调用方；
+ *   T3 不可达降级——无 think_d 时返回 SKIP 且不阻塞调用方；
+ *   T4 空正文——门禁前置拒绝，返回 -1 且不发请求。
  */
 
 #include "agent_review.h"
@@ -27,35 +28,31 @@
 
 typedef struct {
     int fd;
-    const char *replies[2];
-    int want;
+    const char *reply;
+    char req[4096];
     int got;
 } srv_t;
 
 static void *srv_run(void *arg)
 {
     srv_t *s = (srv_t *)arg;
-    for (int i = 0; i < s->want; ++i) {
-        int c = accept(s->fd, NULL, NULL);
-        if (c < 0)
-            break;
-        char req[4096];
-        (void)recv(c, req, sizeof(req), 0);
-        const char *rep = s->replies[i];
-        (void)send(c, rep, strlen(rep), 0);
+    int c = accept(s->fd, NULL, NULL);
+    if (c >= 0) {
+        ssize_t n = recv(c, s->req, sizeof(s->req) - 1, 0);
+        if (n > 0)
+            s->req[n] = '\0';
+        (void)send(c, s->reply, strlen(s->reply), 0);
         close(c);
-        s->got++;
+        s->got = 1;
     }
     return NULL;
 }
 
-static int srv_open(srv_t *s, const char *path, const char *t2, const char *t1f)
+static int srv_open(srv_t *s, const char *path, const char *reply)
 {
     struct sockaddr_un a;
     memset(s, 0, sizeof(*s));
-    s->replies[0] = t2;
-    s->replies[1] = t1f;
-    s->want = t1f ? 2 : 1;
+    s->reply = reply;
     s->fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (s->fd < 0)
         return -1;
@@ -76,11 +73,11 @@ static void srv_close(srv_t *s, const char *path)
     unlink(path);
 }
 
-static void test_pipeline(const char *path, const char *t2, const char *t1f, int want)
+static void test_pipeline(const char *path, const char *reply, int want)
 {
     srv_t s;
     pthread_t th;
-    if (srv_open(&s, path, t2, t1f) != 0) {
+    if (srv_open(&s, path, reply) != 0) {
         fprintf(stderr, "FAIL: mock think_d bind %s\n", path);
         exit(1);
     }
@@ -89,8 +86,12 @@ static void test_pipeline(const char *path, const char *t2, const char *t1f, int
     agent_review_result_t rv;
     int rc = agent_rev_apply("goal-x", "body-y", "{\"text\":\"body-y\"}", "{\"ok\":true}", &rv);
 
-    srv_close(&s, path);
     pthread_join(th, NULL);
+    srv_close(&s, path);
+    if (!s.got || !strstr(s.req, "\"mode\":\"pipeline\"")) {
+        fprintf(stderr, "FAIL: request did not ask for the pipeline: %s\n", s.req);
+        exit(1);
+    }
     if (rc != 0 || rv.verdict != want) {
         fprintf(stderr, "FAIL: rc=%d verdict=%d want=%d reason=%s\n", rc, rv.verdict, want,
                 rv.reason);
@@ -113,12 +114,10 @@ int main(void)
 
     printf("  test_pipeline_drift...\n");
     test_pipeline(sock, "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"verdict\":1,\"reason\":\"d1\"}}",
-                  "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"verdict\":0,\"reason\":\"ok\"}}",
                   AIRY_REVIEW_DRIFT);
 
     printf("  test_pipeline_reject...\n");
-    test_pipeline(sock, "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"verdict\":1,\"reason\":\"d2\"}}",
-                  "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"verdict\":1,\"reason\":\"bad\"}}",
+    test_pipeline(sock, "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"verdict\":2,\"reason\":\"bad\"}}",
                   AIRY_REVIEW_REJECT);
 
     printf("  test_degrade_unreachable...\n");

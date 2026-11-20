@@ -83,4 +83,7 @@ think_add_test(test_think_evolve_map.c)
 # 0.1.21 C-4：双思考 B 侧 schema 校验与正文读取黄金集。
 think_add_test(test_review_schema.c)
 
+# 0.1.21 R16：执行中复核整链由本 daemon 承载（pipeline 档回归）。
+think_add_test(test_review_pipe.c)
+
 enable_testing()

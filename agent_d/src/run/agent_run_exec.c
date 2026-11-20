@@ -830,8 +830,9 @@ static void run_verify(run_ctx_t *c)
 }
 
 /* R16 / C-4：判据复核通过后再做一次语义复核（t2 语义审查 + t1-f 终裁）。
- * 语义判断在 think_d（think.review），管线与降级链在 coreloopthree；think_d
- * 不可达或无模型时降级 SKIP，既有结果不变。终裁拒绝按未达判据收尾。 */
+ * 整链由 think_d 承载（think.review pipeline 档，机制在 coreloopthree）；
+ * think_d 不可达或无模型时降级 SKIP，既有结果不变。终裁拒绝按未达判据
+ * 收尾。 */
 static void run_review(run_ctx_t *c)
 {
     cJSON *art = cJSON_CreateObject();
