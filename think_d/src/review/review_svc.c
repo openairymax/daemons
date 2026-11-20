@@ -10,15 +10,16 @@
  * CLI 经 gateway 调用 think.review，满足"策略迁 daemon、机制留 core"。
  *
  * execution_review 机制本体（gate→t2→t1-f 编排）留 coreloopthree 供
- * work_hall 复核回调使用；此处仅提供语义判断（提示词工程 + 模型路由 +
- * LLM 调用）。模型路由取 think_d 已配置的 GRAD 角色模型：t2 用
- * think2_slow_model（A 角色），t1-f 用 think1_fast_model（B 角色）；
- * 未显式配置时返回 verdict=-1，由机制层走既定降级（gate-only / adopt
- * t2），杜绝与主生成同模型自审自签。
+ * work_hall 复核回调使用；本 daemon 用同一机制承载执行中复核（本文件
+ * pipeline 档），并对外只暴露语义判断（t2 / t1-f 档）。模型路由取 think_d
+ * 已配置的 GRAD 角色模型：t2 用 think2_slow_model（A 角色），t1-f 用
+ * think1_fast_model（B 角色）；未显式配置时返回 verdict=-1，由机制层走
+ * 既定降级（gate-only / adopt t2），杜绝与主生成同模型自审自签。
  */
 
 #include "airy_memory.h"
 #include "daemon_platform_ext.h"
+#include "execution_review.h"
 #include "jsonrpc_helpers.h"
 #include "llm_svc_adapter.h"
 #include "llm_service.h"
@@ -231,16 +232,75 @@ static int review_t1f(const char *gate_reason, int drift, const char *node_goal,
     return rc;
 }
 
-/* think.review：params {stage: t2|t1f, node_goal?, output_json?,
- * output_body?（C-4：产物正文，B 侧必读）, output_signatures?[],
- * gate_reason?(t1f), drift?(t1f)}
- * result: {verdict: -1|0|1, reason} */
+/* pipeline 档：调用方一次 RPC 让本 daemon 在进程内跑完整复核链
+ * （确定性门禁 → t2 → t1-f）。执行体因此只持有挂载点，不必直挂
+ * coreloopthree 机制库（G13 扇出纪律）。 */
+typedef struct {
+    const char *goal;
+    const char *body;
+    const char *json;
+} rv_pipe_t;
+
+static int rv_pipe_t2(const airy_review_input_t *in, const char *fact, char *reason,
+                      size_t sz, void *ud)
+{
+    (void)in;
+    (void)fact;
+    const rv_pipe_t *p = (const rv_pipe_t *)ud;
+    return review_t2(p->goal, p->json, p->body, NULL, reason, sz);
+}
+
+static int rv_pipe_t1f(const airy_review_input_t *in, int drift, const char *gate,
+                       char *reason, size_t sz, void *ud)
+{
+    (void)in;
+    const rv_pipe_t *p = (const rv_pipe_t *)ud;
+    return review_t1f(gate, drift, p->goal, p->json, p->body, reason, sz);
+}
+
+/* 跑一次同步管线；返回判定值（-1 = 机制不可用，调用方保持既有结果）。 */
+static int rv_pipeline(const char *goal, const char *body, const char *json,
+                       const char *facts, char *reason, size_t sz)
+{
+    airy_review_config_t cfg;
+    __builtin_memset(&cfg, 0, sizeof(cfg));
+    cfg.fact_base_json = facts;
+    cfg.require_output_nonempty = 1;
+
+    airy_execution_review_t *rv = airy_execution_review_create(&cfg);
+    if (!rv) {
+        SVC_LOG_WARN("review pipeline: reviewer create failed");
+        return -1;
+    }
+
+    rv_pipe_t p = {goal, body, json};
+    airy_review_semantic_ops_t ops;
+    __builtin_memset(&ops, 0, sizeof(ops));
+    ops.t2_review = rv_pipe_t2;
+    ops.t1f_adjudicate = rv_pipe_t1f;
+    ops.user_data = &p;
+    airy_execution_review_set_semantic_ops(rv, &ops);
+
+    airy_review_input_t in;
+    __builtin_memset(&in, 0, sizeof(in));
+    in.node_goal = goal;
+    in.output_json = json;
+
+    airy_review_verdict_t v = AIRY_REVIEW_SKIP;
+    airy_err_t e = airy_execution_review_run(rv, &in, &v, reason, sz);
+    airy_execution_review_destroy(rv);
+    if (e != AIRY_SUCCESS)
+        return -1;
+    return (int)v;
+}
+
+/* think.review：params {mode?: pipeline, stage?: t2|t1f, node_goal?,
+ * output_json?, output_body?（C-4：产物正文，B 侧必读）, output_signatures?[],
+ * gate_reason?(t1f), drift?(t1f), facts_json?(pipeline)}
+ * result: {verdict: -1|0..3, reason} */
 void review_svc_process(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
-    cJSON *stage = cJSON_GetObjectItem(params, "stage");
-    JSONRPC_REQUIRE(cJSON_IsString(stage) && stage->valuestring && stage->valuestring[0], client_fd,
-                    "Missing stage string", id);
     cJSON *ng = cJSON_GetObjectItem(params, "node_goal");
     cJSON *oj = cJSON_GetObjectItem(params, "output_json");
     cJSON *ob = cJSON_GetObjectItem(params, "output_body");
@@ -250,20 +310,31 @@ void review_svc_process(cJSON *params, int id, void *user_data)
 
     int verdict = -1;
     char reason[REVIEW_REASON_MAX] = "";
-    if (strcmp(stage->valuestring, "t2") == 0) {
-        cJSON *sigs = cJSON_GetObjectItem(params, "output_signatures");
-        verdict = review_t2(node_goal, output_json, output_body, sigs, reason,
-                            sizeof(reason));
-    } else if (strcmp(stage->valuestring, "t1f") == 0) {
-        cJSON *gr = cJSON_GetObjectItem(params, "gate_reason");
-        cJSON *df = cJSON_GetObjectItem(params, "drift");
-        const char *gate_reason = cJSON_IsString(gr) ? gr->valuestring : NULL;
-        int drift = cJSON_IsNumber(df) ? (int)df->valuedouble : 0;
-        verdict = review_t1f(gate_reason, drift, node_goal, output_json, output_body,
-                             reason, sizeof(reason));
+    cJSON *md = cJSON_GetObjectItem(params, "mode");
+    if (cJSON_IsString(md) && md->valuestring && strcmp(md->valuestring, "pipeline") == 0) {
+        cJSON *fj = cJSON_GetObjectItem(params, "facts_json");
+        const char *facts = cJSON_IsString(fj) ? fj->valuestring : NULL;
+        verdict = rv_pipeline(node_goal, output_body, output_json, facts, reason,
+                              sizeof(reason));
     } else {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Unknown stage", id);
-        return;
+        cJSON *stage = cJSON_GetObjectItem(params, "stage");
+        JSONRPC_REQUIRE(cJSON_IsString(stage) && stage->valuestring && stage->valuestring[0],
+                        client_fd, "Missing stage string", id);
+        if (strcmp(stage->valuestring, "t2") == 0) {
+            cJSON *sigs = cJSON_GetObjectItem(params, "output_signatures");
+            verdict = review_t2(node_goal, output_json, output_body, sigs, reason,
+                                sizeof(reason));
+        } else if (strcmp(stage->valuestring, "t1f") == 0) {
+            cJSON *gr = cJSON_GetObjectItem(params, "gate_reason");
+            cJSON *df = cJSON_GetObjectItem(params, "drift");
+            const char *gate_reason = cJSON_IsString(gr) ? gr->valuestring : NULL;
+            int drift = cJSON_IsNumber(df) ? (int)df->valuedouble : 0;
+            verdict = review_t1f(gate_reason, drift, node_goal, output_json, output_body,
+                                 reason, sizeof(reason));
+        } else {
+            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Unknown stage", id);
+            return;
+        }
     }
 
     cJSON *res = cJSON_CreateObject();

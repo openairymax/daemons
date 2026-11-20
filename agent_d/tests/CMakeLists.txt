@@ -46,8 +46,6 @@ set(AGENT_COMMON_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/run
-    # R16: 复核管线契约（execution_review.h）
-    ${ATOMIC_DIR}/coreloopthree/include
     ${COMMONS_DIR}
     ${COMMONS_DIR}/include
     ${COMMONS_DIR}/platform/include
@@ -120,11 +118,8 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
 
     target_include_directories(test_agent_${TEST_NAME} PRIVATE ${AGENT_COMMON_INCLUDES})
 
-    # 链接 airy_agent_service 静态库（已含 service.c）；R16 复核管线在
-    # airy_coreloopthree。
     target_link_libraries(test_agent_${TEST_NAME} PRIVATE
         airy_agent_service
-        airy_coreloopthree
         svc_common
         airy_common
         Threads::Threads
