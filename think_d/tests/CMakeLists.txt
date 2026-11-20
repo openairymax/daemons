@@ -27,6 +27,7 @@ function(think_add_test TEST_SRC)
     target_include_directories(test_think_${TEST_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/review
         ${DAEMON_COMMON_INCLUDE_DIR}
         ${COMMONS_INCLUDE_DIR}
         ${COMMONS_INCLUDE_DIR}/platform/include
