@@ -182,8 +182,8 @@ static void approval_set(char *approval, size_t cap, const char *value)
 }
 
 approval_gate_verdict_t gate_ask(approval_gate_t *gate, const char *agent_id,
-                                          const tool_metadata_t *meta,
-                                          const char *params_json, char **out_reason)
+                                 const tool_metadata_t *meta, const char *params_json,
+                                 char **out_reason)
 {
     return gate_ask_ex(gate, agent_id, meta, params_json, 0, NULL, 0, out_reason);
 }
@@ -201,9 +201,9 @@ static approval_gate_verdict_t gate_acl_ok(const tool_metadata_t *meta,
 
 /* 交互审批统一入口：返回 1=已放行 0=继续（未决） -1=已拒绝，
  * 放行分支的审批来源标记与审计日志只在此处落地一次。 */
-static int gate_ask(approval_gate_t *gate, const char *agent_id, const tool_metadata_t *meta,
-                    const char *params_json, char *approval, size_t cap,
-                    const tool_approval_detail_t *detail, char **out_reason)
+static int ask_interactive(approval_gate_t *gate, const char *agent_id,
+                           const tool_metadata_t *meta, const char *params_json, char *approval,
+                           size_t cap, const tool_approval_detail_t *detail, char **out_reason)
 {
     switch (ask_via_interactive(gate, agent_id, meta, params_json, out_reason)) {
     case INTERACTIVE_ALLOWED:
@@ -225,7 +225,7 @@ static approval_gate_verdict_t gate_risk_high(approval_gate_t *gate, const char 
                                               const tool_approval_detail_t *detail,
                                               char **out_reason)
 {
-    int r = gate_ask(gate, agent_id, meta, params_json, approval, cap, detail, out_reason);
+    int r = ask_interactive(gate, agent_id, meta, params_json, approval, cap, detail, out_reason);
     if (r > 0)
         return APPROVAL_GATE_ALLOWED;
     if (r < 0)
@@ -251,7 +251,7 @@ static approval_gate_verdict_t gate_acl_deny(approval_gate_t *gate, const char *
                                              const tool_approval_detail_t *detail,
                                              char **out_reason)
 {
-    int r = gate_ask(gate, agent_id, meta, params_json, approval, cap, detail, out_reason);
+    int r = ask_interactive(gate, agent_id, meta, params_json, approval, cap, detail, out_reason);
     if (r > 0)
         return APPROVAL_GATE_ALLOWED;
     if (r < 0)
