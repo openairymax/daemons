@@ -15,6 +15,7 @@
 #include "airy_prov/secrets.h" /* explicit_bzero SSoT shim：macOS/Windows 无系统声明 */
 #include "airy_prov/provider_http.h"
 #include "airy_prov/provider_retry.h"
+#include "platform_misc.h" /* airy_file_exists：CA 包位置探测（跨平台存在性判据） */
 #include "svc_logger.h"
 #include "sync.h"
 
@@ -66,6 +67,25 @@ static const char *env_first_set(const char *const *names, size_t count)
         const char *v = getenv(names[i]);
         if (v && v[0])
             return v;
+    }
+    return NULL;
+}
+
+/* 发行包自带 libcurl/libgnutls，其编译期默认 CA 路径取自构建机（Debian 系
+ * /etc/ssl/certs/ca-certificates.crt）。RHEL 系（含 AirymaxOS）无此路径，
+ * TLS 握手以 CACERT_BADFILE 失败，而同一凭据直连可得 200。故无环境覆盖时
+ * 按标准位置探测，命中即以 CAINFO 显式指定，使二进制不依赖构建机布局。 */
+static const char *ca_bundle_probe(void)
+{
+    static const char *const paths[] = {
+        "/etc/pki/tls/certs/ca-bundle.crt",
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+        "/etc/ssl/cert.pem",
+    };
+    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); ++i) {
+        if (airy_file_exists(paths[i]))
+            return paths[i];
     }
     return NULL;
 }
@@ -122,6 +142,8 @@ void provider_http_setup(CURL *curl, double timeout_sec, double read_idle_sec)
 
     static const char *const ca_names[] = {"AIRY_HTTP_CAINFO", "CURL_CA_BUNDLE", "SSL_CERT_FILE"};
     const char *ca = env_first_set(ca_names, sizeof(ca_names) / sizeof(ca_names[0]));
+    if (!ca)
+        ca = ca_bundle_probe();
     if (ca)
         curl_easy_setopt(curl, CURLOPT_CAINFO, ca);
 }
