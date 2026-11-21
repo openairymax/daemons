@@ -26,6 +26,7 @@
 #include "gateway_d_internal.h"
 #include "logging.h"
 #include "daemon_platform_ext.h"
+#include "platform_paths.h"
 #include "svc_common.h"
 #include "svc_logger.h"
 #include "error.h"
@@ -40,6 +41,7 @@
 #endif
 
 #include <signal.h>
+#include <stdio.h> /* fopen/fprintf：运行期端口事实发布 */
 #ifndef _WIN32
 #include <unistd.h> /* write() in async-signal-safe handler */
 #endif
@@ -248,11 +250,38 @@ static void gw_proto_stop(void)
 #endif
 }
 
+/* 运行期端口事实由绑定方发布：run/gateway.port 是输出而非输入。bootstrap /
+ * supervisor 直启路径不经过启动器，若不自发布，按该文件解析端点的客户端会
+ * 沿用上一次栈的陈旧端口（实测：文件 8080，实监听 2027）。 */
+static void gw_publish_port(uint16_t port)
+{
+    const char *dir = airy_runtime_dir();
+    char path[512];
+    FILE *fp;
+
+    if (!dir || !*dir)
+        return;
+    if (snprintf(path, sizeof(path), "%s/gateway.port", dir) >= (int)sizeof(path)) {
+        SVC_LOG_WARN("runtime dir too long, gateway port unpublished");
+        return;
+    }
+    fp = fopen(path, "w");
+    if (!fp) {
+        SVC_LOG_WARN("cannot publish gateway port to %s", path);
+        return;
+    }
+    fprintf(fp, "%u\n", (unsigned)port);
+    if (fclose(fp) != 0)
+        SVC_LOG_WARN("cannot flush gateway port file %s", path);
+}
+
 void gw_sd_announce(gateway_service_t service)
 {
     /* 端点摘要与 SD/IPC 注册必须读 service 实际生效配置（bind 侧
      * fail-closed 收敛发生在 start 内部，本地 config 副本不反映改写） */
     const gateway_service_config_t *run_cfg = gateway_get_config(service);
+
+    gw_publish_port(run_cfg->http.port);
 
     SVC_LOG_INFO("AgentRT Gateway Daemon started");
     SVC_LOG_INFO("  HTTP:     %s:%d %s", run_cfg->http.host, run_cfg->http.port,
