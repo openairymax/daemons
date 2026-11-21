@@ -30,6 +30,7 @@
 #include "svc_common.h"
 #include "svc_logger.h"
 #include "error.h"
+#include "io.h"
 
 #include "gateway_protocol_router.h"
 #include "gateway_mcp_server.h"
@@ -41,7 +42,7 @@
 #endif
 
 #include <signal.h>
-#include <stdio.h> /* fopen/fprintf：运行期端口事实发布 */
+#include <stdio.h> /* snprintf：运行期端口事实的文本化 */
 #ifndef _WIN32
 #include <unistd.h> /* write() in async-signal-safe handler */
 #endif
@@ -257,7 +258,8 @@ static void gw_publish_port(uint16_t port)
 {
     const char *dir = airy_runtime_dir();
     char path[512];
-    FILE *fp;
+    char buf[16];
+    int n;
 
     if (!dir || !*dir)
         return;
@@ -265,14 +267,11 @@ static void gw_publish_port(uint16_t port)
         SVC_LOG_WARN("runtime dir too long, gateway port unpublished");
         return;
     }
-    fp = fopen(path, "w");
-    if (!fp) {
+    /* 读者（CLI / 启动器 / 洁净房用例）与本进程无同步：走同目录 tmp +
+     * rename 落地，任何人读到的要么是旧端口、要么是新端口，不会是半截数字。 */
+    n = snprintf(buf, sizeof(buf), "%u\n", (unsigned)port);
+    if (n <= 0 || airy_io_write_file(path, buf, (size_t)n) != 0)
         SVC_LOG_WARN("cannot publish gateway port to %s", path);
-        return;
-    }
-    fprintf(fp, "%u\n", (unsigned)port);
-    if (fclose(fp) != 0)
-        SVC_LOG_WARN("cannot flush gateway port file %s", path);
 }
 
 void gw_sd_announce(gateway_service_t service)
