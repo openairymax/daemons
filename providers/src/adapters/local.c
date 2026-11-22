@@ -169,7 +169,9 @@ static void local_destroy(provider_ctx_t *ctx_ptr)
  * Ollama 专有扩展（D3）：keep_alive 为 Ollama 顶层扩展字段（Chat 兼容
  * 端点受支持），默认 5min 卸载导致「间隔后首请求」冷加载尖峰，此处置
  * "30m" 摊薄重载。num_ctx 不在 Chat 兼容端点生效（官方文档明确该端点
- * 不提供上下文大小设置），num_predict 已由顶层 max_tokens 覆盖，故均不注入。
+ * 不提供上下文大小设置）：上下文窗口由托管启动参数 -c 在进程启动时确定，
+ * 取值来自 model.yaml 的 context_window（airy_cli mr_sync 装配），故此处
+ * 不注入 num_ctx 是端点契约而非遗漏；num_predict 已由顶层 max_tokens 覆盖。
  * 常量置本件（线格式扩展面），不新增用户配置面。 */
 #define LOCAL_EXTRA_PARAMS "{\"keep_alive\":\"30m\"}"
 
