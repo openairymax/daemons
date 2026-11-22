@@ -34,6 +34,9 @@ typedef struct {
     int *model_max_output;
     /* 与 models 同下标对齐的每模型调用方并发预算（D2-9④，0 = 未配置）。 */
     int *model_max_concurrent;
+    /* 与 models 同下标对齐的每模型采样覆盖（-1 = 未声明）。 */
+    float *model_temperature;
+    float *model_top_p;
     /* B-1：能力位快照（registry 装配时从 provider_config_t 复制）。 */
     provider_caps_t hw;
 } provider_t;
@@ -41,6 +44,9 @@ typedef struct {
 /* 查 provider 对某模型的调用方并发预算（0 = 未配置）。纯 provider_t 表查询，
  * 不触及 registry 状态，故归位属主域此处。 */
 int prov_max_conc(const provider_t *prov, const char *model);
+
+/* 查某模型的采样覆盖；*temp / *top_p 输出 -1 表示未声明。 */
+void prov_model_samp(const provider_t *prov, const char *model, float *temp, float *top_p);
 
 #ifdef __cplusplus
 }

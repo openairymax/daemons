@@ -29,6 +29,8 @@ static void free_provider_fields(provider_config_t *prov)
     }
     AIRY_FREE((void *)prov->model_max_output);
     AIRY_FREE((void *)prov->model_max_concurrent);
+    AIRY_FREE((void *)prov->model_temperature);
+    AIRY_FREE((void *)prov->model_top_p);
     __builtin_memset(prov, 0, sizeof(*prov));
 }
 
@@ -77,8 +79,19 @@ static int *ints_dup(const int *src, size_t n)
     return dup;
 }
 
-/* 模型表与两张 per-model 整数表同长同序，长度都由模型表本身决定；空表
- * 只复制空壳，不分配长度为零的整数表。 */
+static float *floats_dup(const float *src, size_t n)
+{
+    float *dup = (float *)AIRY_CALLOC(n, sizeof(float));
+
+    if (!dup)
+        return NULL;
+    for (size_t i = 0; i < n; ++i)
+        dup[i] = src[i];
+    return dup;
+}
+
+/* 模型表与四张 per-model 副表同长同序，长度都由模型表本身决定；空表
+ * 只复制空壳，不分配长度为零的副表。 */
 static void models_take(const provider_config_t *src, provider_config_t *d)
 {
     if (!src->models)
@@ -92,6 +105,10 @@ static void models_take(const provider_config_t *src, provider_config_t *d)
         d->model_max_output = ints_dup(src->model_max_output, n);
     if (src->model_max_concurrent)
         d->model_max_concurrent = ints_dup(src->model_max_concurrent, n);
+    if (src->model_temperature)
+        d->model_temperature = floats_dup(src->model_temperature, n);
+    if (src->model_top_p)
+        d->model_top_p = floats_dup(src->model_top_p, n);
 }
 
 static provider_config_t provider_config_dup(const provider_config_t *src)

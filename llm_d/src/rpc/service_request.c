@@ -352,6 +352,22 @@ void resolve_gen_params(const llm_service_t *svc, const provider_t *prov,
     }
 }
 
+/* 采样覆盖唯一解析点：请求显式值 > 模型条目 > 缺省（envelope 兜底）。
+ * temperature 用 temperature_set 判定，显式 0 是确定性意图而非缺省；
+ * top_p 沿用 ">0 才下发" 语义，0 视为未声明。 */
+void resolve_sample(const provider_t *prov, const char *model, llm_request_config_t *cfg)
+{
+    float temp, top_p;
+
+    prov_model_samp(prov, model, &temp, &top_p);
+    if (!cfg->temperature_set && temp >= 0.0f) {
+        cfg->temperature = temp;
+        cfg->temperature_set = true;
+    }
+    if (cfg->top_p <= 0.0f && top_p > 0.0f)
+        cfg->top_p = top_p;
+}
+
 /* 0.1.17：上游因输出上限截断必须可判读，否则表现为"回答莫名中断"。
  * P-E：上限归因决定建议指向——调用方显式设的上限（如 1-token 冒烟探针）
  * 被兑现不是配置缺陷，不应每请求 WARN 并误导去改 model.yaml；只有模型/

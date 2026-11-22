@@ -7,6 +7,7 @@
 #include "gateway_proto_types.h"
 
 #include "airy_abi.h"
+#include "airy_defaults.h"
 
 AIRY_ABI_BEGIN
 
@@ -25,7 +26,7 @@ typedef struct {
 #define GW_LLM_API_CONFIG_DEFAULTS  \
     {.default_model = "",           \
      .max_tokens_default = 4096,    \
-     .temperature_default = 0.7,    \
+     .temperature_default = AIRY_LLM_DEFAULT_TEMPERATURE, \
      .top_p_default = 1.0,          \
      .rate_limit_rpm = 60,          \
      .retry_max = 3,                \

@@ -53,6 +53,15 @@ static void check_bit(const char *name, bool got, bool want)
     check_int(name, got ? 1 : 0, want ? 1 : 0);
 }
 
+static void check_float(const char *name, float got, float want)
+{
+    test_count++;
+    if (got < want - 0.0005f || got > want + 0.0005f) {
+        printf("    FAIL: %s: got %f, want %f\n", name, (double)got, (double)want);
+        fail_count++;
+    }
+}
+
 static void free_providers(provider_config_t *provs, size_t n)
 {
     for (size_t i = 0; i < n; ++i) {
@@ -68,6 +77,8 @@ static void free_providers(provider_config_t *provs, size_t n)
         }
         AIRY_FREE(provs[i].model_max_output);
         AIRY_FREE(provs[i].model_max_concurrent);
+        AIRY_FREE((void *)provs[i].model_temperature);
+        AIRY_FREE((void *)provs[i].model_top_p);
     }
     AIRY_FREE(provs);
 }
@@ -411,6 +422,54 @@ static int case_hw_undecl(const char *path)
     return 0;
 }
 
+/* t11：采样覆盖落位与哨兵：未声明/非法值保持 -1，合法值原样贯通到
+ *       provider 的每模型副表（声明点与消费点必须同源）。 */
+static const char kSampling[] = "models:\n"
+                                "  - name: s1\n"
+                                "    model_id: s1\n"
+                                "    provider: prov\n"
+                                "    base_url: http://127.0.0.1:9/v1\n"
+                                "    temperature: 0.15\n"
+                                "    top_p: 0.8\n"
+                                "  - name: s2\n"
+                                "    model_id: s2\n"
+                                "    provider: prov\n"
+                                "    base_url: http://127.0.0.1:9/v1\n"
+                                "  - name: s3\n"
+                                "    model_id: s3\n"
+                                "    provider: prov\n"
+                                "    base_url: http://127.0.0.1:9/v1\n"
+                                "    temperature: 5\n"
+                                "    top_p: 0\n";
+
+static int case_sampling(const char *path)
+{
+    svc_yaml_state_t st;
+    memset(&st, 0, sizeof(st));
+    if (put_file(path, kSampling) != 0)
+        return 1;
+    check_int("samp.rc", svc_yaml_load_state(path, &st), 0);
+    check_int("samp.count", (int)st.model_count, 3);
+    check_float("samp.m1.temp", st.models[0].temperature, 0.15f);
+    check_float("samp.m1.top_p", st.models[0].top_p, 0.8f);
+    check_float("samp.m2.temp", st.models[1].temperature, -1.0f);
+    check_float("samp.m3.temp", st.models[2].temperature, -1.0f);
+    check_float("samp.m3.top_p", st.models[2].top_p, -1.0f);
+
+    provider_config_t *sp = NULL;
+    size_t sn = 0;
+    check_int("samp.agg.rc", svc_load_model_config_yaml(path, &sp, &sn), 0);
+    check_int("samp.agg.count", (int)sn, 1);
+    if (sp && sn == 1) {
+        check_int("samp.agg.models", (int)(sp[0].models[0] != NULL), 1);
+        check_float("samp.agg.temp", sp[0].model_temperature[0], 0.15f);
+        check_float("samp.agg.top_p", sp[0].model_top_p[0], 0.8f);
+        check_float("samp.agg.miss", sp[0].model_temperature[1], -1.0f);
+        free_providers(sp, sn);
+    }
+    return 0;
+}
+
 int main(void)
 {
     char path[256];
@@ -420,7 +479,7 @@ int main(void)
 
     if (case_caps(path) || case_unknown_key(path) || case_provision(path) ||
         case_missing(path) || case_full_rows(path) || case_hw_decl(path) ||
-        case_hw_undecl(path))
+        case_hw_undecl(path) || case_sampling(path))
         return 1;
 
     remove(path);

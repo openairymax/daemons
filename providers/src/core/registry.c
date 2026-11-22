@@ -67,6 +67,18 @@ static int *ints_dup(const int *src, size_t n)
     return dst;
 }
 
+/* 与 models 同长同序的浮点副表（采样覆盖，-1 为未声明哨兵）。 */
+static float *floats_dup(const float *src, size_t n)
+{
+    float *dst = AIRY_CALLOC(n + 1, sizeof(*dst));
+
+    if (!dst)
+        return NULL;
+    for (size_t j = 0; j < n; ++j)
+        dst[j] = src[j];
+    return dst;
+}
+
 static void models_free(char **models)
 {
     if (!models)
@@ -111,6 +123,12 @@ static int provider_build(const provider_config_t *pcfg, provider_t *slot)
     int *cncs = (models && pcfg->model_max_concurrent && cnt > 0)
                     ? ints_dup(pcfg->model_max_concurrent, cnt)
                     : NULL;
+    float *tmps = (models && pcfg->model_temperature && cnt > 0)
+                      ? floats_dup(pcfg->model_temperature, cnt)
+                      : NULL;
+    float *tps = (models && pcfg->model_top_p && cnt > 0)
+                     ? floats_dup(pcfg->model_top_p, cnt)
+                     : NULL;
     char *name = AIRY_STRDUP(pcfg->name);
 
     if (!name) {
@@ -118,6 +136,8 @@ static int provider_build(const provider_config_t *pcfg, provider_t *slot)
         models_free(models);
         AIRY_FREE(caps);
         AIRY_FREE(cncs);
+        AIRY_FREE(tmps);
+        AIRY_FREE(tps);
         adapter->destroy(ctx);
         return -1;
     }
@@ -128,6 +148,8 @@ static int provider_build(const provider_config_t *pcfg, provider_t *slot)
     slot->models = models;
     slot->model_max_output = caps;
     slot->model_max_concurrent = cncs;
+    slot->model_temperature = tmps;
+    slot->model_top_p = tps;
     slot->hw = pcfg->hw;
     return 0;
 }
@@ -190,6 +212,8 @@ void provider_registry_destroy(provider_registry_t *reg)
             }
             AIRY_FREE(p->model_max_output);
             AIRY_FREE(p->model_max_concurrent);
+            AIRY_FREE(p->model_temperature);
+            AIRY_FREE(p->model_top_p);
         }
         AIRY_FREE(reg->providers);
         reg->providers = NULL;
