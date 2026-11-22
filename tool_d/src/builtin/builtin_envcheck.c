@@ -13,9 +13,7 @@
 #include "builtin/builtin_envcheck_internal.h"
 
 #include "builtin/builtin_limits_internal.h"
-
 #include "platform_paths.h"
-
 #ifndef _WIN32
 
 #include <strings.h>
@@ -111,7 +109,7 @@ int env_probe_program(const char *name)
     if (!name || !name[0])
         return 0;
     if (strchr(name, '/'))
-        return access(name, X_OK) == 0 ? 1 : 0;
+        return access(name, X_OK) == 0;
     return env_path_has(name);
 }
 
