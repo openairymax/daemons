@@ -299,13 +299,18 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
     char *history_json = (hist && cJSON_IsArray(hist) && cJSON_GetArraySize(hist) > 0)
                              ? cJSON_PrintUnformatted(hist)
                              : NULL;
+    /* Subagent lineage (§25.6): optional per-request parent task identity,
+     * forwarded to the runner so child tasks stay correlated with the task
+     * that spawned them. Absent for top-level invokes. */
+    cJSON *parent = cJSON_GetObjectItem(params, "parent_task_id");
+    const char *parent_task_id = (parent && cJSON_IsString(parent)) ? parent->valuestring : NULL;
 
     uint64_t perf_t0 = perf_now_us();
     char *out_output = NULL;
     const char *workspace_dir = invoke_workspace(params);
     int ret = agent_service_invoke(g_service, agent_id->valuestring, input_str, input_len,
-                                   workspace_dir, session_id, history_json, timeout_s, token,
-                                   &out_output);
+                                   workspace_dir, session_id, history_json, parent_task_id,
+                                   timeout_s, token, &out_output);
     AIRY_FREE(history_json);
 
     log_if_slow("agent.invoke", perf_t0, agent_id->valuestring);

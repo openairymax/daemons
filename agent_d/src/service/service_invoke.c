@@ -94,7 +94,7 @@ static void inv_add_history(cJSON *req, const char *history_json)
  * interleaved line. */
 static int inv_send(agent_entry_internal_t *agent, const char *agent_id, const char *input,
                     const char *workspace_dir, const char *session_id,
-                    const char *history_json)
+                    const char *history_json, const char *parent_task_id)
 {
     cJSON *req = cJSON_CreateObject();
     cJSON_AddStringToObject(req, "agent_id", agent_id);
@@ -109,6 +109,10 @@ static int inv_send(agent_entry_internal_t *agent, const char *agent_id, const c
      * rebuilds the execution context per request (S-P1-19). */
     if (session_id && session_id[0])
         cJSON_AddStringToObject(req, "session_id", session_id);
+    /* Subagent lineage (§25.6): the parent task identity reaches the runner
+     * so a child task can be correlated with the task that spawned it. */
+    if (parent_task_id && parent_task_id[0])
+        cJSON_AddStringToObject(req, "parent_task_id", parent_task_id);
     inv_add_history(req, history_json);
     char *req_str = cJSON_PrintUnformatted(req);
     cJSON_Delete(req);
@@ -172,10 +176,11 @@ static int inv_take(cJSON *resp, const char *raw, char **out_output)
  * unusable. */
 static int inv_child(agent_service_t *svc, agent_entry_internal_t *agent, const char *agent_id,
                      const char *input, const char *workspace_dir, const char *session_id,
-                     const char *history_json, int read_timeout_s,
+                     const char *history_json, const char *parent_task_id, int read_timeout_s,
                      airy_cancel_token_t *cancel_token, char **out_output, uint64_t perf_t0)
 {
-    int src = inv_send(agent, agent_id, input, workspace_dir, session_id, history_json);
+    int src = inv_send(agent, agent_id, input, workspace_dir, session_id, history_json,
+                       parent_task_id);
     if (src == INV_IO) {
         SVC_LOG_WARN("Agent invoke write failed, child unusable: agent_id=%s errno=%d", agent_id,
                      errno);
@@ -248,7 +253,7 @@ static int inv_child(agent_service_t *svc, agent_entry_internal_t *agent, const 
 
 int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char *input, size_t len,
                          const char *workspace_dir, const char *session_id,
-                         const char *history_json, int timeout_s,
+                         const char *history_json, const char *parent_task_id, int timeout_s,
                          airy_cancel_token_t *cancel_token, char **out_output)
 {
     if (!svc || !svc->initialized || !agent_id || !out_output)
@@ -278,7 +283,7 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char 
 #if AIRY_PLATFORM_POSIX
     if (agent->child_pid > 0 && agent->stdin_fd >= 0) {
         int crc = inv_child(svc, agent, agent_id, input, workspace_dir, session_id, history_json,
-                            read_timeout_s, cancel_token, out_output, perf_t0);
+                            parent_task_id, read_timeout_s, cancel_token, out_output, perf_t0);
         if (crc != INV_FALLBACK)
             return crc;
     }
