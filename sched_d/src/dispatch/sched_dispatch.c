@@ -6,11 +6,14 @@
  * @brief Scheduler daemon - real dispatch (agent_d interaction) domain.
  * @details Implements the P2.2 real dispatch chain over agent_d's Unix
  *          socket (spawn + invoke + terminate) and the sched_dispatch_executor
- *          callback injected into the scheduler service. sched_dispatch_executor
- *          was promoted from static when main.c was split by functional
- *          domain (main.c passes it to sched_service_set_executor;
- *          declaration in sched_daemon_internal.h); the dispatch helpers
- *          remain static here.
+ *          callback injected into the scheduler service. The caller-supplied
+ *          timeout_ms (node/graph budget, 0 = env default) is split across
+ *          spawn and invoke; exhausting it returns AIRY_ERR_TIMEOUT so the
+ *          node reaches a reported terminal state instead of hanging.
+ *          sched_dispatch_executor was promoted from static when main.c was
+ *          split by functional domain (main.c passes it to
+ *          sched_service_set_executor; declaration in sched_daemon_internal.h);
+ *          the dispatch helpers remain static here.
  */
 
 #include "airy_memory.h"
@@ -31,7 +34,8 @@ typedef struct {
 } sched_dispatch_result_t;
 static int sched_dispatch_enabled(void);
 static int sched_dispatch_task(const char *role, const char *task_description,
-                               const char *workspace_dir, sched_dispatch_result_t *out_result);
+                               const char *workspace_dir, uint32_t budget_ms,
+                               sched_dispatch_result_t *out_result);
 
 static int sched_dispatch_enabled(void)
 {
@@ -49,7 +53,8 @@ static void agent_socket(char *buf, size_t size)
     }
 }
 
-static uint32_t timeout_ms(void)
+/* Transport default used when the caller carries no budget (0). */
+static uint32_t disp_default_ms(void)
 {
     const char *env = getenv("AIRY_SCHED_DISPATCH_TIMEOUT_MS");
     if (env && env[0] != '\0') {
@@ -58,6 +63,18 @@ static uint32_t timeout_ms(void)
             return (uint32_t)v;
     }
     return 300000;
+}
+
+/* Remaining budget of one dispatch (ms). budget_ms==0 falls back to the
+ * transport default; a non-zero budget that is already used up returns 0 so
+ * the caller can report AIRY_ERR_TIMEOUT instead of issuing a doomed RPC.
+ * Spawn and invoke share this deadline. */
+static uint32_t disp_left(uint32_t budget_ms, uint64_t t0)
+{
+    if (budget_ms == 0)
+        return disp_default_ms();
+    uint64_t used = airy_time_wall_ms() - t0;
+    return used >= budget_ms ? 0 : (uint32_t)(budget_ms - used);
 }
 
 /*
@@ -72,14 +89,16 @@ static uint32_t timeout_ms(void)
 /* 调一次 agent.sock RPC 并取回顶层字符串字段的堆副本；任一环节失败返回
  * 非零错误码，*out 保持 NULL。 */
 static int disp_call_str(const char *sock, const char *method, const char *params,
-                         const char *field, char **out)
+                         const char *field, uint32_t wait_ms, char **out)
 {
     char *res = NULL;
-    int rc = daemon_rpc_call(sock, method, params, &res, timeout_ms());
+    int rc = daemon_rpc_call(sock, method, params, &res, wait_ms);
     if (rc != AIRY_SUCCESS || !res) {
-        SVC_LOG_ERROR("sched dispatch: agent.%s failed (rc=%d)", method, rc);
+        SVC_LOG_ERROR("sched dispatch: agent.%s failed (rc=%d, wait_ms=%u)", method, rc, wait_ms);
         AIRY_FREE(res);
-        return AIRY_ERR_SVC_NOT_READY;
+        /* 超时是节点级终态的依据，不能在传输层被折叠成 SVC_NOT_READY。 */
+        return (rc == AIRY_ERR_TIMEOUT || rc == AIRY_ERR_EXEC_TIMEOUT) ? rc :
+                                                                            AIRY_ERR_SVC_NOT_READY;
     }
 
     cJSON *root = cJSON_Parse(res);
@@ -101,7 +120,10 @@ static int disp_call_str(const char *sock, const char *method, const char *param
     return AIRY_SUCCESS;
 }
 
-/* 尽力回收 agent 进程：失败只告警，不影响已取回的任务输出。 */
+/* 尽力回收 agent 进程：失败只告警，不影响已取回的任务输出。回收是清理动作，
+ * 用短固定上限，避免一个僵死 agent 把 worker 拖到传输默认超时。 */
+#define SCHED_DISP_KILL_MS 2000
+
 static void disp_terminate(const char *sock, const char *agent_id)
 {
     cJSON *params = cJSON_CreateObject();
@@ -111,7 +133,7 @@ static void disp_terminate(const char *sock, const char *agent_id)
     if (!text)
         return;
     char *res = NULL;
-    int rc = daemon_rpc_call(sock, "terminate", text, &res, timeout_ms());
+    int rc = daemon_rpc_call(sock, "terminate", text, &res, SCHED_DISP_KILL_MS);
     AIRY_FREE(text);
     AIRY_FREE(res);
     if (rc != AIRY_SUCCESS)
@@ -119,11 +141,13 @@ static void disp_terminate(const char *sock, const char *agent_id)
 }
 
 static int sched_dispatch_task(const char *role, const char *task_description,
-                               const char *workspace_dir, sched_dispatch_result_t *out_result)
+                               const char *workspace_dir, uint32_t budget_ms,
+                               sched_dispatch_result_t *out_result)
 {
     if (!role || !out_result)
         return AIRY_ERR_INVALID_PARAM;
 
+    const uint64_t t0 = airy_time_wall_ms();
     char sock[AIRY_PATH_MAX];
     agent_socket(sock, sizeof(sock));
 
@@ -141,8 +165,12 @@ static int sched_dispatch_task(const char *role, const char *task_description,
     AIRY_FREE(spec_str);
 
     char *agent_id = NULL;
-    int rc = spawn_str ? disp_call_str(sock, "spawn", spawn_str, "agent_id", &agent_id)
-                       : AIRY_ERR_OUT_OF_MEMORY;
+    int rc = AIRY_ERR_OUT_OF_MEMORY;
+    if (spawn_str) {
+        uint32_t wait = disp_left(budget_ms, t0);
+        rc = wait > 0 ? disp_call_str(sock, "spawn", spawn_str, "agent_id", wait, &agent_id) :
+                        AIRY_ERR_TIMEOUT;
+    }
     AIRY_FREE(spawn_str);
     if (rc != AIRY_SUCCESS)
         return rc;
@@ -161,10 +189,16 @@ static int sched_dispatch_task(const char *role, const char *task_description,
     cJSON_Delete(invoke);
 
     char *output = NULL;
-    rc = invoke_str ? disp_call_str(sock, "invoke", invoke_str, "output", &output)
-                    : AIRY_ERR_OUT_OF_MEMORY;
+    rc = AIRY_ERR_OUT_OF_MEMORY;
+    if (invoke_str) {
+        uint32_t wait = disp_left(budget_ms, t0);
+        rc = wait > 0 ? disp_call_str(sock, "invoke", invoke_str, "output", wait, &output) :
+                        AIRY_ERR_TIMEOUT;
+    }
     AIRY_FREE(invoke_str);
     if (rc != AIRY_SUCCESS) {
+        /* invoke 失败/超时同样回收 agent 进程，否则超时路径会留下孤儿进程。 */
+        disp_terminate(sock, agent_id);
         AIRY_FREE(agent_id);
         return rc;
     }
@@ -184,7 +218,7 @@ static int sched_dispatch_task(const char *role, const char *task_description,
  * selected role).
  */
 int sched_dispatch_executor(const char *agent_id, const char *task_description,
-                            const char *workspace_dir, char **out_output)
+                            const char *workspace_dir, uint32_t timeout_ms, char **out_output)
 {
 
     if (!sched_dispatch_enabled()) {
@@ -193,7 +227,8 @@ int sched_dispatch_executor(const char *agent_id, const char *task_description,
     }
 
     sched_dispatch_result_t dispatch = {0};
-    int dret = sched_dispatch_task(agent_id, task_description, workspace_dir, &dispatch);
+    int dret = sched_dispatch_task(agent_id, task_description, workspace_dir, timeout_ms,
+                                   &dispatch);
     if (dret != AIRY_SUCCESS || !dispatch.output || !dispatch.agent_id) {
         AIRY_FREE(dispatch.agent_id);
         AIRY_FREE(dispatch.output);

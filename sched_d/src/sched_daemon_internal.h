@@ -24,6 +24,6 @@ extern sched_service_t *g_service;
 /* Task-execution callback (defined in sched_dispatch.c, injected by
  * svc.c via sched_service_set_executor) */
 int sched_dispatch_executor(const char *agent_id, const char *task_description,
-                            const char *workspace_dir, char **out_output);
+                            const char *workspace_dir, uint32_t timeout_ms, char **out_output);
 
 #endif /* AIRY_RT_SCHED_DAEMON_INTERNAL_H */

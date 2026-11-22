@@ -23,6 +23,17 @@
  * upstream artifact cannot crowd the rest of the graph out of the budget. */
 #define SCHED_DAG_UPSTREAM_BUDGET 4096
 
+/* Node execution budget (ms): the node-level timeout_ms wins, then the
+ * graph-level timeout_ms; 0 means no node budget and the dispatch layer
+ * applies its transport default. One resolver so the serial worker, the
+ * parallel batch workers and the queue worker cannot drift apart. */
+static inline uint32_t dag_node_budget(const sched_dag_t *dag, const sched_dag_node_t *node)
+{
+    if (node && node->exec_timeout_ms > 0)
+        return node->exec_timeout_ms;
+    return dag ? dag->exec_timeout_ms : 0;
+}
+
 /* Single source of truth for "this node can no longer change state". The
  * graph convergence check, the progress counters and the dependency gates all
  * consume this predicate, so adding a terminal state stays a one-line change
@@ -30,7 +41,8 @@
 static inline int sched_dag_node_done(sched_dag_node_status_t st)
 {
     return st == SCHED_DAG_NODE_COMPLETED || st == SCHED_DAG_NODE_SEMANTIC_FAILED ||
-           st == SCHED_DAG_NODE_FAILED || st == SCHED_DAG_NODE_CANCELED;
+           st == SCHED_DAG_NODE_FAILED || st == SCHED_DAG_NODE_TIMEOUT ||
+           st == SCHED_DAG_NODE_CANCELED;
 }
 
 /* 1 = node terminal and unusable by its dependents (a dependency in this
@@ -38,7 +50,7 @@ static inline int sched_dag_node_done(sched_dag_node_status_t st)
 static inline int sched_dag_dep_broken(sched_dag_node_status_t st)
 {
     return st == SCHED_DAG_NODE_SEMANTIC_FAILED || st == SCHED_DAG_NODE_FAILED ||
-           st == SCHED_DAG_NODE_CANCELED;
+           st == SCHED_DAG_NODE_TIMEOUT || st == SCHED_DAG_NODE_CANCELED;
 }
 
 /* A dispatched node must come back with an artifact. A success exit code with
@@ -94,7 +106,7 @@ int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag, sched_dag_
 void sched_dag_propagate_unreachable(sched_service_t *svc);
 
 /* Finalize every active graph whose nodes are all terminal:
- * any FAILED node -> graph FAILED, else any SEMANTIC_FAILED node ->
+ * any FAILED/TIMEOUT node -> graph FAILED, else any SEMANTIC_FAILED node ->
  * graph SEMANTIC_FAILED, else graph COMPLETED. */
 void sched_dag_finalize_terminal(sched_service_t *svc);
 

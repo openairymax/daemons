@@ -31,22 +31,24 @@ extern const char *g_fail_goal;
 extern const char *g_fatal_goal;
 extern const char *g_flaky_goal;
 extern const char *g_empty_goal;
+extern const char *g_slow_goal;
 extern _Atomic int g_flaky_left;
 extern _Atomic int g_block;
 extern _Atomic int g_concurrent_now;
 extern _Atomic int g_concurrent_max;
+extern _Atomic unsigned g_last_timeout_ms;
 
 /* ---- 共享辅助函数（定义于 test_dag.c） ---- */
 void exec_log_reset(void);
 int fake_executor(const char *agent_id, const char *task_description, const char *workspace_dir,
-                  char **out_output);
+                  uint32_t timeout_ms, char **out_output);
 sched_service_t *make_service(void);
 sched_service_t *make_service_graded(bool fatal_cascade, uint32_t parallel);
 sched_service_t *make_parallel_service(void);
 int wait_dag_terminal(sched_service_t *svc, const char *dag_id, int timeout_ms);
 int get_dag_status_str(sched_service_t *svc, const char *dag_id, char *out, size_t cap);
 int parallel_executor(const char *agent_id, const char *task_description,
-                      const char *workspace_dir, char **out_output);
+                      const char *workspace_dir, uint32_t timeout_ms, char **out_output);
 
 /* ---- 各域文件的测试函数（main() 直接调用，调用语句保持原样） ---- */
 /* test_dag_core.c */
@@ -65,6 +67,7 @@ int test_dag_fatal_cascade_whole(void);
 int test_dag_transient_retry(void);
 int test_dag_transient_retry_exhausted(void);
 int test_dag_semantic_failed(void);
+int test_dag_timeout(void);
 /* test_dag_parallel.c */
 int test_dag_parallel_delegation(void);
 int test_dag_upstream_inject_par(void);

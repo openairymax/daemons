@@ -319,10 +319,11 @@ static int node_succeed(const sched_dag_t *dag, sched_dag_node_t *node, char *ou
 
 /* Whole-graph failure: node FAILED with a reason, graph FAILED, downstream
  * cascade-canceled. Returns the number of canceled nodes. */
-static size_t dag_abort(sched_dag_t *dag, sched_dag_node_t *node, const char *msg)
+static size_t dag_abort(sched_dag_t *dag, sched_dag_node_t *node, const char *msg,
+                        sched_dag_node_status_t st)
 {
     node_err_set(node, msg);
-    node->status = SCHED_DAG_NODE_FAILED;
+    node->status = st;
     dag->status = SCHED_DAG_STATUS_FAILED;
     return dag_cascade_cancel(dag);
 }
@@ -368,6 +369,9 @@ static int node_backoff(sched_dag_t *dag, sched_dag_node_t *node, int dret)
  *     instead of a hollow success
  *   - FATAL (only when dag_fatal_cascade=true) -> node FAILED + cascade-cancel
  *     the whole graph
+ *   - timeout (transport/execution deadline exceeded, timeout_ms propagated
+ *     down to the executor) -> node TIMEOUT, the terminal reason is preserved
+ *     for the caller instead of being folded into a generic FAILED
  *   - transient with retry not exhausted/under budget -> back to PENDING +
  *     exponential backoff
  *   - everything else (ordinary failure / legacy dag_fatal_cascade=false) ->
@@ -378,6 +382,7 @@ int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag, sched_dag_
                               int dret, char *output)
 {
     int fatal;
+    int timed_out;
     const char *why;
 
     if (node->status == SCHED_DAG_NODE_CANCELED || dag->status == SCHED_DAG_STATUS_CANCELED ||
@@ -389,20 +394,23 @@ int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag, sched_dag_
 
     node->finished_at_ms = airy_time_wall_ms();
     node_err_set(node, NULL);
+    timed_out = (dret == AIRY_ERR_TIMEOUT || dret == AIRY_ERR_EXEC_TIMEOUT);
     fatal = svc->dag_fatal_cascade && sched_dag_error_is_fatal(dret);
     why = fatal ? "agent dispatch failed (fatal)"
-                : dret == AIRY_ERR_SVC_NOT_READY ? "dag executor not injected"
-                                                 : "agent dispatch failed";
+                : timed_out ? "agent execution timed out"
+                            : dret == AIRY_ERR_SVC_NOT_READY ? "dag executor not injected"
+                                                             : "agent dispatch failed";
 
     if (fatal || !svc->dag_fatal_cascade) {
-        size_t cascade = dag_abort(dag, node, why);
+        size_t cascade = dag_abort(dag, node, why,
+                                   timed_out ? SCHED_DAG_NODE_TIMEOUT : SCHED_DAG_NODE_FAILED);
         SVC_LOG_ERROR("DAG node failed: %s/%s (error=%s, rc=%d)", dag->dag_id, node->id,
                       node->error ? node->error : "unknown", dret);
         SVC_LOG_WARN("DAG aborted by node failure%s: %s (%zu nodes cascade-canceled)",
                      fatal ? " (fatal)" : "", dag->dag_id, cascade);
     } else if (!node_backoff(dag, node, dret)) {
-        node_err_set(node, "agent dispatch failed");
-        node->status = SCHED_DAG_NODE_FAILED;
+        node_err_set(node, why);
+        node->status = timed_out ? SCHED_DAG_NODE_TIMEOUT : SCHED_DAG_NODE_FAILED;
         SVC_LOG_ERROR("DAG node failed (no cascade): %s/%s (error=%s, rc=%d)", dag->dag_id,
                       node->id, node->error ? node->error : "unknown", dret);
     }
@@ -456,7 +464,8 @@ void sched_dag_finalize_terminal(sched_service_t *svc)
         int has_failed = 0;
         int has_semantic = 0;
         for (size_t j = 0; j < dag->node_count; j++) {
-            if (dag->nodes[j]->status == SCHED_DAG_NODE_FAILED) {
+            if (dag->nodes[j]->status == SCHED_DAG_NODE_FAILED ||
+                dag->nodes[j]->status == SCHED_DAG_NODE_TIMEOUT) {
                 has_failed = 1;
                 break;
             }

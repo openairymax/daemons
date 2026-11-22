@@ -78,11 +78,15 @@ typedef struct {
  * @param task_description Task description (used as invoke's input)
  * @param workspace_dir Optional task workspace (runner chdir's into it; NULL
  *                      means the daemon's cwd is used)
+ * @param timeout_ms Execution budget in milliseconds (0 = transport default);
+ *                   the callback must bound its dispatch by it and return
+ *                   AIRY_ERR_TIMEOUT when the budget is exhausted
  * @param out_output Execution output (AIRY_MALLOC, caller frees)
  * @return 0 on success, non-zero on failure
  */
 typedef int (*sched_task_executor_t)(const char *agent_id, const char *task_description,
-                                     const char *workspace_dir, char **out_output);
+                                     const char *workspace_dir, uint32_t timeout_ms,
+                                     char **out_output);
 
 
 #define AIRY_CAP_MAX_TASKS 256
@@ -268,6 +272,10 @@ typedef enum {
      * separately so a partial failure is not confused with an abort. */
     SCHED_DAG_NODE_SEMANTIC_FAILED,
     SCHED_DAG_NODE_FAILED,
+    /* Execution exceeded the propagated budget (node/graph timeout_ms) before
+     * producing an artifact: terminal, reported separately from FAILED so the
+     * caller can tell a hung agent from a rejected/failed dispatch. */
+    SCHED_DAG_NODE_TIMEOUT,
     SCHED_DAG_NODE_CANCELED,
     SCHED_DAG_NODE_COUNT
 } sched_dag_node_status_t;
