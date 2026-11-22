@@ -9,7 +9,7 @@
  *        pipe 交给 pump 线程惰性落盘到 $AIRY_HOME/logs/<name>.out（首个
  *        字节才建文件，A-5；AIRY_PREOPEN_OUT=1 回退预开）；Windows
  *        (CREATE_SUSPENDED) + Job Object KILL_ON_JOB_CLOSE。
- *        POSIX 子进程分支先做 LD_*/DYLD_* 清洗（隔离格）：宿主注入的
+ *        POSIX 子进程分支先做 LD_ 与 DYLD_ 前缀变量清洗（隔离格）：宿主注入的
  *        LD_LIBRARY_PATH / LD_PRELOAD / LD_AUDIT 与 macOS 的
  *        DYLD_LIBRARY_PATH / DYLD_FRAMEWORK_PATH / DYLD_INSERT_LIBRARIES
  *        一律不继承，仅当画像声明 AIRYRT_LAUNCH_KEEPENV_<NAME> 显式列出时保留。
