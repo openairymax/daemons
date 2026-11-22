@@ -26,8 +26,6 @@
 #include "airy_regex.h"
 
 #include "builtin/builtin_buf_internal.h"
-#include "builtin/builtin_exec_internal.h"
-#include "builtin/builtin_limits_internal.h"
 #include "builtin/builtin_time_internal.h"
 
 #define BUILTIN_WEBSEARCH_MAX 8

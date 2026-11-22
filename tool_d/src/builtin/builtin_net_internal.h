@@ -11,12 +11,19 @@
  *          - builtin_net_fetch.c  web_fetch (URL parse + curl + fallback)
  *          - builtin_net_search.c web_search (provider JSON + SERP scrape)
  *          - builtin_net_guard.c  SSRF host policy + provider config reader
+ *
+ *        Serves as the family prelude: the shared result-envelope helpers
+ *        (btool_fail/btool_soft) live in the limits/exec internals, so both
+ *        are pulled here once instead of by each unit (G13 fan-in ratchet).
  */
 
 #ifndef AIRY_RT_TOOL_BUILTIN_NET_INTERNAL_H
 #define AIRY_RT_TOOL_BUILTIN_NET_INTERNAL_H
 
 #include <stddef.h>
+
+#include "builtin/builtin_exec_internal.h"
+#include "builtin/builtin_limits_internal.h"
 
 #ifdef __cplusplus
 extern "C" {
