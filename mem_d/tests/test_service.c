@@ -987,28 +987,26 @@ static void test_recent_conv_scope(void)
 
     mem_recent_item_t *items = NULL;
     size_t n = 0;
-    assert(mem_service_recent_scoped(svc, 1, "sess_a", &items, &n) == AIRY_SUCCESS);
+    assert(mem_recent_scoped(svc, 1, "sess_a", &items, &n) == AIRY_SUCCESS);
     assert(n == 1);
     assert(strcmp(items[0].record_id, a2) == 0);
     mem_recent_items_free(items, n);
 
     items = NULL;
     n = 99;
-    assert(mem_service_recent_scoped(svc, 5, "sess_c", &items, &n) == AIRY_SUCCESS);
+    assert(mem_recent_scoped(svc, 5, "sess_c", &items, &n) == AIRY_SUCCESS);
     assert(n == 0);
     assert(items == NULL);
 
     mem_search_hit_t *hits = NULL;
     size_t hit_n = 0;
-    assert(mem_service_search_scoped(svc, NULL, "sess_a", "record", 5, &hits, &hit_n) ==
-           AIRY_SUCCESS);
+    assert(mem_search_scoped(svc, NULL, "sess_a", "record", 5, &hits, &hit_n) == AIRY_SUCCESS);
     assert(hit_n == 2);
     mem_search_hits_free(hits, hit_n);
 
     hits = NULL;
     hit_n = 0;
-    assert(mem_service_search_scoped(svc, NULL, NULL, "record", 5, &hits, &hit_n) ==
-           AIRY_SUCCESS);
+    assert(mem_search_scoped(svc, NULL, NULL, "record", 5, &hits, &hit_n) == AIRY_SUCCESS);
     assert(hit_n == 3);
     mem_search_hits_free(hits, hit_n);
 

@@ -77,8 +77,7 @@ void handle_search(cJSON *params, int id, airy_sock_t client_fd)
     /* 可选会话作用域：给定 conv 时只在同一会话记录中检索（S-P1-16）。 */
     const char *scope = cJSON_IsString(conv) && conv->valuestring[0] ? conv->valuestring : NULL;
 
-    int ret = mem_service_search_scoped(g_service, NULL, scope, query->valuestring, lim,
-                                        &hits, &count);
+    int ret = mem_search_scoped(g_service, NULL, scope, query->valuestring, lim, &hits, &count);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Memory search failed", id);
         return;
@@ -154,7 +153,7 @@ void handle_recent(cJSON *params, int id, airy_sock_t client_fd)
 
     mem_recent_item_t *items = NULL;
     size_t count = 0;
-    int ret = mem_service_recent_scoped(g_service, lim, scope, &items, &count);
+    int ret = mem_recent_scoped(g_service, lim, scope, &items, &count);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Memory recent failed", id);
         return;
