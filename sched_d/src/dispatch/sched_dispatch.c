@@ -88,12 +88,15 @@ static int disp_call_str(const char *sock, const char *method, const char *param
         SVC_LOG_ERROR("sched dispatch: agent.%s result parse failed", method);
         return AIRY_ERR_PARSE_ERROR;
     }
+    /* 失败载荷不因成功信封而放行：success=false 即终态失败，output 里的
+     * 文本不得作为下游节点的结果。 */
+    int failed = cJSON_IsFalse(cJSON_GetObjectItem(root, "success"));
     cJSON *v = cJSON_GetObjectItem(root, field);
-    *out = (cJSON_IsString(v) && v->valuestring) ? AIRY_STRDUP(v->valuestring) : NULL;
+    *out = (!failed && cJSON_IsString(v) && v->valuestring) ? AIRY_STRDUP(v->valuestring) : NULL;
     cJSON_Delete(root);
     if (!*out) {
-        SVC_LOG_ERROR("sched dispatch: agent.%s result missing %s", method, field);
-        return AIRY_ERR_STATE_ERROR;
+        SVC_LOG_ERROR("sched dispatch: agent.%s failed or has no %s", method, field);
+        return failed ? AIRY_ERR_EXEC_FAIL : AIRY_ERR_STATE_ERROR;
     }
     return AIRY_SUCCESS;
 }
