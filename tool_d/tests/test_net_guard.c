@@ -10,12 +10,12 @@
  * 全部用字面量，不做真实网络请求。
  */
 
-#include "builtin/builtin_net_internal.h"
-#include "test_framework.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "builtin/builtin_net_internal.h"
+#include "test_framework.h"
 
 /* 跨平台环境变量写入；value 为 NULL 表示删除。 */
 static void set_env(const char *key, const char *value)
