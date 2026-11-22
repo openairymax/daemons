@@ -55,7 +55,9 @@ int think_service_orchestrate(think_service_t *svc, const char *input, uint32_t 
 
     orch_result_t *results = NULL;
     size_t count = 0;
-    int ret = orchestrator_execute(svc->orch, input, &results, &count);
+    /* timeout_ms 是本次编排的端到端预算（0 = 仅按编排器阶段配置裁决）；
+     * 预算耗尽时阶段以 TIMEOUT 终态返回，success=false 并在 phases 中体现。 */
+    int ret = orchestrator_execute_budget(svc->orch, input, timeout_ms, &results, &count);
     if (ret != 0 || !results) {
         if (results) {
             for (size_t i = 0; i < count; i++)
@@ -85,8 +87,12 @@ int think_service_orchestrate(think_service_t *svc, const char *input, uint32_t 
         cJSON_AddNumberToObject(ph, "duration_ms", (double)results[i].duration_ms);
         cJSON_AddStringToObject(ph, "output",
                                 results[i].output ? results[i].output : "");
-        if (results[i].status != ORCH_TASK_COMPLETED)
+        if (results[i].status != ORCH_TASK_COMPLETED) {
             success = 0;
+            if (results[i].status == ORCH_TASK_TIMEOUT)
+                SVC_LOG_WARN("think_service_orchestrate: phase %zu timed out (budget=%ums)", i,
+                             timeout_ms);
+        }
         cJSON_AddItemToArray(phases, ph);
     }
     cJSON_AddItemToObject(root, "phases", phases);
