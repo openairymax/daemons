@@ -9,9 +9,10 @@
  *        pipe 交给 pump 线程惰性落盘到 $AIRY_HOME/logs/<name>.out（首个
  *        字节才建文件，A-5；AIRY_PREOPEN_OUT=1 回退预开）；Windows
  *        (CREATE_SUSPENDED) + Job Object KILL_ON_JOB_CLOSE。
- *        POSIX 子进程分支先做 LD_* 清洗（隔离格）：宿主注入的
- *        LD_LIBRARY_PATH / LD_PRELOAD / LD_AUDIT 一律不继承，仅当
- *        画像声明 AIRYRT_LAUNCH_KEEPENV_<NAME> 显式列出时保留。
+ *        POSIX 子进程分支先做 LD_*/DYLD_* 清洗（隔离格）：宿主注入的
+ *        LD_LIBRARY_PATH / LD_PRELOAD / LD_AUDIT 与 macOS 的
+ *        DYLD_LIBRARY_PATH / DYLD_FRAMEWORK_PATH / DYLD_INSERT_LIBRARIES
+ *        一律不继承，仅当画像声明 AIRYRT_LAUNCH_KEEPENV_<NAME> 显式列出时保留。
  * reap：waitpid(WNOHANG) / WaitForSingleObject(0) 收割死因写入
  *       last_death（V13.1 判据）；CORE 死进 BACKOFF，AUX 死回 STOPPED
  *       （仅 activate 复活）。A-9：BACKOFF/WAIT 到期由 sup_next_wake_ms
@@ -412,7 +413,13 @@ static int env_keep(const char *list, const char *var)
 
 void sup_env_scrub(const sup_proc_t *p)
 {
-    static const char *const dyn[] = {"LD_LIBRARY_PATH", "LD_PRELOAD", "LD_AUDIT"};
+    static const char *const dyn[] = {
+        "LD_LIBRARY_PATH", "LD_PRELOAD", "LD_AUDIT",
+#if AIRY_PLATFORM_MACOS
+        /* dyld 用独立变量注入；Linux 的 LD_* 在 macOS 上无效果，二者都要清。 */
+        "DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH", "DYLD_INSERT_LIBRARIES",
+#endif
+    };
     for (size_t i = 0; i < sizeof(dyn) / sizeof(dyn[0]); i++) {
         if (!getenv(dyn[i]))
             continue;
