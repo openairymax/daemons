@@ -214,7 +214,19 @@ static const char *invoke_workspace(cJSON *params)
     return NULL;
 }
 
-/* 回包：成功输出 / 按错误码分派 JSON-RPC 错误。 */
+/* 失败载荷里的 error 文本（无则空串），供 JSON-RPC error 消息回传；
+ * 否则客户端只看到笼统的 "Agent invoke failed"，无法区分鉴权、超时或
+ * 模型不可用。 */
+static void invoke_reason(const char *out, char *buf, size_t cap)
+{
+    buf[0] = '\0';
+    cJSON *root = out ? cJSON_Parse(out) : NULL;
+    cJSON *err = root ? cJSON_GetObjectItemCaseSensitive(root, "error") : NULL;
+    if (err && cJSON_IsString(err) && err->valuestring)
+        snprintf(buf, cap, "%s", err->valuestring);
+    cJSON_Delete(root);
+}
+
 static void invoke_reply(airy_sock_t client_fd, int id, int ret, char *out_output)
 {
     if (ret == AIRY_SUCCESS && out_output) {
@@ -225,15 +237,19 @@ static void invoke_reply(airy_sock_t client_fd, int id, int ret, char *out_outpu
         return;
     }
 
+    char reason[256];
+    invoke_reason(out_output, reason, sizeof(reason));
     AIRY_FREE(out_output);
     if (ret == AIRY_ERR_NOT_FOUND) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Agent not found", id);
     } else if (ret == AIRY_ERR_CANCELED) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Agent invoke canceled", id);
+    } else if (reason[0]) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, reason, id);
     } else {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Agent invoke failed", id);
     }
-    SVC_LOG_ERROR("agent.invoke failed: error=%d", ret);
+    SVC_LOG_ERROR("agent.invoke failed: error=%d %s", ret, reason);
 }
 
 static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)

@@ -121,26 +121,30 @@ static void inv_mark_trunc(char *buf, int rrc, const char *agent_id)
 
 /* Extract the runner.py response object. A failure must NOT be flattened to
  * plain text with a SUCCESS return, otherwise upper layers absorb the error
- * string as a valid task result (P0-1 L2 poisoning). */
-static void inv_take(cJSON *resp, const char *raw, char **out_output)
+ * string as a valid task result (P0-1 L2 poisoning). Returns 0 when the
+ * runner reported success, -1 when it reported failure; the failure JSON is
+ * still stored in out_output so the caller can relay the reason. */
+static int inv_take(cJSON *resp, const char *raw, char **out_output)
 {
     cJSON *ok = cJSON_GetObjectItem(resp, "success");
-    cJSON *err = cJSON_GetObjectItem(resp, "error");
     *out_output = NULL;
-    if (!(ok && cJSON_IsFalse(ok) && err && cJSON_IsString(err))) {
+    if (!(ok && cJSON_IsFalse(ok))) {
         cJSON *out = cJSON_GetObjectItem(resp, "output");
         *out_output = (out && cJSON_IsString(out)) ? AIRY_STRDUP(out->valuestring) : AIRY_STRDUP(raw);
-        return;
+        return 0;
     }
+    cJSON *err = cJSON_GetObjectItem(resp, "error");
+    const char *msg = (err && cJSON_IsString(err)) ? err->valuestring : "agent failed";
     cJSON *fobj = cJSON_CreateObject();
     if (fobj) {
         cJSON_AddBoolToObject(fobj, "success", 0);
-        cJSON_AddStringToObject(fobj, "error", err->valuestring);
+        cJSON_AddStringToObject(fobj, "error", msg);
         *out_output = cJSON_PrintUnformatted(fobj);
     }
     cJSON_Delete(fobj);
     if (!*out_output)
         *out_output = AIRY_STRDUP("{\"success\":false,\"error\":\"agent failed\"}");
+    return -1;
 }
 
 /* Child pipe protocol: one JSON request line in, one JSON response line out.
@@ -197,8 +201,9 @@ static int inv_child(agent_service_t *svc, agent_entry_internal_t *agent, const 
     inv_mark_trunc(resp_buf, rrc, agent_id);
 
     cJSON *resp = cJSON_Parse(resp_buf);
+    int agent_failed = 0;
     if (resp) {
-        inv_take(resp, resp_buf, out_output);
+        agent_failed = inv_take(resp, resp_buf, out_output) != 0;
         cJSON_Delete(resp);
     } else {
         *out_output = AIRY_STRDUP(resp_buf);
@@ -206,10 +211,15 @@ static int inv_child(agent_service_t *svc, agent_entry_internal_t *agent, const 
     AIRY_FREE(resp_buf);
 
     airy_mtx_unlock(&agent->entry_lock);
-
-    airy_atomic_fetch_add(&svc->m_invoke_ok, 1);
     agent_perf_accumulate(&svc->m_invoke_us_total, &svc->m_invoke_us_max,
                           agent_perf_now_us() - perf_t0);
+    if (agent_failed) {
+        airy_atomic_fetch_add(&svc->m_invoke_fail, 1);
+        SVC_LOG_WARN("Agent invoke reported failure: agent_id=%s", agent_id);
+        return AIRY_ERR_EXEC_FAIL;
+    }
+
+    airy_atomic_fetch_add(&svc->m_invoke_ok, 1);
     SVC_LOG_DEBUG("Agent invoke via child: agent_id=%s", agent_id);
     return AIRY_SUCCESS;
 }
