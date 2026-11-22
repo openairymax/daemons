@@ -26,23 +26,44 @@
 
 #define MEM_RECENT_DEFAULT_LIMIT 10
 
-/* metadata.conv 与给定值相等即命中；无 metadata / 无 conv 视为不匹配。 */
-int mem_rec_in_conv(const mem_record_entry_t *rec, const char *conv)
+/* metadata.<key> 与 val 相等即命中；缺键时按 missing（NULL 表示不匹配）判定。
+ * 无 metadata 与解析失败都按缺键处理。 */
+static int mem_meta_is(const mem_record_entry_t *rec, const char *key,
+                       const char *val, const char *missing)
 {
-    if (!rec || !rec->metadata || !conv)
+    if (!rec || !val)
         return 0;
-    cJSON *root = cJSON_Parse(rec->metadata);
-    if (!root)
-        return 0;
-    cJSON *c = cJSON_GetObjectItem(root, "conv");
-    int hit = cJSON_IsString(c) && c->valuestring && strcmp(c->valuestring, conv) == 0;
-    cJSON_Delete(root);
+    cJSON *root = rec->metadata ? cJSON_Parse(rec->metadata) : NULL;
+    cJSON *item = root ? cJSON_GetObjectItem(root, key) : NULL;
+    int hit;
+    if (cJSON_IsString(item) && item->valuestring)
+        hit = strcmp(item->valuestring, val) == 0;
+    else
+        hit = missing && strcmp(missing, val) == 0;
+    if (root)
+        cJSON_Delete(root);
     return hit;
 }
 
-int mem_recent_scoped(mem_service_t *svc, uint32_t limit, const char *conv,
-                      mem_recent_item_t **out_items, size_t *out_count)
+int mem_rec_in_conv(const mem_record_entry_t *rec, const char *conv)
 {
+    return mem_meta_is(rec, "conv", conv, NULL);
+}
+
+/* 租户键缺省归属 default（与 hall_store 单租户兜底一致）：写入时不带
+ * tenant 的记录与显式 tenant=default 等价。 */
+int mem_rec_tenant(const mem_record_entry_t *rec, const char *tenant)
+{
+    return mem_meta_is(rec, "tenant", tenant, "default");
+}
+
+int mem_recent_scope(mem_service_t *svc, uint32_t limit, const mem_scope_t *scope,
+                     mem_recent_item_t **out_items, size_t *out_count)
+{
+    const char *kb_id = scope ? scope->kb_id : NULL;
+    const char *conv = scope ? scope->conv : NULL;
+    const char *tenant = scope ? scope->tenant : NULL;
+
     if (!svc || !svc->initialized || !out_items || !out_count)
         return AIRY_ERR_INVALID_PARAM;
     *out_items = NULL;
@@ -64,13 +85,21 @@ int mem_recent_scoped(mem_service_t *svc, uint32_t limit, const char *conv,
 
     /* 下标倒序即写入序倒序：写入总落在 record_count 处，删除以 memmove
      * 连续压实（mem_remove_record_at），故数组下标恒等于写入序。不依赖
-     * created_at（秒级精度，同秒多写时会并列）。 */
+     * created_at（秒级精度，同秒多写时会并列）。
+     * 扫描全量而不是只扫最新 limit 条：否则范围外记录会占满窗口，
+     * 使更早的匹配记录被静默丢弃（见 mem_service.h 的约定）。 */
     size_t n = 0;
-    for (size_t i = 0; i < total && n < take; i++) {
+    for (size_t i = 0; i < total; i++) {
+        if (n >= take)
+            break;
         const mem_record_entry_t *rec = &svc->records[total - 1 - i];
         if (!rec->record_id || !rec->data)
             continue;
+        if (kb_id && !mem_rec_in_kb(rec, kb_id))
+            continue;
         if (conv && !mem_rec_in_conv(rec, conv))
+            continue;
+        if (tenant && !mem_rec_tenant(rec, tenant))
             continue;
         mem_recent_item_t *it = &items[n];
         it->record_id = AIRY_STRDUP(rec->record_id);
@@ -94,6 +123,14 @@ int mem_recent_scoped(mem_service_t *svc, uint32_t limit, const char *conv,
     *out_items = shrunk ? shrunk : items;
     *out_count = n;
     return AIRY_SUCCESS;
+}
+
+int mem_recent_scoped(mem_service_t *svc, uint32_t limit, const char *conv,
+                      mem_recent_item_t **out_items, size_t *out_count)
+{
+    mem_scope_t scope = {0};
+    scope.conv = conv;
+    return mem_recent_scope(svc, limit, &scope, out_items, out_count);
 }
 
 int mem_service_recent(mem_service_t *svc, uint32_t limit,
@@ -194,9 +231,12 @@ static int mem_hit_take(const mem_rank_t *r, const mem_record_entry_t *rec, mem_
     return 1;
 }
 
-static size_t mem_hits_collect(const mem_rank_t *r, const char *kb_id, const char *conv,
+static size_t mem_hits_collect(const mem_rank_t *r, const mem_scope_t *scope,
                                mem_search_hit_t *hits, size_t *vec_used)
 {
+    const char *kb_id = scope ? scope->kb_id : NULL;
+    const char *conv = scope ? scope->conv : NULL;
+    const char *tenant = scope ? scope->tenant : NULL;
     size_t n = 0;
 
     *vec_used = 0;
@@ -205,6 +245,8 @@ static size_t mem_hits_collect(const mem_rank_t *r, const char *kb_id, const cha
         if (kb_id && !mem_rec_in_kb(rec, kb_id))
             continue;
         if (conv && !mem_rec_in_conv(rec, conv))
+            continue;
+        if (tenant && !mem_rec_tenant(rec, tenant))
             continue;
         if (rec->vec.term_count > 0)
             (*vec_used)++;
@@ -236,21 +278,32 @@ static size_t mem_hits_trim(mem_search_hit_t *hits, size_t n, uint32_t limit)
 int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
                        mem_search_hit_t **out_hits, size_t *out_count)
 {
-    return mem_search_scoped(svc, NULL, NULL, query, limit, out_hits, out_count);
+    return mem_search_scope(svc, NULL, query, limit, out_hits, out_count);
 }
 
 /* 兼容入口：仅按 kb_id 过滤（kb.c 使用）。 */
 int mem_service_search_filtered(mem_service_t *svc, const char *kb_id, const char *query,
                                 uint32_t limit, mem_search_hit_t **out_hits, size_t *out_count)
 {
-    return mem_search_scoped(svc, kb_id, NULL, query, limit, out_hits, out_count);
+    mem_scope_t scope = {0};
+    scope.kb_id = kb_id;
+    return mem_search_scope(svc, &scope, query, limit, out_hits, out_count);
 }
 
-/* 共享检索核心：kb_id / conv 非空时仅在匹配记录中打分（先过滤后排名，
- * 保证 limit 不被范围外记录占用）。 */
 int mem_search_scoped(mem_service_t *svc, const char *kb_id, const char *conv,
                       const char *query, uint32_t limit,
                       mem_search_hit_t **out_hits, size_t *out_count)
+{
+    mem_scope_t scope = {0};
+    scope.kb_id = kb_id;
+    scope.conv = conv;
+    return mem_search_scope(svc, &scope, query, limit, out_hits, out_count);
+}
+
+/* 共享检索核心：作用域非空时仅在匹配记录中打分（先过滤后排名，
+ * 保证 limit 不被范围外记录占用）。 */
+int mem_search_scope(mem_service_t *svc, const mem_scope_t *scope, const char *query,
+                     uint32_t limit, mem_search_hit_t **out_hits, size_t *out_count)
 {
     mem_rank_t r;
     mem_search_hit_t *hits;
@@ -273,7 +326,7 @@ int mem_search_scoped(mem_service_t *svc, const char *kb_id, const char *conv,
                              : NULL;
     oom = !hits && svc->record_count > 0;
     if (!oom)
-        hit_count = mem_hits_collect(&r, kb_id, conv, hits, &vec_used);
+        hit_count = mem_hits_collect(&r, scope, hits, &vec_used);
     airy_mtx_unlock(&svc->lock);
 
     mem_rank_close(&r);

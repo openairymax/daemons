@@ -1018,6 +1018,73 @@ static void test_recent_conv_scope(void)
     printf("    PASSED\n");
 }
 
+/* S-P1-17：租户谓词按 metadata.tenant 隔离；缺键记录归属 default，
+ * 因此未标注的记录不会被显式租户读到。 */
+static void test_recent_tenant_scope(void)
+{
+    printf("  test_recent_tenant_scope...\n");
+    mem_test_clean_persist();
+    mem_service_t *svc = mem_service_create(16);
+    assert(svc != NULL);
+
+    char *t1 = write_meta(svc, "tenant one record", "{\"tenant\":\"acme\"}");
+    char *t2 = write_meta(svc, "tenant two record", "{\"tenant\":\"globex\"}");
+    char *d1 = write_text(svc, "unlabelled record");
+
+    mem_recent_item_t *items = NULL;
+    size_t n = 0;
+    mem_scope_t scope = {0};
+    scope.tenant = "acme";
+    assert(mem_recent_scope(svc, 10, &scope, &items, &n) == AIRY_SUCCESS);
+    assert(n == 1);
+    assert(strcmp(items[0].record_id, t1) == 0);
+    mem_recent_items_free(items, n);
+
+    items = NULL;
+    n = 0;
+    scope.tenant = "default";
+    assert(mem_recent_scope(svc, 10, &scope, &items, &n) == AIRY_SUCCESS);
+    assert(n == 1);
+    assert(strcmp(items[0].record_id, d1) == 0);
+    mem_recent_items_free(items, n);
+
+    mem_search_hit_t *hits = NULL;
+    size_t hit_n = 0;
+    scope.tenant = "globex";
+    assert(mem_search_scope(svc, &scope, "record", 10, &hits, &hit_n) == AIRY_SUCCESS);
+    assert(hit_n == 1);
+    assert(strcmp(hits[0].record_id, t2) == 0);
+    mem_search_hits_free(hits, hit_n);
+
+    hits = NULL;
+    hit_n = 0;
+    scope.tenant = NULL;
+    assert(mem_search_scope(svc, &scope, "record", 10, &hits, &hit_n) == AIRY_SUCCESS);
+    assert(hit_n == 3);
+    mem_search_hits_free(hits, hit_n);
+
+    /* 范围外记录不得占满窗口：最新两条都是 globex，limit=1 的 acme 查询
+     * 仍须取到更早的 acme 记录，而不是返回空。 */
+    char *g2 = write_meta(svc, "globex late one", "{\"tenant\":\"globex\"}");
+    char *g3 = write_meta(svc, "globex late two", "{\"tenant\":\"globex\"}");
+    items = NULL;
+    n = 0;
+    scope.tenant = "acme";
+    assert(mem_recent_scope(svc, 1, &scope, &items, &n) == AIRY_SUCCESS);
+    assert(n == 1);
+    assert(strcmp(items[0].record_id, t1) == 0);
+    mem_recent_items_free(items, n);
+    AIRY_FREE(g2);
+    AIRY_FREE(g3);
+
+    AIRY_FREE(t1);
+    AIRY_FREE(t2);
+    AIRY_FREE(d1);
+    mem_service_destroy(svc);
+    mem_test_clean_persist();
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
 
@@ -1058,6 +1125,7 @@ int main(void)
     test_recent_order_delete_all();
     test_recent_order_after_reload();
     test_recent_conv_scope();
+    test_recent_tenant_scope();
     printf("=== All tests PASSED ===\n");
     return 0;
 }

@@ -60,8 +60,14 @@ int mem_search_scoped(mem_service_t *svc, const char *kb_id, const char *conv,
                       mem_search_hit_t **out_hits, size_t *out_count);
 int mem_recent_scoped(mem_service_t *svc, uint32_t limit, const char *conv,
                       mem_recent_item_t **out_items, size_t *out_count);
+int mem_recent_scope(mem_service_t *svc, uint32_t limit, const mem_scope_t *scope,
+                     mem_recent_item_t **out_items, size_t *out_count);
+int mem_search_scope(mem_service_t *svc, const mem_scope_t *scope, const char *query,
+                     uint32_t limit, mem_search_hit_t **out_hits, size_t *out_count);
 /* metadata.conv 匹配（scope.c 实现，检索与最近列表共用） */
 int mem_rec_in_conv(const mem_record_entry_t *rec, const char *conv);
+/* metadata.tenant 匹配；缺键归属 default（单租户兜底） */
+int mem_rec_tenant(const mem_record_entry_t *rec, const char *tenant);
 /* 深拷贝记录内容与 metadata（调用方须持锁，结果由调用方释放） */
 int mem_rec_copy_out(const mem_record_entry_t *rec, void **out_data, size_t *out_len,
                      char **out_meta);
