@@ -30,8 +30,8 @@ int info_rpc_start(void);
 /* 对称清理（停止采集线程，幂等）。 */
 void info_rpc_cleanup(void);
 
-/* 在 monit_d 方法调度器上登记 info_* 方法（4 个）。 */
-void info_rpc_register(void *disp);
+/* 在 monit_d 方法调度器上登记 info_* 方法（4 个）。返回 0 全部成功。 */
+int info_rpc_register(void *disp);
 
 /* ── 内部 API（供单元测试直接驱动采集与历史环） ───────────────────── */
 

@@ -33,8 +33,9 @@ void roadmap_rpc_cleanup(void);
 /**
  * @brief 注册 roadmap.* RPC 方法到调度器分发器。
  * @param disp 事件驱动分发器（method_dispatcher_t*）
+ * @return 0 全部注册成功；非 0 首个失败方法的错误码
  */
-void roadmap_rpc_register(void *disp);
+int roadmap_rpc_register(void *disp);
 
 #ifdef __cplusplus
 }

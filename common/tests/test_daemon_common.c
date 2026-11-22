@@ -89,11 +89,12 @@ int main(void)
     test_cb_multiple_breakers();
     test_cb_default_configs();
 
-    /* 2. Method Dispatcher (5 tests) */
+    /* 2. Method Dispatcher (6 tests) */
     test_md_create_destroy();
     test_md_register_and_dispatch();
     test_md_not_found();
     test_md_multiple_methods();
+    test_md_grow_beyond_capacity();
     test_md_overwrite_registration();
 
     /* 3. Alert Manager (5 tests) */

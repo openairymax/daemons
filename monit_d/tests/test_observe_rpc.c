@@ -266,7 +266,7 @@ int main(void)
 #ifndef _WIN32
     g_disp = method_dispatcher_create(16);
     assert(g_disp != NULL);
-    observe_rpc_register(g_disp);
+    assert(observe_rpc_register(g_disp) == 0);
     /* 自监控预注册 5 个指标 + 非 /metrics 请求不误接管 */
     assert(obs_rpc_metric_count() >= 5);
 #endif

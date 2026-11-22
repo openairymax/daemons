@@ -24,8 +24,8 @@ int plugin_rpc_init(void);
 /* 对称清理（幂等）。 */
 void plugin_rpc_cleanup(void);
 
-/* 在 tool_d 方法调度器上登记 plugin_* 方法（12 个）。 */
-void plugin_rpc_register(void *disp);
+/* 在 tool_d 方法调度器上登记 plugin_* 方法（12 个）；返回 0 全部成功。 */
+int plugin_rpc_register(void *disp);
 
 #ifdef __cplusplus
 }

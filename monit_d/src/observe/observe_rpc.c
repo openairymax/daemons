@@ -449,17 +449,19 @@ void observe_rpc_cleanup(void)
     SVC_LOG_INFO("observe_rpc: cleaned up");
 }
 
-void observe_rpc_register(void *disp)
+int observe_rpc_register(void *disp)
 {
-    method_dispatcher_t *d = (method_dispatcher_t *)disp;
-    if (!d)
-        return;
     /* observe_* 前缀登记：与 monit 原生 record_metric/get_metrics（嵌套
      * metric 对象语义）区分，避免覆盖 monit 语义；get_stats/health_check
      * 复用 monit 原生方法，不在此登记。 */
-    method_dispatcher_register(d, "observe_record_metric", obs_m_record_metric, NULL);
-    method_dispatcher_register(d, "observe_query_metrics", obs_m_query_metrics, NULL);
-    method_dispatcher_register(d, "observe_get_metrics", obs_m_get_metrics, NULL);
-    SVC_LOG_INFO("observe_rpc: registered observe.* methods on monit_d dispatcher "
-                 "(observe_record_metric/query_metrics/get_metrics)");
+    static const method_desc_t methods[] = {
+        {"observe_record_metric", obs_m_record_metric},
+        {"observe_query_metrics", obs_m_query_metrics},
+        {"observe_get_metrics", obs_m_get_metrics},
+    };
+    int rc = method_dispatcher_register_all((method_dispatcher_t *)disp, methods,
+                                            sizeof(methods) / sizeof(methods[0]));
+    if (rc == 0)
+        SVC_LOG_INFO("observe_rpc: registered observe.* methods on monit_d dispatcher");
+    return rc;
 }

@@ -384,7 +384,7 @@ typedef struct {
     int (*svc_prepare)(const char *config_path);
     void (*svc_endpoint)(daemon_endpoint_t *ep, int cmdline_tcp);
     int (*svc_activate)(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd);
-    void (*svc_attach)(void *dispatcher);
+    int (*svc_attach)(void *dispatcher);
     void (*svc_teardown)(void);
     void (*svc_destroy)(void);
     /* 方法表（SVC_<D>_METHODS 展开，含协议保留 shutdown） */
@@ -502,7 +502,7 @@ typedef struct {
  */
 int svc_activate_noop(daemon_event_driver_t *driver,
                       daemon_bootstrap_sd_t *bsd);
-void svc_attach_noop(void *dispatcher);
+int svc_attach_noop(void *dispatcher);
 void svc_teardown_noop(void);
 
 /**

@@ -86,9 +86,10 @@ int svc_activate_noop(daemon_event_driver_t *driver,
     return 0;
 }
 
-void svc_attach_noop(void *dispatcher)
+int svc_attach_noop(void *dispatcher)
 {
     (void)dispatcher;
+    return 0;
 }
 
 void svc_teardown_noop(void)
@@ -237,11 +238,20 @@ int daemon_boot(int argc, char **argv, const daemon_boot_t *boot)
     }
 
     *boot->dispatcher = daemon_event_driver_get_dispatcher(*boot->event_driver);
-    for (size_t i = 0; i < boot->method_count; i++)
-        method_dispatcher_register(*boot->dispatcher, boot->methods[i].name,
-                                   boot->methods[i].handler, NULL);
+    /* 注册失败必须致命：缺失的方法面在服务对外后不可恢复，此处回滚
+     * 驱动与监听套接字，让启动器看到确定的失败而非残缺服务。 */
+    for (size_t i = 0; i < boot->method_count; i++) {
+        if (method_dispatcher_register(*boot->dispatcher, boot->methods[i].name,
+                                       boot->methods[i].handler, NULL) != 0) {
+            SVC_LOG_ERROR("Failed to register RPC method '%s'", boot->methods[i].name);
+            goto fail_driver;
+        }
+    }
     SVC_LOG_INFO("Registered %d RPC methods (%s.* namespace)", boot->method_total, boot->cname);
-    boot->svc_attach(*boot->dispatcher);
+    if (boot->svc_attach(*boot->dispatcher) != 0) {
+        SVC_LOG_ERROR("Failed to attach service methods (%s.* namespace)", boot->cname);
+        goto fail_driver;
+    }
 
     if (daemon_event_driver_add_server_fd(*boot->event_driver, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");

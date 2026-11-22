@@ -112,8 +112,9 @@ void svc_destroy(void)
 
 /* observe / info 方法族走动态注册（内建模块，不入 manifest
  * methods 静态表）；注册时点由生成态 main 在静态表落库后调用。 */
-void svc_attach(void *dispatcher)
+int svc_attach(void *dispatcher)
 {
-    observe_rpc_register(dispatcher);
-    info_rpc_register(dispatcher);
+    if (observe_rpc_register(dispatcher) != 0)
+        return -1;
+    return info_rpc_register(dispatcher);
 }

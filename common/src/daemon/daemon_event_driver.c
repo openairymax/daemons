@@ -181,10 +181,8 @@ daemon_event_driver_t *daemon_event_driver_create(const daemon_event_config_t *c
     }
 
     if (config->use_jsonrpc) {
-        /* 32-method capacity: cupolas_d registers 17 (incl. the vault/net/
-         * entitlements wiring methods), all other daemons stay within 16.
-         * This capacity is an upper-bound guard; registration overflow warns
-         * and is rejected. */
+        /* 32 是初始容量而非上限：注册超过该值后方法表按倍率扩容，
+         * 任何方法都不因容量不足被拒。 */
         driver->dispatcher = method_dispatcher_create(32);
         if (!driver->dispatcher) {
             SVC_LOG_ERROR(

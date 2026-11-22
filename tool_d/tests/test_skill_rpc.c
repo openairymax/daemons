@@ -56,10 +56,12 @@ static void test_rpc_register(void)
     method_dispatcher_t *d = method_dispatcher_create(16);
     assert(d != NULL);
 
-    skill_rpc_register(d);
+    assert(skill_rpc_register(d) == 0);
 
     int dup = method_dispatcher_register(d, "skill.list", test_dup_stub, NULL);
     assert(dup != 0);
+    /* 第 4 个方法必须也已登记：曾因方法表容量写死 32 而注册失败。 */
+    assert(method_dispatcher_register(d, "skill.uninstall", test_dup_stub, NULL) != 0);
 
     method_dispatcher_destroy(d);
 

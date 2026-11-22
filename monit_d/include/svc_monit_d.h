@@ -36,7 +36,7 @@ static inline void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
  * 出口（dispatcher 为 method_dispatcher_t）。 */
 int svc_prepare(const char *config_path);
 int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd);
-void svc_attach(void *dispatcher);
+int svc_attach(void *dispatcher);
 void svc_destroy(void);
 
 /* RPC 方法清单（唯一声明源，源自 .manifest rpc.methods）。
