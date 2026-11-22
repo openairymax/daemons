@@ -57,7 +57,7 @@ int think_service_orchestrate(think_service_t *svc, const char *input, uint32_t 
     size_t count = 0;
     /* timeout_ms 是本次编排的端到端预算（0 = 仅按编排器阶段配置裁决）；
      * 预算耗尽时阶段以 TIMEOUT 终态返回，success=false 并在 phases 中体现。 */
-    int ret = orchestrator_execute_budget(svc->orch, input, timeout_ms, &results, &count);
+    int ret = orch_exec_budget(svc->orch, input, timeout_ms, &results, &count);
     if (ret != 0 || !results) {
         if (results) {
             for (size_t i = 0; i < count; i++)
