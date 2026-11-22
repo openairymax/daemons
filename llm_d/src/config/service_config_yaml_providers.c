@@ -82,6 +82,8 @@ static void agg_add_model(provider_agg_t *p, const model_entry_t *m)
         p->model_names[mi] = AIRY_STRDUP(m->name);
         p->model_max_output[mi] = m->max_output_tokens;
         p->model_max_concurrent[mi] = m->max_concurrent;
+        p->model_temperature[mi] = m->temperature;
+        p->model_top_p[mi] = m->top_p;
         p->model_count++;
     }
     agg_base_url(p, m->endpoint);
@@ -153,10 +155,12 @@ static void svc_yaml_merge_provider_cfgs(svc_yaml_state_t *st, provider_agg_t *p
             } else if (provs[j].model_count < 64) {
                 size_t mi = provs[j].model_count;
                 provs[j].model_names[mi] = st->pcfg[pi].model_names[k];
-                /* providers: 段只声明连接，不声明每模型输出上限/并发预算；
-                 * 保持 0（未配置），由引擎级默认兜底。 */
+                /* providers: 段只声明连接，不声明每模型输出上限/并发预算/
+                 * 采样；保持未配置哨兵，由引擎级默认兜底。 */
                 provs[j].model_max_output[mi] = 0;
                 provs[j].model_max_concurrent[mi] = 0;
+                provs[j].model_temperature[mi] = -1.0f;
+                provs[j].model_top_p[mi] = -1.0f;
                 provs[j].model_count++;
             } else {
                 AIRY_FREE(st->pcfg[pi].model_names[k]);
@@ -173,20 +177,28 @@ static void build_models(provider_agg_t *p, provider_config_t *out)
     char **marr = (char **)AIRY_CALLOC(p->model_count + 1, sizeof(char *));
     int *caparr = (int *)AIRY_CALLOC(p->model_count + 1, sizeof(int));
     int *cncarr = (int *)AIRY_CALLOC(p->model_count + 1, sizeof(int));
-    if (marr && caparr && cncarr) {
+    float *tmparr = (float *)AIRY_CALLOC(p->model_count + 1, sizeof(float));
+    float *tparr = (float *)AIRY_CALLOC(p->model_count + 1, sizeof(float));
+    if (marr && caparr && cncarr && tmparr && tparr) {
         for (size_t k = 0; k < p->model_count; ++k) {
             marr[k] = p->model_names[k];
             caparr[k] = p->model_max_output[k];
             cncarr[k] = p->model_max_concurrent[k];
+            tmparr[k] = p->model_temperature[k];
+            tparr[k] = p->model_top_p[k];
         }
         marr[p->model_count] = NULL;
         out->models = marr;
         out->model_max_output = caparr;
         out->model_max_concurrent = cncarr;
+        out->model_temperature = tmparr;
+        out->model_top_p = tparr;
     } else {
         AIRY_FREE(marr);
         AIRY_FREE(caparr);
         AIRY_FREE(cncarr);
+        AIRY_FREE(tmparr);
+        AIRY_FREE(tparr);
         for (size_t k = 0; k < p->model_count; ++k)
             AIRY_FREE(p->model_names[k]);
     }

@@ -263,6 +263,51 @@ static void test_bound_src(void)
     check_int("src.none_with_intent", gen_bound_src(16, 0), GEN_BOUND_NONE);
 }
 
+static void check_float(const char *name, float got, float want)
+{
+    test_count++;
+    if (got < want - 0.0005f || got > want + 0.0005f) {
+        printf("    FAIL: %s: got %f, want %f\n", name, (double)got, (double)want);
+        fail_count++;
+    }
+}
+
+/* S-P1-12：采样覆盖三级优先——请求显式值 > 模型条目 > 缺省（不动）。
+ * temperature 的显式 0 是确定性意图，不得被条目覆盖；top_p 以 >0 为已声明。 */
+static void test_sample_priority(void)
+{
+    char *models[] = {"m1", NULL};
+    float temps[] = {0.2f, -1.0f};
+    float tops[] = {0.8f, -1.0f};
+    provider_t prov;
+    make_provider(&prov, models, NULL);
+    prov.model_temperature = temps;
+    prov.model_top_p = tops;
+
+    llm_request_config_t cfg;
+    __builtin_memset(&cfg, 0, sizeof(cfg));
+    resolve_sample(&prov, "m1", &cfg);
+    check_int("sample.model.temp_set", cfg.temperature_set, 1);
+    check_float("sample.model.temp", cfg.temperature, 0.2f);
+    check_float("sample.model.top_p", cfg.top_p, 0.8f);
+
+    __builtin_memset(&cfg, 0, sizeof(cfg));
+    cfg.temperature = 0.0f;
+    cfg.temperature_set = 1;
+    cfg.top_p = 0.5f;
+    resolve_sample(&prov, "m1", &cfg);
+    check_float("sample.req.temp", cfg.temperature, 0.0f);
+    check_float("sample.req.top_p", cfg.top_p, 0.5f);
+
+    __builtin_memset(&cfg, 0, sizeof(cfg));
+    resolve_sample(&prov, "m2", &cfg);
+    check_int("sample.miss.temp_set", cfg.temperature_set, 0);
+    check_float("sample.miss.temp", cfg.temperature, 0.0f);
+
+    resolve_sample(NULL, "m1", &cfg);
+    check_int("sample.null.temp_set", cfg.temperature_set, 0);
+}
+
 int main(void)
 {
     printf("running resolve_gen_params / model-cap regression\n");
@@ -276,6 +321,7 @@ int main(void)
     test_null_provider();
     test_registry_model_cap_lookup();
     test_bound_src();
+    test_sample_priority();
 
     if (fail_count == 0) {
         printf("All %d gen-params assertions passed\n", test_count);

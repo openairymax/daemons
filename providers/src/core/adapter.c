@@ -47,6 +47,23 @@ int prov_max_conc(const provider_t *prov, const char *model)
     return 0;
 }
 
+void prov_model_samp(const provider_t *prov, const char *model, float *temp, float *top_p)
+{
+    *temp = -1.0f;
+    *top_p = -1.0f;
+    if (!prov || !model || !prov->models)
+        return;
+    for (size_t i = 0; prov->models[i]; ++i) {
+        if (strcmp(prov->models[i], model) != 0)
+            continue;
+        if (prov->model_temperature)
+            *temp = prov->model_temperature[i];
+        if (prov->model_top_p)
+            *top_p = prov->model_top_p[i];
+        return;
+    }
+}
+
 /* B1-d：失败 resp 释放前把上游状态码与响应体片段存入线程诊断槽，
  * 供 RPC 错误面透传（resp 可为 NULL——传输层失败时指针已归一为空）。 */
 static void diag_from_resp(long http_code, const provider_http_resp_t *resp)

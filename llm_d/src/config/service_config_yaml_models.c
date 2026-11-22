@@ -87,7 +87,7 @@ static void svc_yaml_parse_prov(svc_yaml_state_t *st, struct yaml_node *item)
 }
 
 /* models[] 行字段表：键 → 字段偏移/容量/伴随标志位/取值类型，顺序无关。 */
-enum { YF_STR, YF_INT, YF_TOKENS, YF_PRICE, YF_BOOL };
+enum { YF_STR, YF_INT, YF_TOKENS, YF_PRICE, YF_BOOL, YF_TEMP, YF_TOP_P };
 typedef struct {
     const char *key;
     unsigned off, cap, flag, kind;
@@ -102,6 +102,7 @@ static const svc_yaml_field_t svc_yaml_fields[] = {
     YF("timeout_sec", timeout_sec, YF_INT), YF("max_retries", max_retries, YF_INT),
     YF("max_output", max_output_tokens, YF_TOKENS), YF("vision", vision, YF_BOOL),
     YF("max_concurrent", max_concurrent, YF_INT),
+    YF("temperature", temperature, YF_TEMP), YF("top_p", top_p, YF_TOP_P),
     YF_P("input_cost_per_1k", input_cost_per_k, has_input_price),
     YF_P("output_cost_per_1k", output_cost_per_k, has_output_price),
 };
@@ -110,6 +111,24 @@ static const svc_yaml_field_t svc_yaml_fields[] = {
 static int svc_yaml_truthy(const char *v)
 {
     return strcasecmp(v, "true") == 0 || strcmp(v, "1") == 0 || strcasecmp(v, "yes") == 0;
+}
+
+/* 采样标量：temperature ∈ [0,2]，top_p ∈ (0,1]。越界或非数字视为未
+ * 声明并告警——调参笔误不应把整个模型行或服务启动拖下水。 */
+static float svc_yaml_samp(const char *v, const char *key, const char *name, int top_p)
+{
+    char *end = NULL;
+    float f = strtof(v, &end);
+    float hi = top_p ? 1.0f : 2.0f;
+    int ok = end && end != v && *end == '\0' && f >= 0.0f && f <= hi && (!top_p || f > 0.0f);
+
+    if (!ok) {
+        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN invalid %s '%s' ignored (name=%s), "
+                     "STACK: svc_yaml_parse_model",
+                     key, v, name);
+        return -1.0f;
+    }
+    return f;
 }
 
 /* A7-4（0.1.20）声明面：models[] 行的已知键全集 = 字段表 13 键 + 路由与
@@ -220,6 +239,9 @@ static void svc_yaml_apply(model_entry_t *m, struct yaml_node *item)
             *(int *)(base + f->flag) = 1;
         } else if (f->kind == YF_BOOL)
             *(int *)(base + f->off) = svc_yaml_truthy(v);
+        else if (f->kind == YF_TEMP || f->kind == YF_TOP_P)
+            *(float *)(base + f->off) =
+                svc_yaml_samp(v, f->key, m->name, f->kind == YF_TOP_P);
     }
 }
 
@@ -346,6 +368,8 @@ static void svc_yaml_parse_model(svc_yaml_state_t *st, struct yaml_node *item)
         return;
     model_entry_t *m = &st->models[st->model_count];
     __builtin_memset(m, 0, sizeof(*m));
+    m->temperature = -1.0f;
+    m->top_p = -1.0f;
     AIRY_STRNCPY_TERM(m->name, mn, sizeof(m->name));
     AIRY_STRNCPY_TERM(m->provider, pn, sizeof(m->provider));
     if (svc_yaml_decl_apply(m, item) != 0) {
@@ -415,6 +439,8 @@ void svc_yaml_expand_llm(svc_yaml_state_t *st)
     const char *fmt = llm_cfg->api_format[0] ? llm_cfg->api_format : "chat";
     model_entry_t *m = &st->models[0];
     __builtin_memset(m, 0, sizeof(*m));
+    m->temperature = -1.0f;
+    m->top_p = -1.0f;
     AIRY_STRNCPY_TERM(m->name, llm_cfg->model, sizeof(m->name));
     AIRY_STRNCPY_TERM(m->provider, fmt, sizeof(m->provider));
     AIRY_STRNCPY_TERM(m->api_format, fmt, sizeof(m->api_format));

@@ -39,6 +39,9 @@ typedef struct {
     const int *model_max_output;
     /* 与 models 同下标对齐的每模型调用方并发预算（D2-9④，0 = 未配置）。 */
     const int *model_max_concurrent;
+    /* 与 models 同下标对齐的每模型采样覆盖（-1 = 未声明）。 */
+    const float *model_temperature;
+    const float *model_top_p;
 } provider_config_t;
 
 typedef struct service_config {

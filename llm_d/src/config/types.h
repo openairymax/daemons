@@ -56,6 +56,10 @@ typedef struct {
     int tool_rounds;
     int vision;
     char thinking[8];
+    /* 每模型采样覆盖（model.yaml temperature/top_p）：-1 = 未声明。请求
+     * 未显式指定时生效，缺省仍由 envelope 的全局默认兜底。 */
+    float temperature;
+    float top_p;
     /* 端点附加头（model.yaml extra_headers）：线格式必需但非厂商无关的头，
      * 如 Messages 的协议版本，多条以 ';' 或换行分隔。 */
     char extra_headers[192];
@@ -97,6 +101,9 @@ typedef struct {
     int model_max_output[64];
     /* 与 model_names 同下标对齐：每模型调用方并发预算（D2-9④，0 = 未配置）。 */
     int model_max_concurrent[64];
+    /* 与 model_names 同下标对齐：每模型采样覆盖（-1 = 未声明）。 */
+    float model_temperature[64];
+    float model_top_p[64];
     size_t model_count;
     /* 聚合出的连接声明：api_format 为适配器查找键（chat | messages |
      * local），extra_headers 为首个显式声明该字段的模型带来的端点附加头。 */

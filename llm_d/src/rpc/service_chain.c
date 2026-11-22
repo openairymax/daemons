@@ -260,6 +260,7 @@ static void step_build(llm_service_t *svc, const provider_t *prov,
     if (cur_model[0])
         eff.model = cur_model;
     resolve_gen_params(svc, prov, &eff, model, msz, max_tokens);
+    resolve_sample(prov, model, &eff);
     eff.model = model;
     eff.max_tokens = *max_tokens;
 

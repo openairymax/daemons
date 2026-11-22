@@ -54,6 +54,19 @@ typedef enum {
  */
 gen_bound_src_t gen_bound_src(int explicit_max, int resolved);
 
+/**
+ * @brief 采样覆盖唯一解析点：请求显式值 > 模型条目声明 > 缺省。
+ *
+ * 只填补未声明项：temperature 由 temperature_set 判定（显式 0 合法），
+ * top_p 以 ">0 才下发" 为既有语义。两者都缺省时保持原样，由 envelope
+ * 的全局默认兜底，客户端不再复刻字面量。
+ *
+ * @param prov  选定的 provider（可为 NULL）
+ * @param model 已解析的模型名（可为 NULL）
+ * @param cfg   生效配置（就地填补）
+ */
+void resolve_sample(const provider_t *prov, const char *model, llm_request_config_t *cfg);
+
 #ifdef __cplusplus
 }
 #endif

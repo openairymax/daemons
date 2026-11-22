@@ -17,6 +17,7 @@
  */
 
 #include "airy_memory.h"
+#include "airy_defaults.h"
 #include "error.h"
 #include "airy_prov/provider_envelope.h"
 #include "svc_logger.h"
@@ -259,12 +260,14 @@ static cJSON *ctk_ensure(cJSON *root)
 
 /* 基础采样面：模型名、温度、最大 token、top_p。C11：temperature_set
  * 显式哨兵允许下发 0.0；未显式设置时维持旧请求体等价（>0 用之，否则
- * 0.7 兜底），旧调用方零感知。 */
+ * 全局默认兜底），旧调用方零感知。默认值只在 airy_defaults.h 定义一次。 */
 static void fill_core(cJSON *root, const llm_request_config_t *m, const char *default_model,
                       int default_max_tokens)
 {
     const char *model = (m->model && m->model[0]) ? m->model : default_model;
-    double temp = (m->temperature_set || m->temperature > 0.0f) ? (double)m->temperature : 0.7;
+    double temp = (m->temperature_set || m->temperature > 0.0f)
+                      ? (double)m->temperature
+                      : (double)AIRY_LLM_DEFAULT_TEMPERATURE;
     int max_tokens = m->max_tokens > 0 ? m->max_tokens : default_max_tokens;
 
     cJSON_AddStringToObject(root, "model", model ? model : "");

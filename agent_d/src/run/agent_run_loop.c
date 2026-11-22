@@ -130,6 +130,7 @@ agent_fail_desc_t agent_fail_desc(int rc, int denied)
 /* 构建 llm_d complete_stream 请求（透传本轮工具目录与常规生成参数）。
  * 不在此处写 max_tokens：输出上限的权威在配置面（model.yaml max_output），
  * 由 llm_d 的生成参数解析统一裁决；调用方写死一个数值会让该配置永久失效。
+ * temperature/top_p 同理归模型条目，客户端不复制默认值。
  * tools_src 是 run_catalog_load 产出的本轮目录快照（OpenAI tools 条目）。
  * has_snapshot 区分「快照为空」与「从未取到快照」：前者如实下发无工具，
  * 后者才回落静态 SSoT bootstrap（事件标 catalog_source=static）。 */
@@ -149,7 +150,6 @@ static char *run_build_llm_params(const char *model, const cJSON *messages, cons
         cJSON_AddItemToObject(params, "tools", tools);
     else
         cJSON_Delete(tools);
-    cJSON_AddNumberToObject(params, "temperature", 0.7);
     char *params_str = cJSON_PrintUnformatted(params);
     cJSON_Delete(params);
     return params_str;
