@@ -14,6 +14,8 @@
 
 #include "builtin/builtin_limits_internal.h"
 
+#include "platform_paths.h"
+
 #ifndef _WIN32
 
 #include <strings.h>
@@ -87,12 +89,12 @@ static int env_path_has(const char *name)
     size_t nlen = strlen(name);
     const char *seg = path;
     while (*seg) {
-        const char *end = strchr(seg, ':');
+        const char *end = strchr(seg, AIRY_ENV_SEP);
         size_t len = end ? (size_t)(end - seg) : strlen(seg);
         if (len > 0 && len + nlen + 2 <= 512) {
             char full[512];
             AIRY_MEMCPY(full, seg, len);
-            full[len] = '/';
+            full[len] = AIRY_PATH_SEP;
             AIRY_MEMCPY(full + len + 1, name, nlen + 1);
             if (access(full, X_OK) == 0)
                 return 1;
