@@ -18,8 +18,6 @@
 
 #include "builtin/builtin_net_internal.h"
 
-#include "builtin/builtin_exec_internal.h"
-#include "builtin/builtin_limits_internal.h"
 #include "network_common.h"
 
 /**
