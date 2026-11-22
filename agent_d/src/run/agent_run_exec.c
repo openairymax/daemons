@@ -19,6 +19,7 @@
 #include "agent_run_engine.h"
 #include "agent_run_internal.h"
 #include "agent_task_ledger.h"
+#include "agent_turn_rec.h"
 #include "agent_verify.h"
 
 #include "airy_memory.h"
@@ -263,34 +264,30 @@ static int agent_think_process(const char *session_id, const char *prompt,
     return 0;
 }
 
-/* 会话持久化：成功后把本轮问答写入 mem_d（best effort）。 */
+/* 会话持久化：成功后把本轮问答写入 mem_d（best effort）。
+ * 一轮问答落两条记录（role=user/assistant，conv 与会话同值），契约由
+ * agent_turn_rec 唯一给出；写失败只降级为日志，不回滚已完成的一轮。 */
 static void agent_persist(const char *session_id, const char *user_prompt,
                           const char *assistant_text)
 {
-    if (!user_prompt)
-        return;
-    size_t data_len = strlen(user_prompt) + (assistant_text ? strlen(assistant_text) : 0) + 24;
-    char *data = (char *)AIRY_MALLOC(data_len);
-    cJSON *params = data ? cJSON_CreateObject() : NULL;
-    cJSON *meta = params ? cJSON_CreateObject() : NULL;
-    if (!meta) {
-        AIRY_FREE(data);
-        cJSON_Delete(params);
-        return;
-    }
-    snprintf(data, data_len, "user: %s\nassistant: %s", user_prompt,
-             assistant_text ? assistant_text : "");
-    cJSON_AddStringToObject(params, "data", data);
-    AIRY_FREE(data);
-    cJSON_AddStringToObject(meta, "session_id", session_id ? session_id : "");
-    cJSON_AddStringToObject(meta, "role", "agentrt");
-    cJSON_AddItemToObject(params, "metadata", meta);
+    cJSON *turn = agent_turn_rec(session_id, user_prompt, assistant_text);
 
-    char *resp = run_rpc("mem.sock", "write", params, AGENT_RUN_TOOL_TIMEOUT_MS);
-    if (!resp)
-        SVC_LOG_WARN("agent.run: mem.write failed (session=%s)", session_id ? session_id : "?");
-    else
-        AIRY_FREE(resp);
+    if (!turn)
+        return;
+
+    int n = cJSON_GetArraySize(turn);
+
+    for (int i = 0; i < n; i++) {
+        char *resp = run_rpc("mem.sock", "write", cJSON_GetArrayItem(turn, i),
+                             AGENT_RUN_TOOL_TIMEOUT_MS);
+
+        if (!resp)
+            SVC_LOG_WARN("agent.run: mem.write failed (session=%s, record=%d)",
+                         session_id ? session_id : "?", i);
+        else
+            AIRY_FREE(resp);
+    }
+    cJSON_Delete(turn);
 }
 
 /* 顶层 "role:" 键解析（简单 YAML；复杂 YAML 应使用 JSON）。 */

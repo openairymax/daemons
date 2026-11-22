@@ -20,6 +20,7 @@ set(AGENT_TEST_SOURCES
     test_task_orchestrate.c
     test_task_ledger.c
     test_turn_ckpt.c
+    test_turn_rec.c
     test_agent_review.c
     test_invoke_payload.c
 )
