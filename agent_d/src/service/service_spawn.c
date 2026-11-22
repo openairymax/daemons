@@ -61,6 +61,25 @@ static int agent_spawn_init_entry(agent_service_t *svc, agent_entry_internal_t *
     return AIRY_SUCCESS;
 }
 
+/* Relay the child's own degradation list into the daemon log. The runner
+ * reports which capability backends failed to initialise (for example
+ * syscall_proxy); swallowing that field would leave a child that answers
+ * without any tool silently indistinguishable from a healthy one. */
+#if AIRY_PLATFORM_POSIX
+static void agent_spawn_note_degrade(const char *agent_id, cJSON *frame)
+{
+    cJSON *deg = cJSON_GetObjectItem(frame, "degraded");
+    if (!cJSON_IsArray(deg) || cJSON_GetArraySize(deg) == 0)
+        return;
+    cJSON *first = cJSON_GetArrayItem(deg, 0);
+    cJSON *reason = cJSON_GetObjectItem(frame, "reason");
+    SVC_LOG_WARN("Agent child degraded: agent_id=%s, capabilities=%d, first=%s, reason=%s",
+                 agent_id, cJSON_GetArraySize(deg),
+                 cJSON_IsString(first) ? first->valuestring : "(unset)",
+                 cJSON_IsString(reason) ? reason->valuestring : "(unset)");
+}
+#endif
+
 /* Read the child's readiness handshake; a not-ready child is killed and
  * reaped and child_pid is reset to -1. */
 #if AIRY_PLATFORM_POSIX
@@ -77,6 +96,8 @@ static void agent_spawn_verify_child(const char *agent_id, pid_t *child_pid, int
             cJSON *ready_item = cJSON_GetObjectItem(r, "ready");
             if (ready_item && cJSON_IsTrue(ready_item))
                 alive = 1;
+            if (alive)
+                agent_spawn_note_degrade(agent_id, r);
             cJSON_Delete(r);
         }
     }
