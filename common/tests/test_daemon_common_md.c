@@ -124,10 +124,13 @@ void test_md_grow_beyond_capacity(void)
 
     g_dispatch_called = 0;
     cJSON *req = cJSON_CreateObject();
+    /* 必须带 jsonrpc 版本字段：jsonrpc_validate_request 以 2.0 为请求
+     * 合法性的硬前提，缺字段的帧在解析阶段即被拒，永远到不了方法表。 */
+    cJSON_AddStringToObject(req, "jsonrpc", "2.0");
     cJSON_AddStringToObject(req, "method", "grow_f");
     cJSON_AddNumberToObject(req, "id", 7);
     cJSON_AddObjectToObject(req, "params");
-    method_dispatcher_dispatch(disp, req, NULL, NULL);
+    TEST_ASSERT_EQ(method_dispatcher_dispatch(disp, req, NULL, NULL), 0, "grow_f 分发返回成功");
     TEST_ASSERT_EQ(g_dispatch_called, 1, "扩容后注册的方法仍可分发");
 
     cJSON_Delete(req);
