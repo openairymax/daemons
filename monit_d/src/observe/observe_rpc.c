@@ -459,8 +459,8 @@ int observe_rpc_register(void *disp)
         {"observe_query_metrics", obs_m_query_metrics},
         {"observe_get_metrics", obs_m_get_metrics},
     };
-    int rc = method_dispatcher_register_all((method_dispatcher_t *)disp, methods,
-                                            sizeof(methods) / sizeof(methods[0]));
+    int rc = disp_register_all((method_dispatcher_t *)disp, methods,
+                               sizeof(methods) / sizeof(methods[0]));
     if (rc == 0)
         SVC_LOG_INFO("observe_rpc: registered observe.* methods on monit_d dispatcher");
     return rc;

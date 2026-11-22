@@ -417,8 +417,8 @@ int info_rpc_register(void *disp)
         {"info_health", info_m_health},
         {"info_hardware", info_m_hardware},
     };
-    int rc = method_dispatcher_register_all((method_dispatcher_t *)disp, methods,
-                                            sizeof(methods) / sizeof(methods[0]));
+    int rc = disp_register_all((method_dispatcher_t *)disp, methods,
+                               sizeof(methods) / sizeof(methods[0]));
     if (rc == 0)
         SVC_LOG_INFO("info_rpc: registered info.* methods on monit_d dispatcher");
     return rc;
