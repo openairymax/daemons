@@ -17,6 +17,7 @@
  * 统一的密钥热重载对本地端点无功能影响——key 永不外发。
  */
 
+#include "airy_defaults.h"
 #include "airy_memory.h"
 #include "error.h"
 #include "daemon_platform_ext.h"
@@ -26,12 +27,11 @@
 
 #include <cjson/cJSON.h>
 
-/* 代码级默认端点：仅当调用方未传 base_url 时使用。部署标准配置
- * （model.yaml local provider / llm: 段）显式传 base_url —— Ollama 默认
- * http://localhost:11434，vLLM 走 OpenAI 兼容格式 8080/v1——实际以
- * yaml 传入值为准（2026-08-20 审查：代码默认与 yaml 默认的差异为
- * 文档级，非功能缺陷）。 */
-#define LOCAL_DEFAULT_BASE "http://localhost:8080/v1"
+/* 代码级默认端点只在调用方未传 base_url 时生效，取值统一引用
+ * airy_defaults.h 的本地端点目录 SSoT（vLLM/OpenAI 兼容口 8080）。
+ * 部署标准配置 model.yaml 显式声明 base_url，实际以 yaml 为准；
+ * Ollama 11434 与自托管 llama-server 11435 是不同语义，不得互换。 */
+#define LOCAL_DEFAULT_BASE AIRY_EP_LOCAL_PROVIDERS_URL
 #define LOCAL_CHAT_PATH "/chat/completions"
 
 /* D2-9④：/props 单发探测超时（秒）。探测失败即终态（不随请求重试），
