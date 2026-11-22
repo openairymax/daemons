@@ -82,6 +82,7 @@ static void builtin_html_unescape(char *s)
 /* 去标签并反转义实体。 */
 static void builtin_strip_html(char *s)
 {
+    char *start = s;
     char *r = s;
     while (*s) {
         if (*s == '<') {
@@ -94,7 +95,7 @@ static void builtin_strip_html(char *s)
         *r++ = *s++;
     }
     *r = '\0';
-    builtin_html_unescape(s);
+    builtin_html_unescape(start);
 }
 
 static void snip_take(const char *base, const regmatch_t *m, char *snip, size_t cap)
