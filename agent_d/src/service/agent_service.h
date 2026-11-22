@@ -52,6 +52,9 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id);
  * @param history_json [in] Optional OpenAI messages JSON array (user and
  *        assistant turns) replayed before the current input to support
  *        multi-turn follow-ups; malformed or empty arrays are dropped
+ * @param parent_task_id [in] Optional parent task identity when this invoke
+ *        is a subagent of another task; NULL for top-level invokes. The
+ *        runner exposes it on AgentContext so child tasks can report back
  * @param timeout_s [in] Request-scoped read budget in seconds. 0 or negative
  *        selects the daemon default (300s, AIRY_AGENT_INVOKE_TIMEOUT_S);
  *        values above the operator ceiling clamp to it. Deadline-aware
@@ -69,7 +72,7 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id);
  */
 int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char *input, size_t len,
                          const char *workspace_dir, const char *session_id,
-                         const char *history_json, int timeout_s,
+                         const char *history_json, const char *parent_task_id, int timeout_s,
                          airy_cancel_token_t *cancel_token, char **out_output);
 
 /**
