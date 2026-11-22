@@ -22,5 +22,6 @@ set(AGENT_D_SOURCES
     src/run/agent_task_ledger.c
     src/run/agent_task_orchestrate.c
     src/run/agent_turn_ckpt.c
+    src/run/agent_turn_rec.c
     src/run/agent_verify.c
 )
