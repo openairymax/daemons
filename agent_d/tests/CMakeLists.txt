@@ -42,6 +42,8 @@ set(AGENT_RUN_CORE_SOURCES
     # R16: exec 收尾的语义复核挂载点
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_review.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_task_orchestrate.c
+    # S-P0-05: 每角色记忆记录由 exec 收尾调用，白盒测试须同编该单元
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_turn_rec.c
 )
 
 set(AGENT_COMMON_INCLUDES
