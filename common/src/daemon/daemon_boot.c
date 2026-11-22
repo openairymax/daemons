@@ -22,6 +22,7 @@
  */
 
 #include "airy_rt.h"
+#include "daemon_crash.h"
 #include "daemon_main.h"
 #include "compat.h"
 
@@ -177,6 +178,9 @@ int daemon_boot(int argc, char **argv, const daemon_boot_t *boot)
     log_cfg.outputs = (1u << LOG_OUTPUT_CONSOLE);
     log_init(&log_cfg);
     atexit(log_cleanup);
+    /* 致命信号现场落盘（stderr 已被启动方重定向到服务日志）：进程静默
+     * 消失时，日志里的 fatal/frames 是唯一可离线符号化的证据。 */
+    daemon_crash();
 
     int core_ret = airy_init();
     if (core_ret == AIRY_SUCCESS)
