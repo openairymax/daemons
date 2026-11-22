@@ -21,6 +21,7 @@ set(AGENT_TEST_SOURCES
     test_task_ledger.c
     test_turn_ckpt.c
     test_agent_review.c
+    test_invoke_payload.c
 )
 
 # 引擎闭环符号：white-box include 的测试已自带被包含单元，其余单元在此同编。
