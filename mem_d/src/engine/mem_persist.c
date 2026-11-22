@@ -404,7 +404,7 @@ static bool mem_tail_repair(mem_service_t *svc, char **content, size_t *len)
     char *tail = (char *)AIRY_MALLOC(n - cut + 1);
     if (!tail)
         return false;
-    memcpy(tail, buf + cut, n - cut);
+    AIRY_MEMCPY(tail, buf + cut, n - cut);
     tail[n - cut] = '\0';
     cJSON *root = cJSON_Parse(tail);
     bool keep = root != NULL;
@@ -415,7 +415,7 @@ static bool mem_tail_repair(mem_service_t *svc, char **content, size_t *len)
     char *fixed = (char *)AIRY_MALLOC(keep_len + 2);
     if (!fixed)
         return false;
-    memcpy(fixed, buf, keep_len);
+    AIRY_MEMCPY(fixed, buf, keep_len);
     fixed[keep_len] = '\n';
     fixed[keep_len + 1] = '\0';
 
