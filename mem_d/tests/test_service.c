@@ -770,6 +770,19 @@ static char *write_text(mem_service_t *svc, const char *text)
     return id;
 }
 
+static char *write_meta(mem_service_t *svc, const char *text, const char *meta)
+{
+    mem_write_request_t req = {
+        .data = (void *)text,
+        .len = strlen(text),
+        .metadata = meta,
+    };
+    char *id = NULL;
+    assert(mem_service_write(svc, &req, &id) == AIRY_SUCCESS);
+    assert(id != NULL);
+    return id;
+}
+
 static size_t recent_ids(mem_service_t *svc, char *out[], size_t cap)
 {
     mem_recent_item_t *items = NULL;
@@ -959,6 +972,54 @@ static void test_recent_order_after_reload(void)
     printf("    PASSED\n");
 }
 
+/* S-P1-16：按 metadata.conv 过滤，且过滤先于截断——旧会话记录再新也不能
+ * 占满 limit 把本会话挤空；检索同样只在会话内打分。 */
+static void test_recent_conv_scope(void)
+{
+    printf("  test_recent_conv_scope...\n");
+    mem_test_clean_persist();
+    mem_service_t *svc = mem_service_create(16);
+    assert(svc != NULL);
+
+    char *a1 = write_meta(svc, "alpha record one", "{\"conv\":\"sess_a\"}");
+    char *b1 = write_meta(svc, "beta record one", "{\"conv\":\"sess_b\"}");
+    char *a2 = write_meta(svc, "alpha record two", "{\"conv\":\"sess_a\"}");
+
+    mem_recent_item_t *items = NULL;
+    size_t n = 0;
+    assert(mem_service_recent_scoped(svc, 1, "sess_a", &items, &n) == AIRY_SUCCESS);
+    assert(n == 1);
+    assert(strcmp(items[0].record_id, a2) == 0);
+    mem_recent_items_free(items, n);
+
+    items = NULL;
+    n = 99;
+    assert(mem_service_recent_scoped(svc, 5, "sess_c", &items, &n) == AIRY_SUCCESS);
+    assert(n == 0);
+    assert(items == NULL);
+
+    mem_search_hit_t *hits = NULL;
+    size_t hit_n = 0;
+    assert(mem_service_search_scoped(svc, NULL, "sess_a", "record", 5, &hits, &hit_n) ==
+           AIRY_SUCCESS);
+    assert(hit_n == 2);
+    mem_search_hits_free(hits, hit_n);
+
+    hits = NULL;
+    hit_n = 0;
+    assert(mem_service_search_scoped(svc, NULL, NULL, "record", 5, &hits, &hit_n) ==
+           AIRY_SUCCESS);
+    assert(hit_n == 3);
+    mem_search_hits_free(hits, hit_n);
+
+    AIRY_FREE(a1);
+    AIRY_FREE(b1);
+    AIRY_FREE(a2);
+    mem_service_destroy(svc);
+    mem_test_clean_persist();
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
 
@@ -998,6 +1059,7 @@ int main(void)
     test_recent_order_delete_tail();
     test_recent_order_delete_all();
     test_recent_order_after_reload();
+    test_recent_conv_scope();
     printf("=== All tests PASSED ===\n");
     return 0;
 }

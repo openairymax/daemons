@@ -73,6 +73,18 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
                        mem_search_hit_t **out_hits, size_t *out_count);
 
 /**
+ * @brief Search with optional scope filters.
+ *
+ * `kb_id` restricts to records of that knowledge base; `conv` restricts to
+ * records whose metadata.conv equals it (conversation isolation). Both are
+ * optional (NULL = no restriction). Filtering happens before ranking so the
+ * limit is never consumed by out-of-scope records.
+ */
+int mem_service_search_scoped(mem_service_t *svc, const char *kb_id, const char *conv,
+                              const char *query, uint32_t limit,
+                              mem_search_hit_t **out_hits, size_t *out_count);
+
+/**
  * @brief Read a memory record.
  * @return AIRY_SUCCESS on success; *out_record holds the record content
  *         (caller frees via mem_record_free)
@@ -100,6 +112,15 @@ void mem_record_free(mem_record_t *rec);
  */
 int mem_service_recent(mem_service_t *svc, uint32_t limit,
                        mem_recent_item_t **out_items, size_t *out_count);
+
+/**
+ * @brief 最近记录（可按会话过滤）。
+ *
+ * `conv` 非空时只返回 metadata.conv 匹配的记录，全量倒序扫描后截断——
+ * 不能先取最新 limit 条再过滤，否则旧会话会把窗口占满导致本会话为空。
+ */
+int mem_service_recent_scoped(mem_service_t *svc, uint32_t limit, const char *conv,
+                              mem_recent_item_t **out_items, size_t *out_count);
 void mem_recent_items_free(mem_recent_item_t *items, size_t count);
 
 /**
