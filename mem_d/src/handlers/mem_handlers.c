@@ -67,14 +67,18 @@ void handle_search(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *query = cJSON_GetObjectItem(params, "query");
     cJSON *limit = cJSON_GetObjectItem(params, "limit");
+    cJSON *conv = cJSON_GetObjectItem(params, "conv");
 
     JSONRPC_REQUIRE(query && cJSON_IsString(query), client_fd, "Missing query string", id);
 
     mem_search_hit_t *hits = NULL;
     size_t count = 0;
     uint32_t lim = limit && cJSON_IsNumber(limit) ? clamp_u32(limit->valueint, 10, 100) : 10;
+    /* 可选会话作用域：给定 conv 时只在同一会话记录中检索（S-P1-16）。 */
+    const char *scope = cJSON_IsString(conv) && conv->valuestring[0] ? conv->valuestring : NULL;
 
-    int ret = mem_service_search(g_service, query->valuestring, lim, &hits, &count);
+    int ret = mem_service_search_scoped(g_service, NULL, scope, query->valuestring, lim,
+                                        &hits, &count);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Memory search failed", id);
         return;
@@ -144,11 +148,13 @@ void handle_count(int id, airy_sock_t client_fd)
 void handle_recent(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *limit = params ? cJSON_GetObjectItem(params, "limit") : NULL;
+    cJSON *conv = params ? cJSON_GetObjectItem(params, "conv") : NULL;
     uint32_t lim = limit && cJSON_IsNumber(limit) ? clamp_u32(limit->valueint, 0, 1000) : 0;
+    const char *scope = cJSON_IsString(conv) && conv->valuestring[0] ? conv->valuestring : NULL;
 
     mem_recent_item_t *items = NULL;
     size_t count = 0;
-    int ret = mem_service_recent(g_service, lim, &items, &count);
+    int ret = mem_service_recent_scoped(g_service, lim, scope, &items, &count);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Memory recent failed", id);
         return;
