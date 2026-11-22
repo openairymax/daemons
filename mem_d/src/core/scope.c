@@ -2,21 +2,117 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 /**
- * @file search.c
- * @brief 记忆检索：TF-IDF / 嵌入打分、范围过滤与截断。
+ * @file scope.c
+ * @brief 记忆范围读路径：最近列表与按 conv/kb 过滤的检索。
  *
- * 检索是 mem_d 唯一的读放大路径，独立成文件以便单独推敲：向量准备在锁外
- * 完成（嵌入是网络调用），记录扫描在锁内，排序与截断在锁外。范围过滤
- * （kb_id / conv）先于打分，保证 limit 不被范围外记录占用。
+ * mem.recent 与 mem.search 共用同一套范围谓词（metadata.conv / kb_id）与
+ * 写入序倒序扫描语义，故合并为一个读路径文件：内部头 service.h 的 src 面
+ * 扇入因此保持 5（G13 拆并裁决：拆后 load ≤ 5）。
+ *
+ * 最近列表必须全量倒序扫描后再截断——先取最新 limit 条再过滤会让旧会话
+ * 占满窗口，本会话反而为空；检索则先过滤后打分，保证 limit 不被范围外
+ * 记录占用。
  */
 
 #include "service.h"
+#include "airy_memory.h"
 #include "airy_types.h"
 #include "engine/kb.h"
 
 #include "svc_logger.h"
 
+#include <cjson/cJSON.h>
 #include <string.h>
+
+#define MEM_RECENT_DEFAULT_LIMIT 10
+
+/* metadata.conv 与给定值相等即命中；无 metadata / 无 conv 视为不匹配。 */
+int mem_rec_in_conv(const mem_record_entry_t *rec, const char *conv)
+{
+    if (!rec || !rec->metadata || !conv)
+        return 0;
+    cJSON *root = cJSON_Parse(rec->metadata);
+    if (!root)
+        return 0;
+    cJSON *c = cJSON_GetObjectItem(root, "conv");
+    int hit = cJSON_IsString(c) && c->valuestring && strcmp(c->valuestring, conv) == 0;
+    cJSON_Delete(root);
+    return hit;
+}
+
+int mem_recent_scoped(mem_service_t *svc, uint32_t limit, const char *conv,
+                      mem_recent_item_t **out_items, size_t *out_count)
+{
+    if (!svc || !svc->initialized || !out_items || !out_count)
+        return AIRY_ERR_INVALID_PARAM;
+    *out_items = NULL;
+    *out_count = 0;
+
+    if (limit == 0)
+        limit = MEM_RECENT_DEFAULT_LIMIT;
+
+    airy_mtx_lock(&svc->lock);
+
+    size_t total = svc->record_count;
+    size_t take = total < limit ? total : limit;
+    mem_recent_item_t *items =
+        take ? (mem_recent_item_t *)AIRY_CALLOC(take, sizeof(mem_recent_item_t)) : NULL;
+    if (take && !items) {
+        airy_mtx_unlock(&svc->lock);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+
+    /* 下标倒序即写入序倒序：写入总落在 record_count 处，删除以 memmove
+     * 连续压实（mem_remove_record_at），故数组下标恒等于写入序。不依赖
+     * created_at（秒级精度，同秒多写时会并列）。 */
+    size_t n = 0;
+    for (size_t i = 0; i < total && n < take; i++) {
+        const mem_record_entry_t *rec = &svc->records[total - 1 - i];
+        if (!rec->record_id || !rec->data)
+            continue;
+        if (conv && !mem_rec_in_conv(rec, conv))
+            continue;
+        mem_recent_item_t *it = &items[n];
+        it->record_id = AIRY_STRDUP(rec->record_id);
+        if (!mem_rec_copy_out(rec, &it->data, &it->len, &it->metadata)) {
+            AIRY_FREE(it->record_id);
+            it->record_id = NULL;
+            continue;
+        }
+        it->created_at = rec->created_at;
+        n++;
+    }
+
+    airy_mtx_unlock(&svc->lock);
+
+    if (n == 0) {
+        AIRY_FREE(items);
+        return AIRY_SUCCESS;
+    }
+
+    mem_recent_item_t *shrunk = (mem_recent_item_t *)AIRY_REALLOC(items, n * sizeof(*items));
+    *out_items = shrunk ? shrunk : items;
+    *out_count = n;
+    return AIRY_SUCCESS;
+}
+
+int mem_service_recent(mem_service_t *svc, uint32_t limit,
+                       mem_recent_item_t **out_items, size_t *out_count)
+{
+    return mem_recent_scoped(svc, limit, NULL, out_items, out_count);
+}
+
+void mem_recent_items_free(mem_recent_item_t *items, size_t count)
+{
+    if (!items)
+        return;
+    for (size_t i = 0; i < count; i++) {
+        AIRY_FREE(items[i].record_id);
+        AIRY_FREE(items[i].data);
+        AIRY_FREE(items[i].metadata);
+    }
+    AIRY_FREE(items);
+}
 
 /* 子串命中密度：查询在正文中出现的次数 × 查询长度 / 正文长度。 */
 static float mem_compute_score(const mem_record_entry_t *rec, const char *query)
@@ -140,21 +236,21 @@ static size_t mem_hits_trim(mem_search_hit_t *hits, size_t n, uint32_t limit)
 int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
                        mem_search_hit_t **out_hits, size_t *out_count)
 {
-    return mem_service_search_scoped(svc, NULL, NULL, query, limit, out_hits, out_count);
+    return mem_search_scoped(svc, NULL, NULL, query, limit, out_hits, out_count);
 }
 
 /* 兼容入口：仅按 kb_id 过滤（kb.c 使用）。 */
 int mem_service_search_filtered(mem_service_t *svc, const char *kb_id, const char *query,
                                 uint32_t limit, mem_search_hit_t **out_hits, size_t *out_count)
 {
-    return mem_service_search_scoped(svc, kb_id, NULL, query, limit, out_hits, out_count);
+    return mem_search_scoped(svc, kb_id, NULL, query, limit, out_hits, out_count);
 }
 
 /* 共享检索核心：kb_id / conv 非空时仅在匹配记录中打分（先过滤后排名，
  * 保证 limit 不被范围外记录占用）。 */
-int mem_service_search_scoped(mem_service_t *svc, const char *kb_id, const char *conv,
-                              const char *query, uint32_t limit,
-                              mem_search_hit_t **out_hits, size_t *out_count)
+int mem_search_scoped(mem_service_t *svc, const char *kb_id, const char *conv,
+                      const char *query, uint32_t limit,
+                      mem_search_hit_t **out_hits, size_t *out_count)
 {
     mem_rank_t r;
     mem_search_hit_t *hits;

@@ -27,8 +27,7 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 #   core/ daemon 入口与服务核心 · handlers/ IPC 请求处理器 · engine/ 记忆引擎实现
 set(MEM_SERVICE_SOURCES
     src/core/service.c
-    src/core/search.c
-    src/core/recent.c
+    src/core/scope.c
     src/engine/mem_persist.c
     src/engine/kb.c
     src/engine/vector.c

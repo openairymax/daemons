@@ -24,8 +24,8 @@
  *   for backward compatibility
  *
  * Refactored: JSONL persistence → mem_persist.c; KB operations → kb.c;
- * search/ranking → search.c; recent listing → recent.c. This file owns the
- * service lifecycle and record CRUD.
+ * search/ranking and recent listing → scope.c. This file owns the service
+ * lifecycle and record CRUD.
  */
 
 #include "service.h"
@@ -108,7 +108,7 @@ static char *mem_dup_data(const void *data, size_t len)
     return p;
 }
 
-/* 复制记录内容与 metadata 到调用方（须持有记录锁）。recent.c 复用。 */
+/* 复制记录内容与 metadata 到调用方（须持有记录锁）。scope.c 复用。 */
 int mem_rec_copy_out(const mem_record_entry_t *rec, void **out_data, size_t *out_len,
                      char **out_meta)
 {
