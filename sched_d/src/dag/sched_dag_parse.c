@@ -168,21 +168,10 @@ void sched_dag_free(sched_dag_t *dag)
     AIRY_FREE(dag);
 }
 
-int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
+/* Graph-level scalars: name/input/workspace defaults, shared retry window,
+ * and the per-node default execution budget (node timeout_ms overrides it). */
+static void dag_meta(sched_dag_t *dag, cJSON *root)
 {
-    cJSON *nodes_json = cJSON_GetObjectItem(root, "nodes");
-    if (!cJSON_IsArray(nodes_json) || cJSON_GetArraySize(nodes_json) == 0) {
-        return AIRY_ERR_INVALID_PARAM;
-    }
-    int n = cJSON_GetArraySize(nodes_json);
-    if (n > SCHED_DAG_MAX_NODES) {
-        return AIRY_ERR_OVERFLOW;
-    }
-
-    sched_dag_t *dag = (sched_dag_t *)AIRY_CALLOC(1, sizeof(sched_dag_t));
-    if (!dag)
-        return AIRY_ERR_OUT_OF_MEMORY;
-
     cJSON *name = cJSON_GetObjectItem(root, "name");
     dag->name =
         AIRY_STRDUP(cJSON_IsString(name) && name->valuestring ? name->valuestring : "unnamed_dag");
@@ -204,42 +193,61 @@ int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
     cJSON *dtimeout = cJSON_GetObjectItem(root, "timeout_ms");
     if (cJSON_IsNumber(dtimeout) && dtimeout->valuedouble > 0)
         dag->exec_timeout_ms = (uint32_t)dtimeout->valuedouble;
+}
+
+/* One node: id required and unique; goal/role default; depends array. The
+ * node stays owned by the dag (counted) even on partial failure so
+ * sched_dag_free reclaims it. */
+static void dag_add_node(sched_dag_t *dag, cJSON *nj, int *err)
+{
+    cJSON *nid = cJSON_GetObjectItem(nj, "id");
+    if (!cJSON_IsString(nid) || !nid->valuestring || !nid->valuestring[0]) {
+        *err = AIRY_ERR_INVALID_PARAM;
+        return;
+    }
+    for (size_t p = 0; p < dag->node_count; p++) {
+        if (strcmp(dag->nodes[p]->id, nid->valuestring) == 0) {
+            *err = AIRY_ERR_INVALID_PARAM;
+            return;
+        }
+    }
+
+    sched_dag_node_t *node = (sched_dag_node_t *)AIRY_CALLOC(1, sizeof(sched_dag_node_t));
+    if (!node) {
+        *err = AIRY_ERR_OUT_OF_MEMORY;
+        return;
+    }
+    node->id = AIRY_STRDUP(nid->valuestring);
+    node_fields(node, nj, err);
+    node_deps(node, nj, err);
+    dag->nodes[dag->node_count++] = node;
+}
+
+int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
+{
+    cJSON *nodes_json = cJSON_GetObjectItem(root, "nodes");
+    if (!cJSON_IsArray(nodes_json) || cJSON_GetArraySize(nodes_json) == 0) {
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    int n = cJSON_GetArraySize(nodes_json);
+    if (n > SCHED_DAG_MAX_NODES) {
+        return AIRY_ERR_OVERFLOW;
+    }
+
+    sched_dag_t *dag = (sched_dag_t *)AIRY_CALLOC(1, sizeof(sched_dag_t));
+    if (!dag)
+        return AIRY_ERR_OUT_OF_MEMORY;
+
+    dag_meta(dag, root);
     dag->node_count = 0;
 
-    /* Nodes: id required and unique; goal defaults ""; role defaults "coding";
-     * depends array. err records the concrete failure reason: structurally
-     * invalid INVALID_PARAM / alloc failure OOM / dependency cycle
-     * CYCLE_DETECTED (previously every failure was lumped into cycle
-     * detection, misleading callers). */
+    /* err records the concrete failure reason: structurally invalid
+     * INVALID_PARAM / alloc failure OOM / dependency cycle CYCLE_DETECTED
+     * (previously every failure was lumped into cycle detection, misleading
+     * callers). */
     int err = AIRY_SUCCESS;
-    for (int i = 0; i < n; i++) {
-        cJSON *nj = cJSON_GetArrayItem(nodes_json, i);
-        cJSON *nid = cJSON_GetObjectItem(nj, "id");
-        if (!cJSON_IsString(nid) || !nid->valuestring || !nid->valuestring[0]) {
-            err = AIRY_ERR_INVALID_PARAM;
-            break;
-        }
-        for (size_t p = 0; p < dag->node_count; p++) {
-            if (strcmp(dag->nodes[p]->id, nid->valuestring) == 0) {
-                err = AIRY_ERR_INVALID_PARAM;
-                break;
-            }
-        }
-        if (err != AIRY_SUCCESS)
-            break;
-
-        sched_dag_node_t *node = (sched_dag_node_t *)AIRY_CALLOC(1, sizeof(sched_dag_node_t));
-        if (!node) {
-            err = AIRY_ERR_OUT_OF_MEMORY;
-            break;
-        }
-        node->id = AIRY_STRDUP(nid->valuestring);
-        node_fields(node, nj, &err);
-        node_deps(node, nj, &err);
-        dag->nodes[dag->node_count++] = node;
-        if (err != AIRY_SUCCESS)
-            break;
-    }
+    for (int i = 0; i < n && err == AIRY_SUCCESS; i++)
+        dag_add_node(dag, cJSON_GetArrayItem(nodes_json, i), &err);
 
     if (err == AIRY_SUCCESS)
         sched_dag_validate_deps(dag, &err);
