@@ -163,8 +163,9 @@ void svc_destroy(void)
 /* 策略层附加装配挂点：plugin_* 方法族（dlopen 执行域）与 skill_* 方法族
  * （syscall 技能机制服务面）登记到 tool 命名空间（gateway plugin.* cap
  * 改路由到此）。 */
-void svc_attach(void *dispatcher)
+int svc_attach(void *dispatcher)
 {
-    plugin_rpc_register(dispatcher);
-    skill_rpc_register(dispatcher);
+    if (plugin_rpc_register(dispatcher) != 0)
+        return -1;
+    return skill_rpc_register(dispatcher);
 }

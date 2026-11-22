@@ -106,6 +106,34 @@ void test_md_multiple_methods(void)
     method_dispatcher_destroy(disp);
 }
 
+void test_md_grow_beyond_capacity(void)
+{
+    printf("\n--- [MD] 超出初始容量注册 ---\n");
+
+    /* 容量是初始值而非上限：超出后必须扩容成功并仍可分发。 */
+    method_dispatcher_t *disp = method_dispatcher_create(2);
+    TEST_ASSERT_NOT_NULL(disp, "method_dispatcher_create(2) 成功");
+
+    static const char *names[] = {"grow_a", "grow_b", "grow_c", "grow_d", "grow_e", "grow_f"};
+    int all_ok = 1;
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        if (method_dispatcher_register(disp, names[i], dummy_handler, NULL) != 0)
+            all_ok = 0;
+    }
+    TEST_ASSERT(all_ok, "容量 2 下连续注册 6 个方法全部成功");
+
+    g_dispatch_called = 0;
+    cJSON *req = cJSON_CreateObject();
+    cJSON_AddStringToObject(req, "method", "grow_f");
+    cJSON_AddNumberToObject(req, "id", 7);
+    cJSON_AddObjectToObject(req, "params");
+    method_dispatcher_dispatch(disp, req, NULL, NULL);
+    TEST_ASSERT_EQ(g_dispatch_called, 1, "扩容后注册的方法仍可分发");
+
+    cJSON_Delete(req);
+    method_dispatcher_destroy(disp);
+}
+
 void test_md_overwrite_registration(void)
 {
     printf("\n--- [MD] 覆盖注册 ---\n");

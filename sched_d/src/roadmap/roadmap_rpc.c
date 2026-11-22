@@ -332,15 +332,18 @@ static void on_roadmap_status_method(cJSON *params, int id, void *user_data)
     roadmap_on_status(params, id, *(airy_sock_t *)user_data);
 }
 
-void roadmap_rpc_register(void *disp)
+int roadmap_rpc_register(void *disp)
 {
-    method_dispatcher_t *d = (method_dispatcher_t *)disp;
-    if (!d)
-        return;
-    method_dispatcher_register(d, "plan", on_roadmap_plan_method, NULL);
-    method_dispatcher_register(d, "absorb", on_roadmap_absorb_method, NULL);
-    method_dispatcher_register(d, "roadmap_cancel", on_roadmap_cancel_method, NULL);
-    method_dispatcher_register(d, "roadmap_replan", on_roadmap_replan_method, NULL);
-    method_dispatcher_register(d, "roadmap_status", on_roadmap_status_method, NULL);
-    SVC_LOG_INFO("roadmap_rpc: registered roadmap methods (plan/absorb/cancel/replan/status)");
+    static const method_desc_t methods[] = {
+        {"plan", on_roadmap_plan_method},
+        {"absorb", on_roadmap_absorb_method},
+        {"roadmap_cancel", on_roadmap_cancel_method},
+        {"roadmap_replan", on_roadmap_replan_method},
+        {"roadmap_status", on_roadmap_status_method},
+    };
+    int rc = method_dispatcher_register_all((method_dispatcher_t *)disp, methods,
+                                            sizeof(methods) / sizeof(methods[0]));
+    if (rc == 0)
+        SVC_LOG_INFO("roadmap_rpc: registered plan/absorb/cancel/replan/status");
+    return rc;
 }

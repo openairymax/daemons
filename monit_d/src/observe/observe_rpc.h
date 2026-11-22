@@ -26,8 +26,8 @@ int observe_rpc_init(void);
 /* 对称清理（幂等）。 */
 void observe_rpc_cleanup(void);
 
-/* 在 monit_d 方法调度器上登记 observe_* 方法（3 个）。 */
-void observe_rpc_register(void *disp);
+/* 在 monit_d 方法调度器上登记 observe_* 方法（3 个）。返回 0 全部成功。 */
+int observe_rpc_register(void *disp);
 
 /* ── 内部 API（供单元测试直接驱动指标表与 HTTP 导出） ─────────────── */
 

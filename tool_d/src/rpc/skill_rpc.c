@@ -115,11 +115,14 @@ static void srpc_uninstall(cJSON *params, int id, void *user_data)
     JSONRPC_SEND_SUCCESS(client_fd, obj, id);
 }
 
-void skill_rpc_register(void *dispatcher)
+int skill_rpc_register(void *dispatcher)
 {
-    method_dispatcher_t *d = (method_dispatcher_t *)dispatcher;
-    method_dispatcher_register(d, "skill.install", srpc_install, NULL);
-    method_dispatcher_register(d, "skill.list", srpc_list, NULL);
-    method_dispatcher_register(d, "skill.execute", srpc_execute, NULL);
-    method_dispatcher_register(d, "skill.uninstall", srpc_uninstall, NULL);
+    static const method_desc_t methods[] = {
+        {"skill.install", srpc_install},
+        {"skill.list", srpc_list},
+        {"skill.execute", srpc_execute},
+        {"skill.uninstall", srpc_uninstall},
+    };
+    return method_dispatcher_register_all((method_dispatcher_t *)dispatcher, methods,
+                                          sizeof(methods) / sizeof(methods[0]));
 }

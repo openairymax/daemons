@@ -407,17 +407,19 @@ void info_rpc_cleanup(void)
     SVC_LOG_INFO("info_rpc: cleaned up");
 }
 
-void info_rpc_register(void *disp)
+int info_rpc_register(void *disp)
 {
-    method_dispatcher_t *d = (method_dispatcher_t *)disp;
-    if (!d)
-        return;
     /* info_* 前缀登记：与 monit 既有方法名区分（如 health_check 走 monit
      * 原生）；get_stats/health_check 复用 monit 原生方法，不在此登记。 */
-    method_dispatcher_register(d, "info_system", info_m_system, NULL);
-    method_dispatcher_register(d, "info_history", info_m_history, NULL);
-    method_dispatcher_register(d, "info_health", info_m_health, NULL);
-    method_dispatcher_register(d, "info_hardware", info_m_hardware, NULL);
-    SVC_LOG_INFO("info_rpc: registered info.* methods on monit_d dispatcher "
-                 "(info_system/history/health/hardware)");
+    static const method_desc_t methods[] = {
+        {"info_system", info_m_system},
+        {"info_history", info_m_history},
+        {"info_health", info_m_health},
+        {"info_hardware", info_m_hardware},
+    };
+    int rc = method_dispatcher_register_all((method_dispatcher_t *)disp, methods,
+                                            sizeof(methods) / sizeof(methods[0]));
+    if (rc == 0)
+        SVC_LOG_INFO("info_rpc: registered info.* methods on monit_d dispatcher");
+    return rc;
 }

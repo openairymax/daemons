@@ -336,7 +336,7 @@ int main(void)
 #ifndef _WIN32
     g_disp = method_dispatcher_create(16);
     assert(g_disp != NULL);
-    info_rpc_register(g_disp);
+    assert(info_rpc_register(g_disp) == 0);
 #endif
 
     test_collect();

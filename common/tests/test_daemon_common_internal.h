@@ -92,6 +92,7 @@ void test_md_create_destroy(void);
 void test_md_register_and_dispatch(void);
 void test_md_not_found(void);
 void test_md_multiple_methods(void);
+void test_md_grow_beyond_capacity(void);
 void test_md_overwrite_registration(void);
 
 void test_am_lifecycle(void);

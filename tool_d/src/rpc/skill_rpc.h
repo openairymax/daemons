@@ -18,8 +18,8 @@
 extern "C" {
 #endif
 
-/* 在 method dispatcher 上登记 skill.* 方法族。 */
-void skill_rpc_register(void *dispatcher);
+/* 在 method dispatcher 上登记 skill.* 方法族；返回 0 表示全部登记成功。 */
+int skill_rpc_register(void *dispatcher);
 
 #ifdef __cplusplus
 }

@@ -101,7 +101,7 @@ void svc_destroy(void)
 
 /* 蓝图调度方法族（plan/absorb/cancel/replan/status）：注册逻辑内聚在
  * roadmap_rpc.c，此处仅透传 dispatcher */
-void svc_attach(void *dispatcher)
+int svc_attach(void *dispatcher)
 {
-    roadmap_rpc_register(dispatcher);
+    return roadmap_rpc_register(dispatcher);
 }

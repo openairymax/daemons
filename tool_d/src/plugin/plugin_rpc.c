@@ -312,27 +312,29 @@ static void prpc_handle_health(cJSON *params, int id, void *user_data)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-void plugin_rpc_register(void *disp)
+int plugin_rpc_register(void *disp)
 {
     method_dispatcher_t *d = (method_dispatcher_t *)disp;
-    if (!d)
-        return;
     /* plugin_* 前缀登记：与 tool.execute/list 等既有方法名区分，避免
-     * 覆盖 tool 语义（tool.execute=工具执行，plugin_execute=插件执行）。 */
-    method_dispatcher_register(d, "plugin_load", prpc_handle_load, NULL);
-    method_dispatcher_register(d, "plugin_unload", prpc_handle_unload, NULL);
-    method_dispatcher_register(d, "plugin_start", prpc_handle_start, NULL);
-    method_dispatcher_register(d, "plugin_stop", prpc_handle_stop, NULL);
-    method_dispatcher_register(d, "plugin_execute", prpc_handle_exec, NULL);
-    method_dispatcher_register(d, "plugin_get_metadata", prpc_handle_metadata, NULL);
-    method_dispatcher_register(d, "plugin_get_state", prpc_handle_state, NULL);
-    method_dispatcher_register(d, "plugin_get_stats", prpc_handle_stats, NULL);
-    method_dispatcher_register(d, "plugin_list", prpc_handle_list, NULL);
-    /* L2 协议标准方法 + 别名（plugin.install / uninstall / health_check） */
-    method_dispatcher_register(d, "plugin_install", prpc_handle_load, NULL);
-    method_dispatcher_register(d, "plugin_uninstall", prpc_handle_unload, NULL);
-    method_dispatcher_register(d, "plugin_health_check", prpc_handle_health, NULL);
-    SVC_LOG_INFO("plugin_rpc: registered plugin.* methods on tool_d dispatcher "
-                 "(plugin_load/unload/start/stop/execute/metadata/state/stats/list/"
-                 "install/uninstall/health_check)");
+     * 覆盖 tool 语义（tool.execute=工具执行，plugin_execute=插件执行）。
+     * L2 协议标准方法 + 别名（plugin.install / uninstall / health_check）。 */
+    static const method_desc_t methods[] = {
+        {"plugin_load", prpc_handle_load},
+        {"plugin_unload", prpc_handle_unload},
+        {"plugin_start", prpc_handle_start},
+        {"plugin_stop", prpc_handle_stop},
+        {"plugin_execute", prpc_handle_exec},
+        {"plugin_get_metadata", prpc_handle_metadata},
+        {"plugin_get_state", prpc_handle_state},
+        {"plugin_get_stats", prpc_handle_stats},
+        {"plugin_list", prpc_handle_list},
+        {"plugin_install", prpc_handle_load},
+        {"plugin_uninstall", prpc_handle_unload},
+        {"plugin_health_check", prpc_handle_health},
+    };
+    int rc = method_dispatcher_register_all(d, methods, sizeof(methods) / sizeof(methods[0]));
+    if (rc == 0)
+        SVC_LOG_INFO("plugin_rpc: registered %zu plugin.* methods on tool_d dispatcher",
+                     sizeof(methods) / sizeof(methods[0]));
+    return rc;
 }
