@@ -1,20 +1,34 @@
 name: Daemons CI
 
-# 0.1.21 L-11 / S3：daemons 叶仓此前无任何 CI，缺陷只能靠主线回归偶然暴露。
+# 0.1.21 L-11 / r33：叶仓验证职责重划（取代 0.1.21 早前的「叶仓复刻伞仓构建」）。
 #
-# 结构约束：daemons 的 CMakeLists 不能独立 configure——它消费伞仓注入的
-# PROJECT_VERSION、airy_print_info 与 AIRY_COREKERN_INCLUDE_DIR，测试也注册
-# 在伞仓构建树里。因此本作业检出伞仓、初始化其余叶子，再把 daemons 目录
-# 替换成本仓工作区（即被验证的提交），最后按测试名筛选 daemon 面的用例。
-# 这比「在叶仓里另写一套构建」诚实：不复制、不改写伞仓的构建语义。
+# 结构约束不变：daemons 的 CMakeLists 不能独立 configure——它消费伞仓注入的
+# PROJECT_VERSION、airy_print_info 与 AIRY_COREKERN_INCLUDE_DIR，测试也注册在
+# 伞仓构建树里。但由叶仓自己去复刻这套构建有两个不可接受的代价：
 #
-# 覆盖率当前只出账不设阈值：先让数字可见、可对比，阈值待基线稳定后再加，
-# 否则第一天就要么永久红、要么随手调低标准。
+#   1) 需要跨仓私有读权限（atoms 为 private）。托管 runner 无法使用开发机本地
+#      密钥，凭据只能落到仓库 secret；secret 的写入是人工动作，叶仓因此长期
+#      红或长期空转，门禁失去意义。
+#   2) 复刻出的树是「本仓工作区 + 伞仓其余叶子 HEAD」的合成树：既不是本提交
+#      在伞仓中的集成态，也不是伞仓 pin 的态。它绿了不证明发布态可构建，红了
+#      也定位不到真实集成问题。
+#
+# 因此构建与测试的权威收归伞仓（agentrt/.github/workflows/build-test.yml 每次
+# push 全量构建 + ctest + 覆盖率 + L-8 e2e）。叶仓 CI 只断言叶仓能自主负责的
+# 两件事，全部无需 secret（项目与 Actions 结论 API 均公开）：
+#   · push / PR：提交卫生（R1~R9：标题、正文宽度、Fixes、Sign-off）；
+#   · 定时 / dispatch：集成纪律——伞仓 main 的 daemons gitlink 必须等于本仓
+#     main 的头，且伞仓对该 pin 的 Build & Test 结论必须是 success。
+#     任一不满足即红：pin 漂移意味着本仓的改动没有真实进入集成验证。
 
 on:
   push:
     branches: [main, 'dev/**']
   pull_request:
+  schedule:
+    # 每日 03:10 UTC：在夜间低负载窗口复核 pin 与伞仓结论，避免与日间
+    # runner 高峰争抢，也给跨时区的 bump 留出收敛时间。
+    - cron: '10 3 * * *'
   workflow_dispatch:
 
 permissions:
@@ -24,99 +38,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # 工作流级 env 不提供 runner 上下文，UM/BUILD 由 Prepare workspace 步骤
-  # 派生后写入 GITHUB_ENV；此处只放与运行器无关的常量。
-  # daemon 面测试名（伞仓 ctest 注册名，见各模块 CMakeLists 的 add_test）
-  CTEST_RE: '(a2a_d|svc_test|test_maths|sched_d|mem_d|llm_d|sup_test|channel_e2e|daemon)'
-
 jobs:
-  build-test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - name: Checkout daemons (under test)
-        uses: actions/checkout@v4
-        with:
-          submodules: false
-          fetch-depth: 0
-
-      - name: Prepare workspace paths
-        run: |
-          # 单点派生伞仓与构建目录，后续步骤统一从 GITHUB_ENV 取用。
-          {
-            echo "UM=$RUNNER_TEMP/airymaxrt"
-            echo "BUILD=$RUNNER_TEMP/daemons-build"
-          } >> "$GITHUB_ENV"
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build gcovr \
-            libsqlite3-dev libcjson-dev libcurl4-openssl-dev \
-            libssl-dev zlib1g-dev libzstd-dev \
-            libmicrohttpd-dev libwebsockets-dev libevent-dev \
-            python3 python3-yaml
-
-      - name: Checkout umbrella and its other leaves
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -n "${GH_TOKEN:-}" ]; then
-            printf 'machine github.com\n  login x-access-token\n  password %s\n' "$GH_TOKEN" > "$HOME/.netrc"
-            chmod 600 "$HOME/.netrc"
-          fi
-          git clone -q --depth 1 https://github.com/openairymax/agentrt.git "$UM"
-          for leaf in atoms commons gateway heapstore protocols; do
-            git -C "$UM" submodule update --init --depth 1 -- "$leaf" \
-              || { echo "::error::leaf $leaf unavailable; GH_TOKEN must read it"; exit 1; }
-          done
-          # 实体副本替换 daemons：符号链接会让 common/../../commons 在内核
-          # 路径解析时逃出伞仓，配置期误报 commons 缺失。
-          rm -rf "$UM/daemons"
-          mkdir -p "$UM/daemons"
-          tar -C "$GITHUB_WORKSPACE" --exclude=.git -cf - . | tar -C "$UM/daemons" -xf -
-          rm -f "$HOME/.netrc"
-
-      - name: Configure (out of tree, coverage on)
-        run: |
-          cmake -S "$UM" -B "$BUILD" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DBUILD_TESTS=ON \
-            -DCMAKE_C_FLAGS="--coverage -O0" \
-            -DCMAKE_EXE_LINKER_FLAGS="--coverage"
-
-      - name: Build
-        run: cmake --build "$BUILD" --parallel "$(nproc)"
-
-      - name: Test (daemon surface)
-        run: |
-          n=$(ctest --test-dir "$BUILD" -N -R "$CTEST_RE" | sed -n 's/^Total Tests: //p' | tr -d '[:space:]')
-          case "$n" in ''|0) echo "::error::未匹配到 daemon 测试，筛选正则已失效"; exit 1 ;; esac
-          echo "matched tests: $n"
-          ctest --test-dir "$BUILD" -R "$CTEST_RE" --output-on-failure -j"$(nproc)"
-
-      - name: Coverage report (informational)
-        continue-on-error: true
-        run: |
-          gcovr -r "$UM" --object-directory "$BUILD" \
-            --xml-pretty -o "$BUILD/coverage.xml" \
-            --html-details "$BUILD/coverage.html"
-
-      - name: Upload coverage
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: daemons-coverage
-          path: |
-            ${{ runner.temp }}/daemons-build/coverage.xml
-            ${{ runner.temp }}/daemons-build/coverage.html
-          if-no-files-found: ignore
-          retention-days: 14
-
   commit-audit:
+    # 提交卫生只对「新提交」有意义，定时跑无新增提交可审，跳过。
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -143,3 +68,89 @@ jobs:
         env:
           AIRY_COMMIT_REPO: ${{ github.workspace }}
         run: bash "$RUNNER_TEMP/airy-tools/scripts/ci/quality/gates/g47-commit-audit.sh"
+
+  integration-gate:
+    # 只在定时与手动触发：push 时伞仓尚未 bump，立即判 pin 必然误红。
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout daemons (full history for head resolution)
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      # 单一判据：伞仓 pin 与本仓头相等，且伞仓对该 pin 的 Build & Test 为
+      # success。两条件都要，缺一不可——只看 pin 相等会把「pin 了但构建红」
+      # 当成通过，只看结论会把「绿的是旧 pin」当成通过。
+      - name: Assert pin and umbrella verdict
+        run: |
+          set -euo pipefail
+          UM="$RUNNER_TEMP/agentrt"
+          git clone -q --depth 1 https://github.com/openairymax/agentrt.git "$UM"
+          um_head="$(git -C "$UM" rev-parse HEAD)"
+          leaf="$(git rev-parse HEAD)"
+          echo "umbrella main: $um_head"
+          echo "daemons head:  $leaf"
+
+          # pin 与结论都可能处于「刚 push、尚未收敛」的窗口（bump 提交在途、
+          # 伞仓 job 排队）。轮询 20 次 × 30s 给足收敛时间，超时即判红：
+          # 门禁不能因为「还没跑」而变绿。
+          rc=1
+          for attempt in $(seq 1 20); do
+            pinned="$(git -C "$UM" ls-tree HEAD daemons | awk '{print $3}')"
+            if [ "$pinned" != "$leaf" ]; then
+              echo "attempt $attempt: pin drift (umbrella pins $pinned)"
+              sleep 30
+              git -C "$UM" fetch -q --depth 1 origin main
+              git -C "$UM" reset -q --hard FETCH_HEAD
+              um_head="$(git -C "$UM" rev-parse HEAD)"
+              continue
+            fi
+
+            api="https://api.github.com/repos/openairymax/agentrt/actions/workflows/build-test.yml/runs"
+            curl -sfL -H 'Accept: application/vnd.github+json' \
+              "$api?head_sha=$um_head&per_page=20" -o "$RUNNER_TEMP/runs.json" || true
+            # 同一 head_sha 可能有多次 run（rerun），取 id 最大者即最新一次；
+            # 无 run 时给 missing，让下面的分支继续轮询而不误判。
+            verdict="$(jq -r '
+              (.workflow_runs // []) as $r
+              | if ($r | length) == 0 then "missing|-|-"
+                else ($r | max_by(.id) | "\(.status)|\(.conclusion // "-")|\(.html_url)")
+                end' "$RUNNER_TEMP/runs.json" 2>/dev/null || echo 'missing|-|-')"
+            status="${verdict%%|*}"
+            rest="${verdict#*|}"
+            conclusion="${rest%%|*}"
+            url="${rest#*|}"
+            echo "attempt $attempt: run status=$status conclusion=$conclusion"
+            echo "run: $url"
+
+            if [ "$status" != "completed" ]; then
+              sleep 30
+              continue
+            fi
+            if [ "$conclusion" = "success" ]; then
+              echo "[OK] umbrella Build & Test is green for $leaf"
+              rc=0
+              break
+            fi
+            echo "::error::umbrella Build & Test concluded '$conclusion' for pin $leaf ($url)"
+            rc=1
+            break
+          done
+
+          if [ "$rc" -ne 0 ]; then
+            pinned="$(git -C "$UM" ls-tree HEAD daemons | awk '{print $3}')"
+            if [ "$pinned" != "$leaf" ]; then
+              echo "::error::daemons head $leaf is not pinned by agentrt main (pins $pinned); bump the submodule pointer to run integration verification"
+            fi
+            echo "::error::integration gate FAILED (pin/verdict not satisfied within the polling window)"
+            exit 1
+          fi
+          {
+            echo "### Daemons integration gate"
+            echo "- daemons head: \`$leaf\`"
+            echo "- umbrella main: \`$um_head\`"
+            echo "- verdict: Build & Test success"
+          } >> "$GITHUB_STEP_SUMMARY"
