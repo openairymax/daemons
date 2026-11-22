@@ -65,16 +65,20 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "${GH_TOKEN:-}" ]; then
-            printf 'machine github.com\n  login %s\n  password %s\n' "$GH_TOKEN" "$GH_TOKEN" > "$HOME/.netrc"
+            printf 'machine github.com\n  login x-access-token\n  password %s\n' "$GH_TOKEN" > "$HOME/.netrc"
             chmod 600 "$HOME/.netrc"
           fi
           git clone -q --depth 1 https://github.com/openairymax/agentrt.git "$UM"
           for leaf in atoms commons gateway heapstore protocols; do
             git -C "$UM" submodule update --init --depth 1 -- "$leaf" \
-              || echo "::warning::leaf $leaf unavailable, dependent targets may fail"
+              || { echo "::error::leaf $leaf unavailable; GH_TOKEN must read it"; exit 1; }
           done
+          # 实体副本替换 daemons：符号链接会让 common/../../commons 在内核
+          # 路径解析时逃出伞仓，配置期误报 commons 缺失。
           rm -rf "$UM/daemons"
-          ln -s "$GITHUB_WORKSPACE" "$UM/daemons"
+          mkdir -p "$UM/daemons"
+          tar -C "$GITHUB_WORKSPACE" --exclude=.git -cf - . | tar -C "$UM/daemons" -xf -
+          rm -f "$HOME/.netrc"
 
       - name: Configure (out of tree, coverage on)
         run: |
