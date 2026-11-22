@@ -156,7 +156,10 @@ static void handle_spawn(cJSON *params, int id, airy_sock_t client_fd)
     log_if_slow("agent.spawn", perf_t0, out_agent_id);
 
     if (ret != AIRY_SUCCESS || !out_agent_id) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Agent spawn failed", id);
+        char why[128];
+        snprintf(why, sizeof(why), "Agent spawn failed: %s (%d)",
+                 airy_err_code_name((airy_err_t)ret), ret);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, why, id);
         SVC_LOG_ERROR("agent.spawn failed: error=%d", ret);
         AIRY_FREE(spec_str);
         AIRY_FREE(out_agent_id);
