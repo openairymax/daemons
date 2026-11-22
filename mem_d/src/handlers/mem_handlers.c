@@ -68,16 +68,19 @@ void handle_search(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *query = cJSON_GetObjectItem(params, "query");
     cJSON *limit = cJSON_GetObjectItem(params, "limit");
     cJSON *conv = cJSON_GetObjectItem(params, "conv");
+    cJSON *tenant = cJSON_GetObjectItem(params, "tenant");
 
     JSONRPC_REQUIRE(query && cJSON_IsString(query), client_fd, "Missing query string", id);
 
     mem_search_hit_t *hits = NULL;
     size_t count = 0;
     uint32_t lim = limit && cJSON_IsNumber(limit) ? clamp_u32(limit->valueint, 10, 100) : 10;
-    /* 可选会话作用域：给定 conv 时只在同一会话记录中检索（S-P1-16）。 */
-    const char *scope = cJSON_IsString(conv) && conv->valuestring[0] ? conv->valuestring : NULL;
+    /* 可选范围：conv 限定同一会话（S-P1-16），tenant 限定同一租户（S-P1-17）。 */
+    mem_scope_t scope = {0};
+    scope.conv = cJSON_IsString(conv) && conv->valuestring[0] ? conv->valuestring : NULL;
+    scope.tenant = cJSON_IsString(tenant) && tenant->valuestring[0] ? tenant->valuestring : NULL;
 
-    int ret = mem_search_scoped(g_service, NULL, scope, query->valuestring, lim, &hits, &count);
+    int ret = mem_search_scope(g_service, &scope, query->valuestring, lim, &hits, &count);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Memory search failed", id);
         return;
@@ -148,12 +151,15 @@ void handle_recent(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *limit = params ? cJSON_GetObjectItem(params, "limit") : NULL;
     cJSON *conv = params ? cJSON_GetObjectItem(params, "conv") : NULL;
+    cJSON *tenant = params ? cJSON_GetObjectItem(params, "tenant") : NULL;
     uint32_t lim = limit && cJSON_IsNumber(limit) ? clamp_u32(limit->valueint, 0, 1000) : 0;
-    const char *scope = cJSON_IsString(conv) && conv->valuestring[0] ? conv->valuestring : NULL;
+    mem_scope_t scope = {0};
+    scope.conv = cJSON_IsString(conv) && conv->valuestring[0] ? conv->valuestring : NULL;
+    scope.tenant = cJSON_IsString(tenant) && tenant->valuestring[0] ? tenant->valuestring : NULL;
 
     mem_recent_item_t *items = NULL;
     size_t count = 0;
-    int ret = mem_recent_scoped(g_service, lim, scope, &items, &count);
+    int ret = mem_recent_scope(g_service, lim, &scope, &items, &count);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Memory recent failed", id);
         return;

@@ -206,6 +206,11 @@ void mem_persist_append_record(mem_service_t *svc, const mem_record_entry_t *rec
         SVC_LOG_WARN("mem_d persist: append write failed (errno=%d)", errno);
     else if (fflush(svc->jsonl_append_fp) != 0)
         SVC_LOG_WARN("mem_d persist: fflush failed (errno=%d)", errno);
+    /* Durability: the append is the only copy of the record until the next
+     * full rewrite, so push it to stable storage before returning (S-P1-17).
+     * Memory writes are per-turn, not per-token, so one sync is affordable. */
+    else if (airy_io_sync(svc->jsonl_append_fp) != 0)
+        SVC_LOG_WARN("mem_d persist: sync failed (errno=%d)", errno);
 }
 
 /* ── Full rewrite (crash-safe) ───────────────────────────────────────── */
@@ -379,6 +384,63 @@ static size_t mem_load_lines(mem_service_t *svc, char *content, size_t read_len)
     return loaded;
 }
 
+/* 尾部修复：append 途中崩溃会留下没有换行的半行 JSON。它既解析不了，也会
+ * 让下一次 append 直接拼在残片后面，连带吞掉新记录。加载时检查末行：完整
+ * 记录补换行保留，残片整行丢弃；改写前先备份原文件，失败则保持原样。 */
+static bool mem_tail_repair(mem_service_t *svc, char **content, size_t *len)
+{
+    if (!svc || !svc->jsonl_path || !content || !*content || !len || *len == 0)
+        return false;
+
+    char *buf = *content;
+    size_t n = *len;
+    if (buf[n - 1] == '\n')
+        return false;
+
+    size_t cut = n;
+    while (cut > 0 && buf[cut - 1] != '\n')
+        cut--;
+
+    char *tail = (char *)AIRY_MALLOC(n - cut + 1);
+    if (!tail)
+        return false;
+    memcpy(tail, buf + cut, n - cut);
+    tail[n - cut] = '\0';
+    cJSON *root = cJSON_Parse(tail);
+    bool keep = root != NULL;
+    cJSON_Delete(root);
+    AIRY_FREE(tail);
+
+    size_t keep_len = keep ? n : cut;
+    char *fixed = (char *)AIRY_MALLOC(keep_len + 2);
+    if (!fixed)
+        return false;
+    memcpy(fixed, buf, keep_len);
+    fixed[keep_len] = '\n';
+    fixed[keep_len + 1] = '\0';
+
+    /* 独立备份后缀：与 UTF-8 清洗的 .bak 并存，两个修复各自的现场都保留。 */
+    char bak[4096];
+    if (snprintf(bak, sizeof(bak), "%s.tail.bak", svc->jsonl_path) >= (int)sizeof(bak) ||
+        airy_io_write_file(bak, buf, n) != 0) {
+        SVC_LOG_WARN("mem_d persist: tail repair backup failed, keep file as is");
+        AIRY_FREE(fixed);
+        return false;
+    }
+    if (airy_io_write_file(svc->jsonl_path, fixed, keep_len + 1) != 0) {
+        SVC_LOG_WARN("mem_d persist: tail repair rewrite failed (backup=%s)", bak);
+        AIRY_FREE(fixed);
+        return false;
+    }
+    SVC_LOG_WARN("mem_d persist: unterminated tail repaired (%s, dropped %zu bytes), backup=%s",
+                 keep ? "complete line kept" : "fragment dropped", keep ? 0 : n - cut, bak);
+
+    AIRY_FREE(*content);
+    *content = fixed;
+    *len = keep_len + 1;
+    return true;
+}
+
 void mem_persist_load_existing(mem_service_t *svc)
 {
     if (!svc || !svc->jsonl_path)
@@ -389,8 +451,9 @@ void mem_persist_load_existing(mem_service_t *svc)
     if (airy_io_read_file(svc->jsonl_path, &content, &read_len) != 0 || read_len == 0)
         return;
 
-    /* 存量数据清洗：早期版本按字节截断写坏的记录在这里一次性修复
-     * （备份原文件后原地改写），随后按清洗后的内容加载。 */
+    /* 存量数据清洗：先修尾部残行（否则下一次 append 与之拼接），再修早期
+     * 版本按字节截断写坏的 UTF-8（备份原文件后原地改写），随后加载。 */
+    (void)mem_tail_repair(svc, &content, &read_len);
     (void)mem_persist_repair_utf8(svc, &content, &read_len);
 
     size_t loaded = mem_load_lines(svc, content, read_len);

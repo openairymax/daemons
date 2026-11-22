@@ -52,6 +52,17 @@ typedef struct {
     uint64_t created_at;
 } mem_recent_item_t;
 
+/**
+ * @brief 读路径范围谓词（最近列表与检索共用）。
+ *
+ * 字段为 NULL 表示该维不限；conv/tenant 比对 metadata 中的同名键，
+ * tenant 缺键时归属 default（与 hall_store 的单租户兜底一致）。
+ */
+typedef struct {
+    const char *kb_id;
+    const char *conv;
+    const char *tenant;
+} mem_scope_t;
 
 mem_service_t *mem_service_create(size_t max_records);
 void mem_service_destroy(mem_service_t *svc);
@@ -83,6 +94,10 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
 int mem_search_scoped(mem_service_t *svc, const char *kb_id, const char *conv,
                       const char *query, uint32_t limit,
                       mem_search_hit_t **out_hits, size_t *out_count);
+
+/** @brief 带完整范围谓词的检索（scoped 入口的扩展：含 tenant）。 */
+int mem_search_scope(mem_service_t *svc, const mem_scope_t *scope, const char *query,
+                     uint32_t limit, mem_search_hit_t **out_hits, size_t *out_count);
 
 /**
  * @brief Read a memory record.
@@ -121,6 +136,16 @@ int mem_service_recent(mem_service_t *svc, uint32_t limit,
  */
 int mem_recent_scoped(mem_service_t *svc, uint32_t limit, const char *conv,
                       mem_recent_item_t **out_items, size_t *out_count);
+
+/**
+ * @brief 带完整范围谓词的最近列表。
+ *
+ * kb_id / conv / tenant 非空时逐条比对归属（tenant 缺键归属 default）。
+ * 全量倒序扫描到凑满 limit 条为止：范围外记录不占窗口，避免旧会话或
+ * 其他租户把窗口占满而使本范围为空。
+ */
+int mem_recent_scope(mem_service_t *svc, uint32_t limit, const mem_scope_t *scope,
+                     mem_recent_item_t **out_items, size_t *out_count);
 void mem_recent_items_free(mem_recent_item_t *items, size_t count);
 
 /**
