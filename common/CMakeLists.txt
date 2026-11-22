@@ -64,6 +64,7 @@ set(SVC_COMMON_SOURCES
     src/daemon/daemon_dep.c         # 0.1.19 §7.2: 硬依赖声明 + 启动期探测 + 降级态显式上报（governance 面）
     src/daemon/daemon_state.c       # 0.1.19 §3.7 N7: 运行面形式化四态状态机（G38-2 前置）
     src/daemon/daemon_boot.c        # 0.1.19 §79: daemon 启动机制（十二户 main.c 装配骨架收敛）
+    src/daemon/daemon_crash.c       # 0.1.21: 致命信号现场逐帧落盘（崩溃归因证据）
     src/daemon/daemon_cfg_file.c    # 0.1.19 t44: config_load/ep_load 七副本消解的文件读取与端点段解析机制
 )
 
