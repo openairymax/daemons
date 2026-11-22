@@ -332,7 +332,7 @@ int plugin_rpc_register(void *disp)
         {"plugin_uninstall", prpc_handle_unload},
         {"plugin_health_check", prpc_handle_health},
     };
-    int rc = method_dispatcher_register_all(d, methods, sizeof(methods) / sizeof(methods[0]));
+    int rc = disp_register_all(d, methods, sizeof(methods) / sizeof(methods[0]));
     if (rc == 0)
         SVC_LOG_INFO("plugin_rpc: registered %zu plugin.* methods on tool_d dispatcher",
                      sizeof(methods) / sizeof(methods[0]));

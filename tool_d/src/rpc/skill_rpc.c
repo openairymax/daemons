@@ -123,6 +123,6 @@ int skill_rpc_register(void *dispatcher)
         {"skill.execute", srpc_execute},
         {"skill.uninstall", srpc_uninstall},
     };
-    return method_dispatcher_register_all((method_dispatcher_t *)dispatcher, methods,
-                                          sizeof(methods) / sizeof(methods[0]));
+    return disp_register_all((method_dispatcher_t *)dispatcher, methods,
+                             sizeof(methods) / sizeof(methods[0]));
 }

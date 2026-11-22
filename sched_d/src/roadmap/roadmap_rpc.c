@@ -341,8 +341,8 @@ int roadmap_rpc_register(void *disp)
         {"roadmap_replan", on_roadmap_replan_method},
         {"roadmap_status", on_roadmap_status_method},
     };
-    int rc = method_dispatcher_register_all((method_dispatcher_t *)disp, methods,
-                                            sizeof(methods) / sizeof(methods[0]));
+    int rc = disp_register_all((method_dispatcher_t *)disp, methods,
+                               sizeof(methods) / sizeof(methods[0]));
     if (rc == 0)
         SVC_LOG_INFO("roadmap_rpc: registered plan/absorb/cancel/replan/status");
     return rc;
