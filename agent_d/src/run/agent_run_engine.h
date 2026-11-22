@@ -41,10 +41,12 @@ extern "C" {
 
 #define AGENT_RUN_SESSION_ID_LEN 64
 /* 工具环轮次预算（C-14）：请求参数优先，缺省取策略面
- * （AIRY_AGENT_TOOL_ROUNDS），再缺省 8；上限 32 是机制硬界，策略不得突破。
+ * （AIRY_AGENT_TOOL_ROUNDS），再缺省 16（与执行体 TOOL_ROUNDS_DEFAULT
+ * 同值）；上限 32 是机制硬界，策略不得突破。model.yaml 的 tool_rounds
+ * 由执行体消费，超出硬界一律夹取。
  * 到点不是崩溃：已执行 trace 与中间正文完整移交，并返回 AIRY_EBUDGET +
  * resume_token 供客户端续跑。 */
-#define AGENT_RUN_ROUNDS_DEFAULT 8
+#define AGENT_RUN_ROUNDS_DEFAULT 16
 #define AGENT_RUN_ROUNDS_MAX 32
 /* 续跑令牌上界：只装「原始诉求 + 已完成步骤摘要 + 剩余子目标」，不装全量
  * 历史；二次续跑必须显著小于首次请求体。 */
