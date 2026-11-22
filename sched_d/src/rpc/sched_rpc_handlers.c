@@ -60,6 +60,19 @@ DAEMON_RPC_SHELL(checkpoint_save, handle_checkpoint_save)
 DAEMON_RPC_SHELL(submit, handle_schedule_task)
 DAEMON_RPC_SHELL(query, handle_get_task)
 
+/* 校验并回送序列化结果：js 的所有权在本函数内终结（成功与失败两路都释放） */
+static void reply_json(airy_sock_t fd, char *js, int id, const char *err)
+{
+    CJSON_PARSE_GUARD(obj, js, {
+        AIRY_FREE(js);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, err, id);
+        return;
+    });
+    AIRY_FREE(js);
+    JSONRPC_SEND_SUCCESS(fd, obj, id);
+    obj = NULL;
+}
+
 static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *agent_json = jsonrpc_get_object_param(params, "agent");
@@ -192,15 +205,7 @@ static void handle_get_task(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    CJSON_PARSE_GUARD(report_json, json_out, {
-        AIRY_FREE(json_out);
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid task data", id);
-        return;
-    });
-    AIRY_FREE(json_out);
-
-    JSONRPC_SEND_SUCCESS(client_fd, report_json, id);
-    report_json = NULL;
+    reply_json(client_fd, json_out, id, "Invalid task data");
 }
 
 static void handle_cancel_task(cJSON *params, int id, airy_sock_t client_fd)
@@ -279,15 +284,7 @@ static void handle_dag_status(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    CJSON_PARSE_GUARD(report_json, json_out, {
-        AIRY_FREE(json_out);
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid DAG data", id);
-        return;
-    });
-    AIRY_FREE(json_out);
-
-    JSONRPC_SEND_SUCCESS(client_fd, report_json, id);
-    report_json = NULL;
+    reply_json(client_fd, json_out, id, "Invalid DAG data");
 }
 
 static void handle_dag_list(int id, airy_sock_t client_fd)
@@ -299,15 +296,7 @@ static void handle_dag_list(int id, airy_sock_t client_fd)
         return;
     }
 
-    CJSON_PARSE_GUARD(report_json, json_out, {
-        AIRY_FREE(json_out);
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid DAG list data", id);
-        return;
-    });
-    AIRY_FREE(json_out);
-
-    JSONRPC_SEND_SUCCESS(client_fd, report_json, id);
-    report_json = NULL;
+    reply_json(client_fd, json_out, id, "Invalid DAG list data");
 }
 
 static void handle_dag_cancel(cJSON *params, int id, airy_sock_t client_fd)
@@ -347,15 +336,7 @@ static void handle_get_stats(int id, airy_sock_t client_fd)
         return;
     }
 
-    CJSON_PARSE_GUARD(report_json, (char *)stats_data, {
-        AIRY_FREE(stats_data);
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid report data", id);
-        return;
-    });
-    AIRY_FREE(stats_data);
-
-    JSONRPC_SEND_SUCCESS(client_fd, report_json, id);
-    report_json = NULL;
+    reply_json(client_fd, (char *)stats_data, id, "Invalid report data");
 }
 
 static void handle_health_check(int id, airy_sock_t client_fd)
@@ -375,13 +356,5 @@ static void handle_checkpoint_save(cJSON *params, int id,
         return;
     }
 
-    CJSON_PARSE_GUARD(report_json, json_out, {
-        AIRY_FREE(json_out);
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid checkpoint data", id);
-        return;
-    });
-    AIRY_FREE(json_out);
-
-    JSONRPC_SEND_SUCCESS(client_fd, report_json, id);
-    report_json = NULL;
+    reply_json(client_fd, json_out, id, "Invalid checkpoint data");
 }
