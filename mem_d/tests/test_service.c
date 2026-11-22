@@ -217,17 +217,24 @@ static void test_capacity_limit(void)
     mem_write_request_t req3 = {.data = "third", .len = 5, .metadata = NULL};
 
     char *r1 = NULL, *r2 = NULL, *r3 = NULL;
-    int wrc1 = mem_service_write(svc, &req1, &r1);
-    assert(wrc1 == AIRY_SUCCESS);
-    int wrc2 = mem_service_write(svc, &req2, &r2);
-    assert(wrc2 == AIRY_SUCCESS);
+    assert(mem_service_write(svc, &req1, &r1) == AIRY_SUCCESS);
+    assert(mem_service_write(svc, &req2, &r2) == AIRY_SUCCESS);
 
-    int ret = mem_service_write(svc, &req3, &r3);
-    assert(ret != AIRY_SUCCESS);
-    assert(r3 == NULL);
+    /* 满则淘汰最旧、保留最新：写入不再失败，历史窗口随轮次滚动。 */
+    assert(mem_service_write(svc, &req3, &r3) == AIRY_SUCCESS);
+    assert(mem_service_count(svc) == 2);
+
+    mem_record_t got;
+    AIRY_MEMSET(&got, 0, sizeof(got));
+    assert(mem_service_get(svc, r1, &got) != AIRY_SUCCESS);
+    assert(mem_service_get(svc, r2, &got) == AIRY_SUCCESS);
+    mem_record_free(&got);
+    assert(mem_service_get(svc, r3, &got) == AIRY_SUCCESS);
+    mem_record_free(&got);
 
     AIRY_FREE(r1);
     AIRY_FREE(r2);
+    AIRY_FREE(r3);
 
     mem_service_destroy(svc);
 

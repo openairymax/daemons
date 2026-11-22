@@ -261,6 +261,22 @@ void mem_service_destroy(mem_service_t *svc)
 
 /* ── mem_service_write ───────────────────────────────────────────────── */
 
+/* 容量满：淘汰 created_at 最早的一条（同刻取最早下标，即 FIFO），保留最新。
+ * 淘汰后立刻整库重写，使落盘内容与内存活集合同步——否则重启按文件载入
+ * 会先填满最早的记录，反而把最近的对话挤掉。 */
+static void mem_evict_oldest(mem_service_t *svc)
+{
+    size_t victim = 0;
+
+    for (size_t i = 1; i < svc->record_count; i++) {
+        if (svc->records[i].created_at < svc->records[victim].created_at)
+            victim = i;
+    }
+    mem_remove_record_at(svc, victim);
+    mem_persist_rewrite_all(svc);
+    SVC_LOG_DEBUG("mem_d: capacity reached (cap=%zu), oldest evicted", svc->max_records);
+}
+
 int mem_service_write(mem_service_t *svc, const mem_write_request_t *req, char **out_record_id)
 {
     if (!svc || !svc->initialized || !req || !req->data || req->len == 0 || !out_record_id)
@@ -269,11 +285,8 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req, char *
     *out_record_id = NULL;
     airy_mtx_lock(&svc->lock);
 
-    if (svc->record_count >= svc->max_records) {
-        airy_mtx_unlock(&svc->lock);
-        SVC_LOG_WARN("Memory service full (count=%zu)", svc->record_count);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
+    if (svc->record_count >= svc->max_records)
+        mem_evict_oldest(svc);
 
     size_t idx = svc->record_count;
     mem_record_entry_t *rec = &svc->records[idx];
