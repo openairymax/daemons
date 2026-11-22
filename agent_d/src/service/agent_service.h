@@ -46,6 +46,12 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id);
 
 /**
  * @brief Invoke the given agent.
+ * @param session_id [in] Conversation identifier, may be NULL. Forwarded to
+ *        the runner so the request carries its own session identity; the
+ *        execution context is rebuilt per request and never reused
+ * @param history_json [in] Optional OpenAI messages JSON array (user and
+ *        assistant turns) replayed before the current input to support
+ *        multi-turn follow-ups; malformed or empty arrays are dropped
  * @param timeout_s [in] Request-scoped read budget in seconds. 0 or negative
  *        selects the daemon default (300s, AIRY_AGENT_INVOKE_TIMEOUT_S);
  *        values above the operator ceiling clamp to it. Deadline-aware
@@ -62,8 +68,9 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id);
  *         AIRY_ERR_CANCELED execution cancelled (AbortedOutput)
  */
 int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char *input, size_t len,
-                         const char *workspace_dir, int timeout_s, airy_cancel_token_t *cancel_token,
-                         char **out_output);
+                         const char *workspace_dir, const char *session_id,
+                         const char *history_json, int timeout_s,
+                         airy_cancel_token_t *cancel_token, char **out_output);
 
 /**
  * @brief List all agent IDs.

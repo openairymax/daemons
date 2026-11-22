@@ -287,11 +287,23 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
+    /* Conversation identity and history are optional per-request fields
+     * (S-P1-19): the runner rebuilds its execution context from them and
+     * never reuses the previous request's context. */
+    cJSON *sess = cJSON_GetObjectItem(params, "session_id");
+    const char *session_id = (sess && cJSON_IsString(sess)) ? sess->valuestring : NULL;
+    cJSON *hist = cJSON_GetObjectItem(params, "history");
+    char *history_json = (hist && cJSON_IsArray(hist) && cJSON_GetArraySize(hist) > 0)
+                             ? cJSON_PrintUnformatted(hist)
+                             : NULL;
+
     uint64_t perf_t0 = perf_now_us();
     char *out_output = NULL;
     const char *workspace_dir = invoke_workspace(params);
     int ret = agent_service_invoke(g_service, agent_id->valuestring, input_str, input_len,
-                                   workspace_dir, timeout_s, token, &out_output);
+                                   workspace_dir, session_id, history_json, timeout_s, token,
+                                   &out_output);
+    AIRY_FREE(history_json);
 
     log_if_slow("agent.invoke", perf_t0, agent_id->valuestring);
 
