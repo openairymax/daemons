@@ -15,6 +15,7 @@
  */
 
 #include "service.h"
+#include "airy_memory.h"
 #include "airy_types.h"
 
 #include <cjson/cJSON.h>
