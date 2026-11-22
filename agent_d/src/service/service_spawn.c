@@ -198,6 +198,16 @@ int agent_service_spawn(agent_service_t *svc, const char *spec, char **out_agent
     uint64_t perf_t0 = agent_perf_now_us();
     airy_atomic_fetch_add(&svc->m_spawn_total, 1);
 
+#if !AIRY_PLATFORM_POSIX
+    /* Runner children are forked with POSIX pipes; no equivalent transport
+     * exists here yet. Registering an agent whose invoke can only fail would
+     * report a running service that never answers, so the gap is reported as
+     * an explicit unsupported error before any slot is consumed. */
+    airy_atomic_fetch_add(&svc->m_spawn_fail, 1);
+    SVC_LOG_WARN("Agent spawn unsupported on this platform: no child transport");
+    return AIRY_ERR_NOT_SUPPORTED;
+#endif
+
     agent_lock_svc(svc);
 
     size_t idx = SIZE_MAX;
