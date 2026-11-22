@@ -12,11 +12,11 @@
  *          - builtin_net_search.c web_search (provider JSON + SERP scrape)
  *          - builtin_net_guard.c  SSRF host policy + provider config reader
  *
- *        Serves as the family prelude: the shared result-envelope helpers
- *        (btool_fail/btool_soft) live in builtin_result_internal.h, which
- *        carries the limits prelude along, so the net units pull in one
- *        header instead of each reaching for limits/exec directly (G13
- *        fan-in ratchet).
+ *        Serves as the family prelude: the result-envelope helpers
+ *        (btool_fail/btool_soft) live in builtin_result_internal.h and the
+ *        plain runner contract in builtin_shell_internal.h, so the net
+ *        units include the two narrow headers here instead of each
+ *        reaching for the limits/exec internals (G13 fan-in ratchet).
  */
 
 #ifndef AIRY_RT_TOOL_BUILTIN_NET_INTERNAL_H
@@ -25,6 +25,7 @@
 #include <stddef.h>
 
 #include "builtin/builtin_result_internal.h"
+#include "builtin/builtin_shell_internal.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -3,10 +3,12 @@
 
 /**
  * @file builtin_exec_internal.h
- * @brief Process-execution built-in tools: runner and entry points.
+ * @brief Process-execution built-in tools: capture mechanism and entry
+ *        points.
  *
- *        Owns the shell runner, the shared process-capture mechanism and
- *        the shell/git/web entry points dispatched by tool_builtin_run().
+ *        Owns the shared process-capture mechanism and the shell/git/web
+ *        entry points dispatched by tool_builtin_run(). The plain shell
+ *        runner contract lives in builtin_shell_internal.h.
  */
 
 #ifndef AIRY_RT_TOOL_BUILTIN_EXEC_INTERNAL_H
@@ -14,14 +16,11 @@
 
 #include "builtin/builtin_limits_internal.h"
 #include "builtin/builtin_result_internal.h"
+#include "builtin/builtin_shell_internal.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_code,
-                      uint32_t timeout_ms, int *out_truncated, const os_sandbox_cfg_t *sandbox,
-                      int strict);
 
 #ifndef _WIN32
 /* Child-side setup callback for builtin_proc_capture: runs in the forked
