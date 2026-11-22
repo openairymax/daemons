@@ -25,8 +25,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  UM: ${{ runner.temp }}/airymaxrt
-  BUILD: ${{ runner.temp }}/daemons-build
+  # 工作流级 env 不提供 runner 上下文，UM/BUILD 由 Prepare workspace 步骤
+  # 派生后写入 GITHUB_ENV；此处只放与运行器无关的常量。
   # daemon 面测试名（伞仓 ctest 注册名，见各模块 CMakeLists 的 add_test）
   CTEST_RE: '(a2a_d|svc_test|test_maths|sched_d|mem_d|llm_d|sup_test|channel_e2e|daemon)'
 
@@ -40,6 +40,14 @@ jobs:
         with:
           submodules: false
           fetch-depth: 0
+
+      - name: Prepare workspace paths
+        run: |
+          # 单点派生伞仓与构建目录，后续步骤统一从 GITHUB_ENV 取用。
+          {
+            echo "UM=$RUNNER_TEMP/airymaxrt"
+            echo "BUILD=$RUNNER_TEMP/daemons-build"
+          } >> "$GITHUB_ENV"
 
       - name: Install build dependencies
         run: |
