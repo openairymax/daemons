@@ -65,11 +65,7 @@ static char *a2a_cjson_to_string(cJSON *obj)
 
 static void send_result(airy_sock_t fd, int id, char *result_json)
 {
-    if (!result_json) {
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Result serialize failed", id);
-        return;
-    }
-    cJSON *result = cJSON_Parse(result_json);
+    cJSON *result = result_json ? cJSON_Parse(result_json) : NULL;
     if (!result) {
         JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Result serialize failed", id);
         return;
