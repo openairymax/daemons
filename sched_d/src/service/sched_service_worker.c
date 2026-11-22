@@ -132,12 +132,16 @@ static void *sched_worker_thread(void *arg)
                              sel->selected_agent_id);
                 /* 执行链事件（2.8b）：任务开始执行 → progress 事件。 */
                 sched_hall_progress(rec->task_id, "task_started", (int)rec->priority);
-                sret = svc->executor(sel->selected_agent_id, rec->task_description, NULL, &output);
+                sret = svc->executor(sel->selected_agent_id, rec->task_description, NULL,
+                                     rec->timeout_ms, &output);
                 if (sret != AIRY_SUCCESS || !output) {
                     SVC_LOG_ERROR("sched: executor returned failure for task %s "
                                   "(rc=%d, output=%p)",
                                   rec->task_id, sret, (const void *)output);
-                    error = AIRY_STRDUP("agent dispatch failed");
+                    error = AIRY_STRDUP(sret == AIRY_ERR_TIMEOUT ||
+                                                sret == AIRY_ERR_EXEC_TIMEOUT ?
+                                            "agent dispatch timed out" :
+                                            "agent dispatch failed");
                 }
             }
         }

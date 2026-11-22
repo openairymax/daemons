@@ -30,10 +30,12 @@ const char *g_fail_goal;
 const char *g_fatal_goal;
 const char *g_flaky_goal;
 const char *g_empty_goal;
+const char *g_slow_goal;
 _Atomic int g_flaky_left;
 _Atomic int g_block;
 _Atomic int g_concurrent_now;
 _Atomic int g_concurrent_max;
+_Atomic unsigned g_last_timeout_ms;
 
 static void exec_log_push(const char *role, const char *goal)
 {
@@ -52,14 +54,21 @@ void exec_log_reset(void)
 }
 
 int fake_executor(const char *agent_id, const char *task_description, const char *workspace_dir,
-                  char **out_output)
+                  uint32_t timeout_ms, char **out_output)
 {
     (void)workspace_dir;
+    g_last_timeout_ms = timeout_ms;
     exec_log_push(agent_id ? agent_id : "?", task_description ? task_description : "");
 
     if (g_block) {
         while (g_block)
             TEST_SLEEP_MS(20);
+    }
+    /* Hung-node simulation: consume the propagated budget, then report the
+     * deadline as a terminal timeout instead of hanging the worker. */
+    if (g_slow_goal && task_description && strstr(task_description, g_slow_goal)) {
+        TEST_SLEEP_MS(timeout_ms > 0 ? (int)timeout_ms : 0);
+        return AIRY_ERR_TIMEOUT;
     }
     if (g_fatal_goal && task_description && strstr(task_description, g_fatal_goal)) {
         return AIRY_ERR_OUT_OF_MEMORY;
@@ -239,9 +248,10 @@ int get_dag_status_str(sched_service_t *svc, const char *dag_id, char *out, size
  *     concurrently via the thread pool)
  */
 int parallel_executor(const char *agent_id, const char *task_description,
-                      const char *workspace_dir, char **out_output)
+                      const char *workspace_dir, uint32_t timeout_ms, char **out_output)
 {
     (void)workspace_dir;
+    (void)timeout_ms;
     exec_log_push(agent_id ? agent_id : "?", task_description ? task_description : "");
     int now = ++g_concurrent_now;
     if (now > g_concurrent_max)
@@ -286,6 +296,7 @@ int main(void)
     failed += test_dag_transient_retry();
     failed += test_dag_transient_retry_exhausted();
     failed += test_dag_semantic_failed();
+    failed += test_dag_timeout();
 
     if (failed) {
         printf("\nDAG tests: %d FAILED\n", failed);

@@ -40,6 +40,12 @@ typedef struct sched_dag_node {
     uint64_t started_at_ms;
     uint64_t finished_at_ms;
 
+    /* Per-node execution budget (0 = inherit the graph-level timeout_ms, which
+     * itself 0 means the dispatch transport default). Propagated down to the
+     * executor so a hung agent reaches a terminal TIMEOUT instead of leaving
+     * the node RUNNING forever. */
+    uint32_t exec_timeout_ms;
+
     uint32_t max_retries;
     uint32_t retry_delay_ms;
     uint32_t retry_count;
@@ -66,6 +72,9 @@ typedef struct sched_dag {
     uint64_t created_at_ms;
     uint64_t finished_at_ms;
     uint64_t retry_budget_ms;
+    /* Graph-level default execution budget per node (0 = dispatch default);
+     * a node-level exec_timeout_ms always wins. */
+    uint32_t exec_timeout_ms;
 } sched_dag_t;
 
 struct sched_service {

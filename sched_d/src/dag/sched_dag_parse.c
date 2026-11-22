@@ -37,6 +37,10 @@ static void node_fields(sched_dag_node_t *node, cJSON *nj, int *err)
             node->retry_delay_ms = (uint32_t)rdelay->valuedouble;
     }
 
+    cJSON *timeout = cJSON_GetObjectItem(nj, "timeout_ms");
+    if (cJSON_IsNumber(timeout) && timeout->valuedouble > 0)
+        node->exec_timeout_ms = (uint32_t)timeout->valuedouble;
+
     cJSON *validator = cJSON_GetObjectItem(nj, "validator");
     if (cJSON_IsObject(validator)) {
         node->validator_rule_json = cJSON_PrintUnformatted(validator);
@@ -194,6 +198,12 @@ int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
     cJSON *rbudget = cJSON_GetObjectItem(root, "retry_budget_ms");
     if (cJSON_IsNumber(rbudget) && rbudget->valuedouble > 0)
         dag->retry_budget_ms = (uint64_t)rbudget->valuedouble;
+    /* Graph-level default execution budget per node (0 = dispatch default);
+     * a node-level timeout_ms overrides it. Propagated to the executor so a
+     * hung agent ends in a terminal TIMEOUT instead of a stuck RUNNING node. */
+    cJSON *dtimeout = cJSON_GetObjectItem(root, "timeout_ms");
+    if (cJSON_IsNumber(dtimeout) && dtimeout->valuedouble > 0)
+        dag->exec_timeout_ms = (uint32_t)dtimeout->valuedouble;
     dag->node_count = 0;
 
     /* Nodes: id required and unique; goal defaults ""; role defaults "coding";

@@ -34,8 +34,9 @@
  * mac complete_task writes back (releasing the concurrency slot) + node status
  * write-back under the lock (semantics identical to the original serial
  * single-node dispatch: cancel drops / success writes back / failure is
- * graded — FATAL cascades to abort the graph, ordinary failure does not
- * cascade but cancels unreachable downstream, transient retries with backoff).
+ * graded — FATAL cascades to abort the graph, budget exhaustion ends the node
+ * in TIMEOUT, ordinary failure does not cascade but cancels unreachable
+ * downstream, transient retries with backoff).
  * ============================================================================ */
 
 typedef struct sched_dag_batch_item {
@@ -66,8 +67,10 @@ static void sched_dag_batch_worker(void *arg)
     const char *goal = item->input ? item->input : sched_dag_agent_input(item->dag, node);
     char *output = NULL;
     const char *exec_role = item->agent_id ? item->agent_id : AGENT_VOCAB_FALLBACK;
-    int dret = svc->executor ? svc->executor(exec_role, goal, item->dag->workspace_dir, &output) :
-                               AIRY_ERR_SVC_NOT_READY;
+    int dret = svc->executor ?
+                   svc->executor(exec_role, goal, item->dag->workspace_dir,
+                                 dag_node_budget(item->dag, node), &output) :
+                   AIRY_ERR_SVC_NOT_READY;
 
     if (svc->mac && node->id) {
         mac_framework_complete_task(svc->mac, node->id,
@@ -260,7 +263,8 @@ static void sched_dag_run_one(sched_service_t *svc)
     airy_mtx_unlock(&svc->lock);
 
     char *output = NULL;
-    int dret = svc->executor ? svc->executor(role, goal, dag->workspace_dir, &output) :
+    int dret = svc->executor ? svc->executor(role, goal, dag->workspace_dir,
+                                             dag_node_budget(dag, node), &output) :
                                AIRY_ERR_SVC_NOT_READY;
     AIRY_FREE(goal_buf);
 

@@ -554,3 +554,115 @@ int test_dag_transient_retry_exhausted(void)
     sched_service_destroy(svc);
     return 0;
 }
+
+/* ---- Case 14: execution budget (timeout_ms) reaches the executor ----
+ * The graph-level timeout_ms is inherited by the node; the fake executor
+ * consumes exactly the budget and returns AIRY_ERR_TIMEOUT (what the real
+ * dispatcher does when its RPC deadline expires). The node must end in a
+ * reported TIMEOUT terminal state, the graph FAILED, and the run must finish
+ * far below the transport default (300 s) — proof the budget really reached
+ * execution instead of being compared after the fact. A node-level timeout_ms
+ * must override the graph-level one. */
+static int run_timeout_case(const char *dag_json, unsigned expect_budget, uint64_t *elapsed_ms)
+{
+    sched_service_t *svc = make_service_graded(true, 0);
+    if (!svc) {
+        printf("  FAILED: service create\n");
+        return 1;
+    }
+    exec_log_reset();
+    g_last_timeout_ms = 0;
+    uint64_t t0 = airy_time_wall_ms();
+
+    char *dag_id = NULL;
+    int ret = sched_service_submit_dag(svc, dag_json, &dag_id);
+    if (ret != AIRY_SUCCESS || !dag_id) {
+        printf("  FAILED: submit rc=%d\n", ret);
+        sched_service_destroy(svc);
+        return 1;
+    }
+    if (wait_dag_terminal(svc, dag_id, 5000) != 0) {
+        printf("  FAILED: dag still not terminal (stuck node)\n");
+        AIRY_FREE(dag_id);
+        sched_service_destroy(svc);
+        return 1;
+    }
+    *elapsed_ms = airy_time_wall_ms() - t0;
+
+    if ((unsigned)g_last_timeout_ms != expect_budget) {
+        printf("  FAILED: executor budget=%u (expect %u)\n", (unsigned)g_last_timeout_ms,
+               expect_budget);
+        AIRY_FREE(dag_id);
+        sched_service_destroy(svc);
+        return 1;
+    }
+
+    char st[32];
+    get_dag_status_str(svc, dag_id, st, sizeof(st));
+    if (strcmp(st, "failed") != 0) {
+        printf("  FAILED: dag status=%s (expect failed)\n", st);
+        AIRY_FREE(dag_id);
+        sched_service_destroy(svc);
+        return 1;
+    }
+
+    char *json = NULL;
+    if (sched_service_get_dag(svc, dag_id, &json) != AIRY_SUCCESS || !json) {
+        printf("  FAILED: get_dag after timeout\n");
+        AIRY_FREE(dag_id);
+        sched_service_destroy(svc);
+        return 1;
+    }
+    const char *node = strstr(json, "\"status\":\"timeout\"");
+    if (node == NULL) {
+        printf("  FAILED: node not graded timeout: %s\n", json);
+        AIRY_FREE(json);
+        AIRY_FREE(dag_id);
+        sched_service_destroy(svc);
+        return 1;
+    }
+    AIRY_FREE(json);
+    AIRY_FREE(dag_id);
+    sched_service_destroy(svc);
+    return 0;
+}
+
+int test_dag_timeout(void)
+{
+    printf("=== test_dag_timeout ===\n");
+
+    g_fail_goal = NULL;
+    g_fatal_goal = NULL;
+    g_flaky_goal = NULL;
+    g_empty_goal = NULL;
+    g_block = 0;
+    g_slow_goal = "slow-A";
+
+    uint64_t elapsed = 0;
+    const char *inherit = "{\"name\":\"tmo\",\"timeout_ms\":40,\"nodes\":["
+                          "{\"id\":\"A\",\"goal\":\"slow-A\",\"depends\":[]}"
+                          "]}";
+    if (run_timeout_case(inherit, 40, &elapsed) != 0) {
+        g_slow_goal = NULL;
+        return 1;
+    }
+    if (elapsed >= 2000) {
+        printf("  FAILED: node took %llu ms (budget not enforced)\n",
+               (unsigned long long)elapsed);
+        g_slow_goal = NULL;
+        return 1;
+    }
+
+    const char *override = "{\"name\":\"tmo2\",\"timeout_ms\":40,\"nodes\":["
+                           "{\"id\":\"A\",\"goal\":\"slow-A\",\"depends\":[],"
+                           "\"timeout_ms\":70}"
+                           "]}";
+    if (run_timeout_case(override, 70, &elapsed) != 0) {
+        g_slow_goal = NULL;
+        return 1;
+    }
+    g_slow_goal = NULL;
+
+    printf("  PASSED (graph budget inherited, node budget overrides; terminal timeout)\n\n");
+    return 0;
+}

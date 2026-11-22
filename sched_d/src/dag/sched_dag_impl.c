@@ -30,7 +30,8 @@
 static const char *const sched_dag_state_names[SCHED_DAG_STATUS_COUNT] = {
     "active", "completed", "semantic_failed", "failed", "canceled"};
 static const char *const sched_dag_node_names[SCHED_DAG_NODE_COUNT] = {
-    "pending", "ready", "running", "completed", "semantic_failed", "failed", "canceled"};
+    "pending", "ready", "running", "completed", "semantic_failed", "failed", "timeout",
+    "canceled"};
 
 _Static_assert(sizeof(sched_dag_state_names) / sizeof(sched_dag_state_names[0]) ==
                    SCHED_DAG_STATUS_COUNT,
@@ -163,6 +164,8 @@ int sched_service_get_dag(sched_service_t *service, const char *dag_id, char **o
     cJSON *root = dag_summary_json(dag);
     if (root) {
         cJSON_AddNumberToObject(root, "retry_budget_ms", (double)dag->retry_budget_ms);
+        if (dag->exec_timeout_ms > 0)
+            cJSON_AddNumberToObject(root, "timeout_ms", (double)dag->exec_timeout_ms);
 
         cJSON *nodes = cJSON_CreateArray();
         for (size_t j = 0; j < dag->node_count; j++) {
@@ -187,6 +190,8 @@ int sched_service_get_dag(sched_service_t *service, const char *dag_id, char **o
                 cJSON_AddNumberToObject(nj, "max_retries", (double)node->max_retries);
                 cJSON_AddNumberToObject(nj, "retry_count", (double)node->retry_count);
             }
+            if (node->exec_timeout_ms > 0)
+                cJSON_AddNumberToObject(nj, "timeout_ms", (double)node->exec_timeout_ms);
             cJSON_AddItemToArray(nodes, nj);
         }
         cJSON_AddItemToObject(root, "nodes", nodes);
