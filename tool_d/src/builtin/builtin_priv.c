@@ -11,9 +11,7 @@
  */
 
 #include "builtin/builtin_exec_internal.h"
-#include "builtin/builtin_limits_internal.h"
 #include "builtin/builtin_priv_internal.h"
-#include "builtin/builtin_result_internal.h"
 #include "daemon_security.h"
 
 #ifndef _WIN32
