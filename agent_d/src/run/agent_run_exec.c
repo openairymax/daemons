@@ -174,11 +174,7 @@ static void run_task_state(run_ctx_t *c, const char *state, const char *reason)
 
 /* ---- 依赖 daemon 的会话域辅助（本文件独占） ---- */
 
-/* 依赖域统一出口：params 只读，生命周期仍归调用方（内部序列化后不再触碰）；
- * 成功返回已解包的响应体（AIRY 分配）。
- * 只读入参是刻意的：此前约定「移交所有权」时，调用方把数组元素直接传入，
- * 本函数随即释放仍挂在父节点上的子节点，父数组变为悬垂指针——一次成功的
- * 会话持久化就足以在下一轮遍历或收尾释放时触发段错误。 */
+/* 依赖域统一出口：params 只读（生命周期归调用方），成功返回已解包响应体。 */
 static char *run_rpc(const char *sock_name, const char *method, const cJSON *params,
                      int timeout_ms)
 {
@@ -269,24 +265,17 @@ static int agent_think_process(const char *session_id, const char *prompt,
     return 0;
 }
 
-/* 会话持久化：成功后把本轮问答写入 mem_d（best effort）。
- * 一轮问答落两条记录（role=user/assistant，conv 与会话同值），契约由
- * agent_turn_rec 唯一给出；记录树归本函数所有，run_rpc 只读序列化，
- * 循环结束统一释放。写失败只降级为日志，不回滚已完成的一轮。 */
+/* 会话持久化：成功后把本轮问答写入 mem_d（best effort），记录树由本函数释放；
+ * 写失败只降级为日志，不回滚已完成的一轮。 */
 static void agent_persist(const char *session_id, const char *user_prompt,
                           const char *assistant_text)
 {
     cJSON *turn = agent_turn_rec(session_id, user_prompt, assistant_text);
-
-    if (!turn)
-        return;
-
-    int n = cJSON_GetArraySize(turn);
+    int n = turn ? cJSON_GetArraySize(turn) : 0;
 
     for (int i = 0; i < n; i++) {
         char *resp = run_rpc("mem.sock", "write", cJSON_GetArrayItem(turn, i),
                              AGENT_RUN_TOOL_TIMEOUT_MS);
-
         if (!resp)
             SVC_LOG_WARN("agent.run: mem.write failed (session=%s, record=%d)",
                          session_id ? session_id : "?", i);
