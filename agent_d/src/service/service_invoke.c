@@ -75,11 +75,26 @@ static int inv_reject(agent_service_t *svc, char **out_output, const char *json,
  * caller can run the fallback path. */
 enum { INV_OK = 0, INV_FALLBACK = 1, INV_NOBUF = 2, INV_IO = 3 };
 
+/* Attach the caller-supplied conversation history to the child request.
+ * Only a non-empty OpenAI messages array is forwarded; malformed JSON or an
+ * empty array means "no history" and must not block the invocation. */
+static void inv_add_history(cJSON *req, const char *history_json)
+{
+    if (!history_json || !history_json[0])
+        return;
+    cJSON *hist = cJSON_Parse(history_json);
+    if (hist && cJSON_IsArray(hist) && cJSON_GetArraySize(hist) > 0)
+        cJSON_AddItemToObject(req, "history", hist);
+    else
+        cJSON_Delete(hist);
+}
+
 /* Build the request line and push it to the child stdin. The newline is a
  * second write: the entry lock serializes writers, so the child never sees an
  * interleaved line. */
 static int inv_send(agent_entry_internal_t *agent, const char *agent_id, const char *input,
-                    const char *workspace_dir)
+                    const char *workspace_dir, const char *session_id,
+                    const char *history_json)
 {
     cJSON *req = cJSON_CreateObject();
     cJSON_AddStringToObject(req, "agent_id", agent_id);
@@ -90,6 +105,11 @@ static int inv_send(agent_entry_internal_t *agent, const char *agent_id, const c
      * tree instead of acting on the task (P0-1). */
     if (workspace_dir && workspace_dir[0])
         cJSON_AddStringToObject(req, "workspace_dir", workspace_dir);
+    /* Each request carries its own session identity and history; the runner
+     * rebuilds the execution context per request (S-P1-19). */
+    if (session_id && session_id[0])
+        cJSON_AddStringToObject(req, "session_id", session_id);
+    inv_add_history(req, history_json);
     char *req_str = cJSON_PrintUnformatted(req);
     cJSON_Delete(req);
     if (!req_str)
@@ -151,10 +171,11 @@ static int inv_take(cJSON *resp, const char *raw, char **out_output)
  * Returns INV_FALLBACK with the entry lock still held when the child is
  * unusable. */
 static int inv_child(agent_service_t *svc, agent_entry_internal_t *agent, const char *agent_id,
-                     const char *input, const char *workspace_dir, int read_timeout_s,
+                     const char *input, const char *workspace_dir, const char *session_id,
+                     const char *history_json, int read_timeout_s,
                      airy_cancel_token_t *cancel_token, char **out_output, uint64_t perf_t0)
 {
-    int src = inv_send(agent, agent_id, input, workspace_dir);
+    int src = inv_send(agent, agent_id, input, workspace_dir, session_id, history_json);
     if (src == INV_IO) {
         SVC_LOG_WARN("Agent invoke write failed, child unusable: agent_id=%s errno=%d", agent_id,
                      errno);
@@ -226,8 +247,9 @@ static int inv_child(agent_service_t *svc, agent_entry_internal_t *agent, const 
 #endif
 
 int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char *input, size_t len,
-                         const char *workspace_dir, int timeout_s, airy_cancel_token_t *cancel_token,
-                         char **out_output)
+                         const char *workspace_dir, const char *session_id,
+                         const char *history_json, int timeout_s,
+                         airy_cancel_token_t *cancel_token, char **out_output)
 {
     if (!svc || !svc->initialized || !agent_id || !out_output)
         return AIRY_ERR_INVALID_PARAM;
@@ -255,8 +277,8 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char 
 
 #if AIRY_PLATFORM_POSIX
     if (agent->child_pid > 0 && agent->stdin_fd >= 0) {
-        int crc = inv_child(svc, agent, agent_id, input, workspace_dir, read_timeout_s,
-                            cancel_token, out_output, perf_t0);
+        int crc = inv_child(svc, agent, agent_id, input, workspace_dir, session_id, history_json,
+                            read_timeout_s, cancel_token, out_output, perf_t0);
         if (crc != INV_FALLBACK)
             return crc;
     }

@@ -83,7 +83,7 @@ static void test_terminate(void)
     assert(agent_service_count(svc) == 1);
 
     char *out_output = NULL;
-    ret = agent_service_invoke(svc, agent_id, "ping", 4, NULL, 0, NULL, &out_output);
+    ret = agent_service_invoke(svc, agent_id, "ping", 4, NULL, NULL, NULL, 0, NULL, &out_output);
     assert(ret != AIRY_SUCCESS);
     assert(out_output != NULL);
     assert(strstr(out_output, "error") != NULL);
@@ -111,7 +111,8 @@ static void test_invoke(void)
     /* P0-2: in AIRY_AGENT_NO_SPAWN mode there is no child process; invoke
      * must return a clear error rather than an "invocation processed" fake
      * success */
-    ret = agent_service_invoke(svc, agent_id, "hello", 5, NULL, 0, NULL, &out_output);
+    ret = agent_service_invoke(svc, agent_id, "hello", 5, NULL, NULL, NULL, 0, NULL,
+                               &out_output);
     assert(ret != AIRY_SUCCESS);
     assert(out_output != NULL);
     assert(strstr(out_output, "error") != NULL);
@@ -131,7 +132,7 @@ static void test_invoke_nonexistent(void)
     assert(svc != NULL);
 
     char *out_output = NULL;
-    int ret = agent_service_invoke(svc, "nonexistent_agent_id", "hi", 2, NULL, 0, NULL,
+    int ret = agent_service_invoke(svc, "nonexistent_agent_id", "hi", 2, NULL, NULL, NULL, 0, NULL,
                                    &out_output);
     assert(ret == AIRY_ERR_NOT_FOUND);
     assert(out_output != NULL);
@@ -209,7 +210,7 @@ static void test_spawn_after_terminate(void)
     assert(agent_service_count(svc) == 3);
 
     char *out_output = NULL;
-    int irc = agent_service_invoke(svc, r2, "hi", 2, NULL, 0, NULL, &out_output);
+    int irc = agent_service_invoke(svc, r2, "hi", 2, NULL, NULL, NULL, 0, NULL, &out_output);
     assert(irc != AIRY_SUCCESS);
     AIRY_FREE(out_output);
 
@@ -283,7 +284,7 @@ static void test_invoke_cancel(void)
     assert(tcr == 0);
 
     char *out_output = NULL;
-    ret = agent_service_invoke(svc, agent_id, "ping", 4, NULL, 0, &token, &out_output);
+    ret = agent_service_invoke(svc, agent_id, "ping", 4, NULL, NULL, NULL, 0, &token, &out_output);
     int jrc = airy_platform_thread_join(th, NULL);
     assert(jrc == 0);
 
@@ -365,7 +366,7 @@ static void test_invoke_session_cancel(void)
     assert(tcr == 0);
 
     char *out_output = NULL;
-    ret = agent_service_invoke(svc, agent_id, "ping", 4, NULL, 0, token, &out_output);
+    ret = agent_service_invoke(svc, agent_id, "ping", 4, NULL, NULL, NULL, 0, token, &out_output);
     int jrc = airy_platform_thread_join(th, NULL);
     assert(jrc == 0);
 
