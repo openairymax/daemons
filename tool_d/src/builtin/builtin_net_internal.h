@@ -39,6 +39,15 @@ int net_url_parse(const char *url, builtin_url_t *u);
  * 放行列表，命中即跳过全部默认拒绝规则。 */
 int net_ssrf_check(const char *host, char *why, size_t cap);
 
+/* 读取可配置搜索 provider：endpoint 为含 %s 的 JSON API URL 模板
+ * （无 %s 时按 ?q=/%s 追加），key 可为空。返回 1=已配置 endpoint，
+ * 0=未配置。缓冲区内容在返回 0 时为空串。 */
+int net_cfg_provider(char *ep, size_t ep_cap, char *key, size_t key_cap);
+
+/* 解析 provider 的 JSON 响应，按 "[N] title\n    url\n    snippet\n"
+ * 写入 buf 并累计长度；返回提取到的条目数（0 表示无结果或非法 JSON）。 */
+int net_search_json(const char *json, int max, char *buf, size_t cap, size_t *len);
+
 #ifdef __cplusplus
 }
 #endif

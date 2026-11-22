@@ -107,6 +107,8 @@ set(TOOL_TEST_SOURCES
     test_net.c
     # S-P1-07: SSRF 主机策略（私网/链路本地/元数据/非规范数字形态）
     test_net_guard.c
+    # S-P1-06: 可配置 provider 配置读取与 JSON 结果解析
+    test_web_search.c
 )
 # os_sandbox 测试依赖 Landlock/seccomp/unshare/mount 等 Linux-only 能力，
 # macOS/BSD 上 os_sandbox.c 为空实现（OS_SANDBOX_MODE_OFF），该测试不适用。

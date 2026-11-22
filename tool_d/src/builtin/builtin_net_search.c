@@ -3,11 +3,22 @@
 
 /**
  * @file builtin_net_search.c
- * @brief Built-in tool web_search: Bing / DuckDuckGo HTML search
- *        (modeled on Atom Code WebSearchTool).
+ * @brief Built-in tool web_search: configurable JSON provider first,
+ *        Bing / DuckDuckGo HTML scraping only as a fallback.
  *
  *        params: query (required), max_results (optional, capped at 8)
  *        output: title / URL / summary groups, line-separated
+ *
+ *        Provider configuration (environment, read per call):
+ *          AIRY_WEB_SEARCH_ENDPOINT  JSON API URL template containing %s for
+ *                                    the URL-encoded query; without %s the
+ *                                    query is appended as ?q=/&q=
+ *          AIRY_WEB_SEARCH_KEY       optional credential, sent both as
+ *                                    "Authorization: Bearer" and "X-API-Key"
+ *
+ *        When a provider is configured but unreachable and the SERP
+ *        fallback also fails, the tool returns an explicit offline error
+ *        instead of a generic soft empty result.
  */
 
 #include "builtin/builtin_net_internal.h"
@@ -79,7 +90,8 @@ static void builtin_html_unescape(char *s)
     *r = '\0';
 }
 
-/* 去标签并反转义实体。 */
+/* 去标签并反转义实体。实体反转义必须作用于输出起点：旧实现把已移动到
+ * 串尾的 s 传给 unescape，等于完全不反转义（标题里的 &amp; 原样输出）。 */
 static void builtin_strip_html(char *s)
 {
     char *start = s;
@@ -315,6 +327,163 @@ static const web_src_t WEB_SRC_DDG = {
     "class=\"result__snippet\"[^>]*>(" WEB_SEARCH_TXT ")</a>",
 };
 
+/* ---------------------------------------------------------------------------
+ * 可配置 JSON provider（S-P1-06）
+ * ------------------------------------------------------------------------- */
+
+static const char *json_text(const cJSON *item, const char *key)
+{
+    const cJSON *n = cJSON_GetObjectItem(item, key);
+    return (cJSON_IsString(n) && n->valuestring && n->valuestring[0]) ? n->valuestring : NULL;
+}
+
+static const char *pick_str(const cJSON *it, const char *a, const char *b, const char *c)
+{
+    const char *s = json_text(it, a);
+    if (!s && b)
+        s = json_text(it, b);
+    if (!s && c)
+        s = json_text(it, c);
+    return s;
+}
+
+/* 在常见响应外壳里找结果数组：Bing(webPages.value)、Brave(web.results)、
+ * Serper(organic_results)、Tavily(results) 以及通用 results/items/data。 */
+static const cJSON *find_items(const cJSON *node, int depth)
+{
+    static const char *const keys[] = {"results", "items", "value",   "data", "webPages",
+                                       "web",     "organic_results", "entries"};
+    if (cJSON_IsArray(node))
+        return node;
+    if (!cJSON_IsObject(node) || depth > 2)
+        return NULL;
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        const cJSON *n = cJSON_GetObjectItem(node, keys[i]);
+        if (cJSON_IsArray(n))
+            return n;
+    }
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        const cJSON *r = find_items(cJSON_GetObjectItem(node, keys[i]), depth + 1);
+        if (r)
+            return r;
+    }
+    return NULL;
+}
+
+int net_search_json(const char *json, int max, char *buf, size_t cap, size_t *len)
+{
+    if (!json || !buf || !len || max <= 0 || cap == 0)
+        return 0;
+    cJSON *root = cJSON_Parse(json);
+    if (!root)
+        return 0;
+
+    const cJSON *items = find_items(root, 0);
+    int count = 0;
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, items) {
+        if (count >= max)
+            break;
+        const char *url = pick_str(it, "url", "link", "href");
+        const char *title = pick_str(it, "title", "name", "heading");
+        const char *snip = pick_str(it, "snippet", "description", "content");
+        if (!snip)
+            snip = pick_str(it, "text", "summary", NULL);
+        if (!url || !title)
+            continue;
+        size_t need = strlen(title) + strlen(url) + (snip ? strlen(snip) : 0) + 16;
+        if (*len + need >= cap) {
+            builtin_append_trunc_mark(buf, cap, *len, "\n[search truncated]");
+            break;
+        }
+        int w = snprintf(buf + *len, cap - *len, "[%d] %s\n    %s\n    %s\n", count + 1, title,
+                         url, snip ? snip : "");
+        if (w > 0) {
+            *len += (size_t)w;
+            count++;
+        }
+    }
+    cJSON_Delete(root);
+    return count;
+}
+
+/* endpoint 只允许 http(s) 且不得含 shell 元字符（命令经 sh -c 执行）。 */
+static int ep_check(const char *ep)
+{
+    if (!ep || !ep[0])
+        return -1;
+    if (strpbrk(ep, "'\"`$\\") != NULL)
+        return -1;
+    return (strncmp(ep, "http://", 7) == 0 || strncmp(ep, "https://", 8) == 0) ? 0 : -1;
+}
+
+/* key 只允许 token 安全字符，避免拼进 curl 命令时形成注入面。 */
+static int key_check(const char *k)
+{
+    for (const unsigned char *p = (const unsigned char *)k; *p; p++) {
+        if ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9'))
+            continue;
+        if (strchr("._~+/=-", *p) != NULL)
+            continue;
+        return -1;
+    }
+    return 0;
+}
+
+static int search_cfg_bad(const char *ep, const char *key)
+{
+    return (ep_check(ep) != 0 || (key[0] && key_check(key) != 0)) ? 1 : 0;
+}
+
+static int provider_url(const char *ep, const char *enc, char *url, size_t cap)
+{
+    int w;
+    if (strstr(ep, "%s") != NULL)
+        w = snprintf(url, cap, ep, enc);
+    else
+        w = snprintf(url, cap, "%s%sq=%s", ep, strchr(ep, '?') ? "&" : "?", enc);
+    return (w > 0 && (size_t)w < cap) ? 0 : -1;
+}
+
+/* 返回 0=拿到结果，-1=网络/解析失败（调用方转入 SERP 兜底）。 */
+static int provider_run(const char *query, int max, char *buf, size_t *len, int *count)
+{
+    char ep[2048], key[512], enc[2048], url[4096], cmd[8192];
+
+    if (!net_cfg_provider(ep, sizeof(ep), key, sizeof(key)))
+        return -1;
+    if (search_cfg_bad(ep, key))
+        return -1;
+    builtin_url_encode(query, enc, sizeof(enc));
+    if (provider_url(ep, enc, url, sizeof(url)) != 0)
+        return -1;
+
+    int w;
+    if (key[0])
+        w = snprintf(cmd, sizeof(cmd),
+                     "curl -sSL --max-time 15 -A \"%s\" -H 'Accept: application/json' "
+                     "-H 'Authorization: Bearer %s' -H 'X-API-Key: %s' '%s'",
+                     WEB_SEARCH_UA, key, key, url);
+    else
+        w = snprintf(cmd, sizeof(cmd),
+                     "curl -sSL --max-time 15 -A \"%s\" -H 'Accept: application/json' '%s'",
+                     WEB_SEARCH_UA, url);
+    if (w <= 0 || (size_t)w >= sizeof(cmd))
+        return -1;
+
+    char *out = NULL;
+    int exit_code = -1;
+    if (builtin_shell_run(cmd, NULL, &out, &exit_code, 18000, NULL, NULL, 0) != 0 || !out ||
+        exit_code != 0) {
+        AIRY_FREE(out);
+        return -1;
+    }
+    int got = net_search_json(out, max, buf, BUILTIN_OUTPUT_CAP, len);
+    AIRY_FREE(out);
+    *count = got;
+    return (got > 0) ? 0 : -1;
+}
+
 static int web_search_via(const web_src_t *src, const char *query, int max_results, char *buf,
                           size_t buf_cap, size_t *buf_len, int *count)
 {
@@ -336,10 +505,20 @@ static int web_search_via(const web_src_t *src, const char *query, int max_resul
     return rc;
 }
 
-/* 搜索编排：Bing → DuckDuckGo → 退化查询改写重试；返回最终条目数。 */
+/* 搜索编排：可配置 provider → Bing → DuckDuckGo → 退化查询改写重试；
+ * SERP 仅作为 provider 未配置或失败时的兜底。返回最终条目数。 */
 static int search_run(const char *query, int max_results, uint64_t deadline, char *buf,
                       size_t *buf_len, int *count)
 {
+    if (net_cfg_provider(NULL, 0, NULL, 0)) {
+        if (provider_run(query, max_results, buf, buf_len, count) == 0 && *count > 0)
+            return *count;
+        *buf_len = 0; /* provider 失败/无结果：清空后走 SERP 兜底 */
+        *count = 0;
+        if (builtin_deadline_hit(deadline))
+            return 0;
+    }
+
     int got = (web_search_via(&WEB_SRC_BING, query, max_results, buf, BUILTIN_OUTPUT_CAP, buf_len,
                               count) == 0 &&
                *count > 0);
@@ -382,25 +561,37 @@ int web_search_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
     if (max_results > BUILTIN_WEBSEARCH_MAX)
         max_results = BUILTIN_WEBSEARCH_MAX;
 
+    char ep[2048], key[512];
+    int has_provider = net_cfg_provider(ep, sizeof(ep), key, sizeof(key));
+    if (has_provider && search_cfg_bad(ep, key))
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "Invalid AIRY_WEB_SEARCH_ENDPOINT/KEY (endpoint must be http(s) "
+                          "without quotes; key must be token-safe)");
+
     char *buf = (char *)AIRY_CALLOC(BUILTIN_OUTPUT_CAP, 1);
     if (!buf) return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY, "Out of memory");
     size_t buf_len = 0;
     int count = 0;
 
-    /* Primary path: Bing (fast on most networks), then DuckDuckGo as a
-     * fallback for networks where Bing is blocked. Each endpoint is given a
-     * tight --max-time so an unreachable search provider cannot stall the
-     * IPC round trip beyond the agent's 30s timeout. The stage budget
-     * (timeout_ms) gates the fallbacks so the sum of retries stays within
-     * the executor's per-tool budget. */
+    /* Primary path: the configured provider (when present). SERP scraping is
+     * only a fallback for networks where the provider is blocked or absent.
+     * Each endpoint is given a tight --max-time so an unreachable search
+     * provider cannot stall the IPC round trip beyond the agent's 30s
+     * timeout. The stage budget (timeout_ms) gates the fallbacks so the sum
+     * of retries stays within the executor's per-tool budget. */
     (void)search_run(q->valuestring, max_results, builtin_deadline_ms(timeout_ms), buf, &buf_len,
                      &count);
 
     if (count == 0) {
-        btool_soft(res, "No web results for query: %s (Bing & DuckDuckGo unreachable)",
-                   q->valuestring);
         AIRY_FREE(buf);
-        return AIRY_OK;
+        res->exit_code = 1;
+        if (has_provider)
+            return btool_fail(res, AIRY_ERR_IO,
+                              "web_search offline: configured provider unreachable and SERP "
+                              "fallback failed");
+        return btool_fail(res, AIRY_ERR_IO,
+                          "web_search offline: no provider configured (set "
+                          "AIRY_WEB_SEARCH_ENDPOINT) and SERP fallback failed");
     }
     return btool_okout(res, buf);
 }
