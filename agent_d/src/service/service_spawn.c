@@ -66,7 +66,7 @@ static int agent_spawn_init_entry(agent_service_t *svc, agent_entry_internal_t *
  * syscall_proxy); swallowing that field would leave a child that answers
  * without any tool silently indistinguishable from a healthy one. */
 #if AIRY_PLATFORM_POSIX
-static void agent_spawn_note_degrade(const char *agent_id, cJSON *frame)
+static void spawn_degrade(const char *agent_id, cJSON *frame)
 {
     cJSON *deg = cJSON_GetObjectItem(frame, "degraded");
     if (!cJSON_IsArray(deg) || cJSON_GetArraySize(deg) == 0)
@@ -94,10 +94,9 @@ static void agent_spawn_verify_child(const char *agent_id, pid_t *child_pid, int
         cJSON *r = cJSON_Parse(ready_buf);
         if (r) {
             cJSON *ready_item = cJSON_GetObjectItem(r, "ready");
-            if (ready_item && cJSON_IsTrue(ready_item))
-                alive = 1;
+            alive = ready_item && cJSON_IsTrue(ready_item);
             if (alive)
-                agent_spawn_note_degrade(agent_id, r);
+                spawn_degrade(agent_id, r);
             cJSON_Delete(r);
         }
     }
