@@ -13,8 +13,10 @@
  *          - builtin_net_guard.c  SSRF host policy + provider config reader
  *
  *        Serves as the family prelude: the shared result-envelope helpers
- *        (btool_fail/btool_soft) live in the limits/exec internals, so both
- *        are pulled here once instead of by each unit (G13 fan-in ratchet).
+ *        (btool_fail/btool_soft) live in builtin_result_internal.h, which
+ *        carries the limits prelude along, so the net units pull in one
+ *        header instead of each reaching for limits/exec directly (G13
+ *        fan-in ratchet).
  */
 
 #ifndef AIRY_RT_TOOL_BUILTIN_NET_INTERNAL_H
@@ -22,8 +24,7 @@
 
 #include <stddef.h>
 
-#include "builtin/builtin_exec_internal.h"
-#include "builtin/builtin_limits_internal.h"
+#include "builtin/builtin_result_internal.h"
 
 #ifdef __cplusplus
 extern "C" {
