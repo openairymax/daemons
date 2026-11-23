@@ -213,10 +213,13 @@ void gw_mcp_clients_setup(gw_mcp_server_t *mcp)
     }
 
     cJSON *item = NULL;
+    size_t over = 0; /* 容量外条目：循环走完再一次性告警，避免逐条刷屏 */
     cJSON_ArrayForEach(item, root)
     {
-        if (g_mcp_client_count >= GW_MCP_CLIENTS_MAX)
-            break;
+        if (g_mcp_client_count >= GW_MCP_CLIENTS_MAX) {
+            over++;
+            continue;
+        }
         cJSON *jname = cJSON_GetObjectItem(item, "name");
         if (!cJSON_IsString(jname) || !jname->valuestring || !jname->valuestring[0]) {
             SVC_LOG_WARN("P2-4: mcp client entry missing 'name', skipped");
@@ -244,6 +247,12 @@ void gw_mcp_clients_setup(gw_mcp_server_t *mcp)
                      ctx->name, transport, registered);
         g_mcp_client_count++;
     }
+
+    if (over)
+        SVC_LOG_WARN("P2-4: external MCP client table is full (%d), %zu "
+                     "configured entries not connected; raise "
+                     "GW_MCP_CLIENTS_MAX or split the config",
+                     GW_MCP_CLIENTS_MAX, over);
 
     cJSON_Delete(root);
 }
