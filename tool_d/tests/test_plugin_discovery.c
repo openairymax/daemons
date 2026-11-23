@@ -53,8 +53,8 @@ static int make_plugin(int idx)
     if (!fp)
         return -1;
     fprintf(fp, "name: plug%03d\nversion: 1.0.0\ntype: tool_provider\n"
-                "api_version: 1\nmin_airy_version: 1\n",
-            idx);
+                "api_version: 1\nmin_airy_version: 1\nlibrary: libplug%03d.so\n",
+            idx, idx);
     fclose(fp);
     return 0;
 }
