@@ -389,11 +389,12 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results, size_t *out_c
     }
 
     size_t found = 0;
+    size_t over = 0; /* 容量外仍带 manifest 的目录数，循环后一次性告警 */
 #ifdef _WIN32
     int first_entry = 1;
 #endif
 
-    while (found < PLUGIN_DISCOVERY_MAX_PLUGINS) {
+    for (;;) {
         const char *d_name;
 #ifndef _WIN32
         struct dirent *entry = readdir(dir);
@@ -412,6 +413,13 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results, size_t *out_c
         if (d_name[0] == '.')
             continue;
 
+        if (found >= PLUGIN_DISCOVERY_MAX_PLUGINS) {
+            /* 容量已满仍须走完目录，才能给出被丢弃的真实条数 */
+            char probe[PLUGIN_DISCOVERY_MAX_PATH];
+            snprintf(probe, sizeof(probe), "%s/%s/manifest.yaml", plugins_dir, d_name);
+            over += (size_t)file_exists(probe);
+            continue;
+        }
         found += (size_t)scan_entry(plugins_dir, d_name, &results[found]);
     }
 
@@ -431,6 +439,11 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results, size_t *out_c
     g_discovery.count = found;
 
     AIRY_LOG_INFO("PluginDiscovery: scan complete (%zu plugins found)", found);
+    if (over)
+        AIRY_LOG_WARN("PluginDiscovery: capacity %d reached, %zu plugin dirs "
+                      "with manifest left undiscovered under '%s'; raise "
+                      "PLUGIN_DISCOVERY_MAX_PLUGINS or trim the tree",
+                      PLUGIN_DISCOVERY_MAX_PLUGINS, over, plugins_dir);
     return 0;
 }
 
