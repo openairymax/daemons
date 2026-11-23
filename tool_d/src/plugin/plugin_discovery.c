@@ -35,8 +35,6 @@
 static struct {
     plugin_discovery_config_t config;
     char plugins_dir[PLUGIN_DISCOVERY_MAX_PATH];
-    plugin_discovery_result_t *results;
-    size_t count;
     bool initialized;
 } g_discovery;
 
@@ -174,12 +172,6 @@ int plugin_discovery_init(const plugin_discovery_config_t *config)
 
 void plugin_discovery_destroy(void)
 {
-    if (g_discovery.results) {
-        plugin_discovery_free_results(g_discovery.results, g_discovery.count);
-        g_discovery.results = NULL;
-        g_discovery.count = 0;
-    }
-
     AIRY_LOG_INFO("PluginDiscovery: destroyed");
     g_discovery.initialized = false;
 }
@@ -429,14 +421,11 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results, size_t *out_c
     FindClose(hFind);
 #endif
 
+    /* 结果数组只归调用方：头文件约定 caller frees，若在此再存一份引用，
+     * destroy 会对同一块内存二次释放（plugin_rpc_cleanup 先 free 再
+     * destroy 即崩）。 */
     *out_results = results;
     *out_count = found;
-
-    if (g_discovery.results) {
-        plugin_discovery_free_results(g_discovery.results, g_discovery.count);
-    }
-    g_discovery.results = results;
-    g_discovery.count = found;
 
     AIRY_LOG_INFO("PluginDiscovery: scan complete (%zu plugins found)", found);
     if (over)
