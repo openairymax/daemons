@@ -158,7 +158,7 @@ void ensure_dirs(const sup_ctx_t *ctx);
  * 缺口字节），-1 = 本机无判定（工具缺失或输出不可解析，放行并告警）。 */
 long sup_admit_room(const sup_proc_t *p, long long *short_out);
 
-/* ---- ready.c：端到端就绪（依赖 = CORE 子进程端点可达，状态机 RUNNING） ---- */
+/* ---- svc.c：端到端就绪（依赖 = CORE 子进程端点可达，状态机 RUNNING） ---- */
 typedef struct sup_ready {
     int core_total;
     int core_ready;
