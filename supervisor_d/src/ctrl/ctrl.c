@@ -36,18 +36,6 @@
 
 #define SUP_REQ_MAX 2048
 
-static const char *state_str(sup_state_t st)
-{
-    switch (st) {
-    case SUP_ST_STARTING: return "starting";
-    case SUP_ST_RUNNING:  return "running";
-    case SUP_ST_BACKOFF:  return "backoff";
-    case SUP_ST_FAILED:   return "failed";
-    case SUP_ST_WAIT:     return "wait";
-    default:              return "stopped";
-    }
-}
-
 int sup_ctrl_listen(const sup_ctx_t *ctx)
 {
 #ifdef _WIN32
@@ -158,7 +146,8 @@ long long sup_json_num(const char *json, const char *key, long long dflt)
 
 static void dispatch(sup_ctx_t *ctx, int fd, const char *req)
 {
-    char method[64], name[SUP_NAME_MAX], resp[SUP_MAX_DAEMONS * 96 + 128];
+    /* 单条：name(32)+state(10)+fails+ready 约 110 字节，留 128 余量 */
+    char method[64], name[SUP_NAME_MAX], resp[SUP_MAX_DAEMONS * 128 + 192];
     long long id = 0;
     const char *idp = sup_find_key(req, "id");
     if (idp)
@@ -183,14 +172,26 @@ static void dispatch(sup_ctx_t *ctx, int fd, const char *req)
         ctx->shutdown = 1; /* 主循环受理，串行安全 */
         snprintf(resp, sizeof(resp), "{\"result\":\"ok\",\"id\":%lld}\n", id);
     } else if (strcmp(method, "health_check") == 0) {
+        /* ready 是端到端判据：全部 CORE 处于 RUNNING（进程活 + 端点可达），
+         * 单项 ready 供运维定位是哪条依赖没起来，不必回捞日志。 */
+        sup_ready_t rd = sup_ready_core(ctx);
         size_t off = (size_t)snprintf(resp, sizeof(resp),
-                                      "{\"result\":\"ok\",\"daemons\":[");
+                                      "{\"result\":\"ok\",\"ready\":%s,"
+                                      "\"core_ready\":%d,\"core_total\":%d,"
+                                      "\"daemons\":[",
+                                      rd.core_total > 0 &&
+                                              rd.core_ready == rd.core_total
+                                          ? "true"
+                                          : "false",
+                                      rd.core_ready, rd.core_total);
         for (int i = 0; i < ctx->count && off < sizeof(resp); i++) {
             const sup_proc_t *p = &ctx->procs[i];
             int n = snprintf(resp + off, sizeof(resp) - off,
-                             "%s{\"name\":\"%s\",\"state\":\"%s\",\"fails\":%d}",
-                             i ? "," : "", p->name, state_str(p->state),
-                             p->fail_count);
+                             "%s{\"name\":\"%s\",\"state\":\"%s\",\"fails\":%d,"
+                             "\"ready\":%s}",
+                             i ? "," : "", p->name, sup_state_str(p->state),
+                             p->fail_count,
+                             p->state == SUP_ST_RUNNING ? "true" : "false");
             if (n < 0)
                 break;
             off += (size_t)n;

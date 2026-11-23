@@ -65,7 +65,11 @@ int sup_svc_prepare(sup_ctx_t *ctx, int *lfd_out)
     if (sup_pump_start(ctx) != 0)
         sup_log("WARN", "output pump unavailable, preopen .out fallback");
 #endif
-    sup_log("INFO", "up: home=%s %d daemons (core=%d aux=%d) tick=%ldms ep=%s",
+    /* 这一行只声明期望态已经装载，不代表依赖可用；端到端就绪由
+     * sup_ready_tick 在全 CORE 端点可达时单独记账（S-P2-03）。 */
+    ctx->ready_deadline = sup_now_ms() + ctx->startup_grace_ms;
+    sup_log("INFO",
+            "up: home=%s declared %d daemons (core=%d aux=%d) tick=%ldms ep=%s",
             ctx->airy_home, ctx->count, ncore, naux, ctx->tick_ms,
             ctx->ctrl_ep);
     *lfd_out = lfd;
@@ -79,6 +83,7 @@ int sup_svc_step(sup_ctx_t *ctx, int lfd)
     sup_reconcile(ctx);
     if (g_stop || ctx->shutdown)
         return 1;
+    sup_ready_tick(ctx); /* 就绪边沿记账：依赖可用与否以端点可达为准 */
     /* A-9：退避到期不必等整拍——按最近待办时刻收窄 poll 超时 */
     long long wake = sup_next_wake_ms(ctx);
     if (wake > ctx->tick_ms)
