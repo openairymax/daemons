@@ -151,27 +151,31 @@ static int test_safe_strdup_with_limit(void)
     return 0;
 }
 
-/* is_valid_ascii: 当前 API 中无此函数，预留测试占位
- * 待 safe_string_utils.c 中实现 is_valid_ascii 后取消注释
-#if 0
-static int test_is_valid_ascii(void) {
+static int test_is_valid_ascii(void)
+{
     if (!is_valid_ascii("Hello World!", 12)) {
-        TEST_FAIL("is_valid_ascii", "Valid ASCII rejected");
+        TEST_FAIL("is_valid_ascii", "纯 ASCII 被误判为非法");
     }
 
     if (is_valid_ascii("Invalid \x80\x81", 11)) {
-        TEST_FAIL("is_valid_ascii", "Non-ASCII accepted");
+        TEST_FAIL("is_valid_ascii", "高位字节被误判为合法");
     }
 
     if (!is_valid_ascii("", 0)) {
-        TEST_FAIL("is_valid_ascii", "Empty string should be valid");
+        TEST_FAIL("is_valid_ascii", "空串应为合法");
+    }
+
+    if (is_valid_ascii(NULL, 4)) {
+        TEST_FAIL("is_valid_ascii", "NULL 应为非法");
+    }
+
+    if (!is_valid_ascii("abc\0\x80", 5)) {
+        TEST_FAIL("is_valid_ascii", "遇到 NUL 即应终止扫描");
     }
 
     TEST_PASS("is_valid_ascii");
     return 0;
 }
-#endif
-*/
 
 static int test_secure_clear(void)
 {
@@ -208,13 +212,14 @@ int main(void)
         failed++;
     if (test_safe_strdup_with_limit() != 0)
         failed++;
-    /* if (test_is_valid_ascii() != 0) failed++; */
+    if (test_is_valid_ascii() != 0)
+        failed++;
     if (test_secure_clear() != 0)
         failed++;
 
     printf("\n=== Test Summary ===\n");
-    printf("Total: 7 tests\n");
-    printf("Passed: %d\n", 7 - failed);
+    printf("Total: 8 tests\n");
+    printf("Passed: %d\n", 8 - failed);
     printf("Failed: %d\n", failed);
 
     return (failed == 0) ? 0 : 1;
