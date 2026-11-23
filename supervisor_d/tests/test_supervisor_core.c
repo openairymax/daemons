@@ -208,6 +208,45 @@ static int t_health_noop(void)
     TEST_OK();
 }
 
+/* S-P2-03：就绪 = 全部 CORE 处于 RUNNING（进程活 + 端点可达），AUX 不计数；
+ * 边沿只在迁移时记账一次，丢失就绪立即记账、恢复后清除。 */
+static int t_ready_core(void)
+{
+    sup_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    sup_ready_t r = sup_ready_core(&ctx);
+    TEST_ASSERT(r.core_total == 0 && r.core_ready == 0, "empty ctx");
+
+    ctx.count = 4;
+    ctx.procs[0].role = SUP_ROLE_CORE;
+    ctx.procs[0].state = SUP_ST_RUNNING;
+    ctx.procs[1].role = SUP_ROLE_CORE;
+    ctx.procs[1].state = SUP_ST_STARTING;
+    ctx.procs[2].role = SUP_ROLE_AUX;
+    ctx.procs[2].state = SUP_ST_RUNNING;
+    ctx.procs[3].role = SUP_ROLE_CORE;
+    ctx.procs[3].state = SUP_ST_RUNNING;
+    r = sup_ready_core(&ctx);
+    TEST_ASSERT(r.core_total == 3, "aux counted as startup dependency");
+    TEST_ASSERT(r.core_ready == 2, "core_ready");
+
+    ctx.procs[1].state = SUP_ST_RUNNING;
+    ctx.ready_deadline = sup_now_ms() + 60000;
+    sup_ready_tick(&ctx);
+    TEST_ASSERT(ctx.ready_said == 1 && ctx.unready_said == 0, "ready edge");
+    sup_ready_tick(&ctx);
+    TEST_ASSERT(ctx.ready_said == 1, "edge re-recorded");
+
+    ctx.procs[0].state = SUP_ST_BACKOFF;
+    sup_ready_tick(&ctx);
+    TEST_ASSERT(ctx.unready_said == 1 && ctx.ready_said == 0, "loss not reported");
+
+    ctx.procs[0].state = SUP_ST_RUNNING;
+    sup_ready_tick(&ctx);
+    TEST_ASSERT(ctx.ready_said == 1 && ctx.unready_said == 0, "recovery");
+    TEST_OK();
+}
+
 /* 端点字面量裁剪（net.c 机制件，两腿皆跑） */
 static int t_ep_split(void)
 {
@@ -819,6 +858,21 @@ static int t_ctrl_serve(void)
     TEST_ASSERT(WIFEXITED(st) && WEXITSTATUS(st) == 0, "health_check leg");
     TEST_ASSERT(ctx.shutdown == 0, "shutdown leaked");
 
+    /* 腿1b：就绪判据随状态机一并回报（S-P2-03）——两个 CORE 里一个在退避，
+     * 聚合 ready 必须为 false，并给出分子分母供定位。 */
+    lfd = sup_ctrl_listen(&ctx);
+    TEST_ASSERT(lfd >= 0, "listen 1b");
+    c = fork();
+    if (c == 0)
+        client_roundtrip("{\"method\":\"health_check\",\"id\":6}\n",
+                         "\"ready\":false", "\"core_ready\":1",
+                         "\"core_total\":2");
+    TEST_ASSERT(c > 0, "fork 1b");
+    sup_ctrl_serve(&ctx, lfd, 3000);
+    waitpid(c, &st, 0);
+    sup_ctrl_close(lfd);
+    TEST_ASSERT(WIFEXITED(st) && WEXITSTATUS(st) == 0, "ready leg");
+
     /* 腿2：supervisor.shutdown 受理 */
     ctx.shutdown = 0;
     lfd = sup_ctrl_listen(&ctx);
@@ -970,6 +1024,8 @@ int main(void)
     pass += t_decl_defaults() == 0;
     run++;
     pass += t_health_noop() == 0;
+    run++;
+    pass += t_ready_core() == 0;
     run++;
     pass += t_ep_split() == 0;
 #ifndef _WIN32

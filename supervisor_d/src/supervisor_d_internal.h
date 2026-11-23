@@ -139,6 +139,9 @@ typedef struct sup_ctx {
     long admit_retry_ms;        /* WAIT 态重判周期：装不下的进程多久再问一次 */
     int shutdown;               /* 1 = supervisor.shutdown 已受理 */
     int no_respawn;             /* A-9：AIRY_SUPERVISOR_NO_RESPAWN=1 关自动重建 */
+    int ready_said;             /* 就绪边沿已记账（防每拍刷屏） */
+    int unready_said;           /* 未就绪缺口已记账（同上） */
+    long long ready_deadline;   /* 启动宽限截止：此前不就绪不告警 */
 #ifndef _WIN32
     sup_pump_t pump;            /* A-5 POSIX 输出泵（Windows 保持预开） */
 #endif
@@ -154,6 +157,16 @@ void ensure_dirs(const sup_ctx_t *ctx);
  * 返回 1 = 放行（fit/unknown/未声明），0 = 此刻装不下（refuse，short_out 给出
  * 缺口字节），-1 = 本机无判定（工具缺失或输出不可解析，放行并告警）。 */
 long sup_admit_room(const sup_proc_t *p, long long *short_out);
+
+/* ---- ready.c：端到端就绪（依赖 = CORE 子进程端点可达，状态机 RUNNING） ---- */
+typedef struct sup_ready {
+    int core_total;
+    int core_ready;
+} sup_ready_t;
+
+const char *sup_state_str(sup_state_t st);
+sup_ready_t sup_ready_core(const sup_ctx_t *ctx);
+void sup_ready_tick(sup_ctx_t *ctx);
 
 /* ---- proc.c：spawn / reap / 退避 / 假死探测 / 收摊 ---- */
 long long sup_now_ms(void);
