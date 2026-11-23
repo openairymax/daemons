@@ -367,6 +367,8 @@ int agent_service_invoke_begin(agent_service_t *svc, const char *request_id,
         }
     }
     airy_mtx_unlock(&svc->session_lock);
+    SVC_LOG_WARN("Agent invoke session table full (%d in flight), request rejected",
+                 (int)AGENT_INVOKE_SESSIONS_MAX);
 
     airy_cancel_token_destroy(token);
     AIRY_FREE(token);
