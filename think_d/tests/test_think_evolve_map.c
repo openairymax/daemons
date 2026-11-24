@@ -52,7 +52,8 @@ static void test_map_full(void)
         return;
     }
     if (!NEAR(snap.patterns, 7) || !NEAR(snap.detections, 11) || !NEAR(snap.preemptions, 3) ||
-        !NEAR(snap.effectiveness, 0.75) || !NEAR(snap.records, 42) || !NEAR(snap.evolve_noop, 5)) {
+        !NEAR(snap.effectiveness, 0.75) || !NEAR(snap.records, 42) ||
+        !NEAR(snap.evolve_forwarded, 5)) {
         TEST_FAIL("map_full", "field mismatch");
         return;
     }

@@ -45,7 +45,7 @@ typedef struct {
 
 static double g_last_detections;
 static double g_last_preemptions;
-static double g_last_noop;
+static double g_last_evolve;
 
 static double evo_num(const cJSON *obj, const char *key)
 {
@@ -53,7 +53,7 @@ static double evo_num(const cJSON *obj, const char *key)
     return (item && cJSON_IsNumber(item)) ? item->valuedouble : 0.0;
 }
 
-int think_evo_map(const char *mc_json, uint64_t noop, think_evo_snapshot_t *out)
+int think_evo_map(const char *mc_json, uint64_t forwarded, think_evo_snapshot_t *out)
 {
     if (!mc_json || !out)
         return -1;
@@ -69,7 +69,7 @@ int think_evo_map(const char *mc_json, uint64_t noop, think_evo_snapshot_t *out)
     out->preemptions = evo_num(learning, "preemptive");
     out->effectiveness = evo_num(learning, "effectiveness");
     out->records = evo_num(root, "records");
-    out->evolve_noop = (double)noop;
+    out->evolve_forwarded = (double)forwarded;
     cJSON_Delete(root);
     return 0;
 }
@@ -121,7 +121,7 @@ static void evo_tick(airy_event_loop_t *loop, uint64_t timer_id, void *user_data
         return;
     }
 
-    mapped = think_evo_map(json, airy_memrpc_noops(), &snap);
+    mapped = think_evo_map(json, airy_memrpc_evolve_calls(), &snap);
     AIRY_FREE(json);
     if (mapped != 0)
         return;
@@ -134,7 +134,8 @@ static void evo_tick(airy_event_loop_t *loop, uint64_t timer_id, void *user_data
          &g_last_preemptions},
         {"airy_evolution_effectiveness", "gauge", "ratio", snap.effectiveness, NULL},
         {"airy_evolution_records", "gauge", "count", snap.records, NULL},
-        {"airy_evolution_evolve_noop_total", "counter", "count", snap.evolve_noop, &g_last_noop},
+        {"airy_evolution_evolve_forwarded_total", "counter", "count", snap.evolve_forwarded,
+         &g_last_evolve},
     };
     const size_t total = sizeof(src) / sizeof(src[0]);
 

@@ -21,25 +21,25 @@
 
 #define THINK_EVOLVE_INTERVAL_MS 30000u
 
-/* 单次采样快照：来源为策略侧 mc.stats JSON + provider no-op 计数 */
+/* 单次采样快照：来源为策略侧 mc.stats JSON + provider evolve 转发计数 */
 typedef struct {
     double patterns;
     double detections;
     double preemptions;
     double effectiveness;
     double records;
-    double evolve_noop;
+    double evolve_forwarded;
 } think_evo_snapshot_t;
 
 /**
  * @brief 将 mc.stats JSON 归一为标量快照（缺字段按 0 计）。
  *
  * @param mc_json [in] airy_mc_stats 输出（BORROW）。
- * @param noop [in] provider evolve no-op 累计计数。
+ * @param forwarded [in] provider evolve 转发累计计数。
  * @param out [out] 快照（TRANSFER - 调用方持有，函数整体覆写）。
  * @return 0 成功；-1 JSON 非法或参数为空。
  */
-int think_evo_map(const char *mc_json, uint64_t noop, think_evo_snapshot_t *out);
+int think_evo_map(const char *mc_json, uint64_t forwarded, think_evo_snapshot_t *out);
 
 /**
  * @brief 累计量差值（纯函数，不改基线）。
