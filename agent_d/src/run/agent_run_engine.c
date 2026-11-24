@@ -299,6 +299,11 @@ int agent_run_orchestrate(const cJSON *agent_spec, const char *prompt, char **ou
 
     int ret = agent_service_invoke(g_service, agent_id, prompt, strlen(prompt), NULL, NULL, NULL,
                                    NULL, 0, NULL, out_text);
+    /* P1-6：编排分支的 agent 是「一次 agent.run 一个」的临时实例，invoke
+     * 结束（成功或失败）必须回收——否则每轮编排都占一个 agent 槽位，累计
+     * 到 max_agents 后 spawn 直接 BUSY，表现为「用着用着就答非所问/卡死」。
+     * terminate 幂等：子进程已退出时只做槽位回收。 */
+    agent_service_terminate(g_service, agent_id);
     AIRY_FREE(agent_id);
     AIRY_FREE(spec_str);
     if (ret != AIRY_SUCCESS || !*out_text) {
