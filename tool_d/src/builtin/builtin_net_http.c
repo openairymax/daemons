@@ -31,7 +31,6 @@
 #include "builtin/builtin_net_internal.h"
 
 #include "builtin/builtin_limits_internal.h"
-#include "builtin/builtin_time_internal.h"
 #include "platform_process.h"
 
 #include <stdint.h>
@@ -100,7 +99,7 @@ int net_http_meta_parse(char *out, const char *status_mark, const char *redir_ma
 /* 本跳预算：整链预算已耗尽返回 0，无预算返回默认值。 */
 static uint32_t hop_budget(uint64_t deadline)
 {
-    int left = builtin_deadline_left_ms(deadline);
+    int left = builtin_dl_left_ms(deadline);
 
     if (left == 0)
         return 0;

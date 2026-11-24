@@ -14,7 +14,6 @@
 
 #include "builtin/builtin_buf_internal.h"
 #include "builtin/builtin_fs_internal.h"
-#include "builtin/builtin_time_internal.h"
 
 /* ============================================================================
  * fs_glob: recursive wildcard file listing (modeled on Atom Code GlobTool /
