@@ -121,7 +121,7 @@ static void evo_tick(airy_event_loop_t *loop, uint64_t timer_id, void *user_data
         return;
     }
 
-    mapped = think_evo_map(json, airy_memrpc_evolve_calls(), &snap);
+    mapped = think_evo_map(json, airy_memrpc_fwd_cnt(), &snap);
     AIRY_FREE(json);
     if (mapped != 0)
         return;
