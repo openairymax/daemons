@@ -23,6 +23,7 @@
 #include "agent_run_internal.h"
 
 #include "airy_memory.h"
+#include "airy_run_stream.h"
 #include "daemon_rpc_client.h"
 #include "platform.h"
 #include "svc_logger.h"
@@ -34,6 +35,36 @@
 
 #define LG_TIMEOUT_MS 5000
 #define LG_PREFIX "[compressed context]\n"
+
+/* 用量载荷的唯一构建点。provider 未报 token 时按 4 字节/token 折算并标
+ * estimated，客户端据此决定是否展示为估算值；实报时 source 为 provider。
+ * 只报 total 不报分量时把 total 记到 prompt，保证三者之和恒等于 total。 */
+cJSON *agent_usage_obj(const agent_usage_in_t *in)
+{
+    uint64_t total = in->total;
+    uint64_t pin = in->prompt;
+    uint64_t pout = in->completion;
+    const char *src = AIRY_RS_USAGE_PROVIDER;
+    cJSON *u;
+
+    if (total == 0) {
+        pin = (uint64_t)(in->prompt_bytes / 4);
+        pout = (uint64_t)(in->text_bytes / 4);
+        total = pin + pout;
+        src = AIRY_RS_USAGE_ESTIMATE;
+    } else if (pin + pout == 0) {
+        pin = total;
+    }
+    u = cJSON_CreateObject();
+    if (!u)
+        return NULL;
+    cJSON_AddNumberToObject(u, AIRY_RS_K_USAGE_PROMPT, (double)pin);
+    cJSON_AddNumberToObject(u, AIRY_RS_K_USAGE_COMP, (double)pout);
+    cJSON_AddNumberToObject(u, AIRY_RS_K_USAGE_TOTAL, (double)total);
+    cJSON_AddNumberToObject(u, AIRY_RS_K_USAGE_COST, in->cost);
+    cJSON_AddStringToObject(u, AIRY_RS_K_USAGE_SRC, src);
+    return u;
+}
 
 int agent_ledger_init(agent_ledger_t *lg, const char *sess)
 {

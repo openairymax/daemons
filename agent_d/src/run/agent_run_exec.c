@@ -808,8 +808,11 @@ static void run_chain(run_ctx_t *c)
     cJSON_AddStringToObject(evt, "event", "run_result");
     cJSON_AddNumberToObject(evt, "rc", c->rc);
     cJSON_AddStringToObject(evt, "state", run_state_name(c->rc, c->cancelled));
-    cJSON_AddNumberToObject(evt, "tokens", (double)c->tokens);
-    cJSON_AddNumberToObject(evt, "cost", c->cost);
+    /* 决策链与 result/run_end 共用同一个 usage 对象：轨迹回放不必再
+     * 按「有的帧有 cost、有的帧只有 token」分别猜键名。 */
+    cJSON *usage = run_usage_obj(c);
+    if (usage)
+        cJSON_AddItemToObject(evt, AIRY_RS_K_USAGE, usage);
     char buf[520];
     AIRY_STRNCPY_TERM(buf, c->text ? c->text : "", sizeof(buf));
     cJSON_AddStringToObject(evt, "text", buf);
@@ -941,31 +944,19 @@ static cJSON *run_fail_obj(const run_ctx_t *c)
 }
 
 /* D-11：usage 结构化。provider 实报优先；无实报按字符数估算并标注来源，
- * 避免客户端把缺失计量误读成零消耗。 */
+ * 避免客户端把缺失计量误读成零消耗。形状的唯一实现在 agent_run_ledger.c，
+ * 此处只做字段搬运，result/run_end/run_result 三处共用同一键名。 */
 static cJSON *run_usage_obj(const run_ctx_t *c)
 {
-    uint64_t total = c->tokens;
-    uint64_t pin = c->tokens_in;
-    uint64_t pout = c->tokens_out;
-    const char *src = AIRY_RS_USAGE_PROVIDER;
-    cJSON *u;
-
-    if (total == 0) {
-        pin = (uint64_t)((c->prompt ? strlen(c->prompt) : 0) / 4);
-        pout = (uint64_t)((c->text ? strlen(c->text) : 0) / 4);
-        total = pin + pout;
-        src = AIRY_RS_USAGE_ESTIMATE;
-    } else if (pin + pout == 0) {
-        pin = total;
-    }
-    u = cJSON_CreateObject();
-    if (!u)
-        return NULL;
-    cJSON_AddNumberToObject(u, AIRY_RS_K_USAGE_PROMPT, (double)pin);
-    cJSON_AddNumberToObject(u, AIRY_RS_K_USAGE_COMP, (double)pout);
-    cJSON_AddNumberToObject(u, AIRY_RS_K_USAGE_TOTAL, (double)total);
-    cJSON_AddStringToObject(u, AIRY_RS_K_USAGE_SRC, src);
-    return u;
+    agent_usage_in_t in = {
+        c->tokens,
+        c->tokens_in,
+        c->tokens_out,
+        c->prompt ? strlen(c->prompt) : 0,
+        c->text ? strlen(c->text) : 0,
+        c->cost,
+    };
+    return agent_usage_obj(&in);
 }
 
 /* 契约字段：会话/任务元数据、终态、失败载荷、用量与续跑令牌。 */
@@ -1010,8 +1001,6 @@ static void run_fill_meta(run_ctx_t *c, cJSON *result)
         AIRY_FREE(c->resume_out);
         c->resume_out = NULL;
     }
-    cJSON_AddNumberToObject(result, "tokens_used", (double)c->tokens);
-    cJSON_AddNumberToObject(result, "cost_usd", c->cost);
 }
 
 /* 轨迹与思考链：tool_trace 整棵移交；交互轮问题集按成功与否决定是否引导。 */

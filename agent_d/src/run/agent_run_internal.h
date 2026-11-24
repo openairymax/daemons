@@ -71,6 +71,29 @@ void agent_ledger_add(agent_ledger_t *lg, const char *type, const char *text, si
  */
 void agent_ledger_fit(agent_ledger_t *lg, cJSON *messages);
 
+/* ---- 计量域（agent_run_ledger.c） ---- */
+
+/**
+ * 用量入参（S30-P0-5）：token 为 provider 实报分量，*_bytes 仅用于
+ * provider 未实报时按 4 字节/token 估算；cost 恒透传。
+ */
+typedef struct {
+    uint64_t total;
+    uint64_t prompt;
+    uint64_t completion;
+    size_t prompt_bytes;
+    size_t text_bytes;
+    double cost;
+} agent_usage_in_t;
+
+/**
+ * @brief 构建统一 usage 对象（prompt/completion/total/cost/source）。
+ *
+ * result、run_end 与决策链 run_result 共用本函数，是全项目唯一的计量
+ * 载荷形状；调用方取得所有权（cJSON_Delete）；OOM 返回 NULL。
+ */
+cJSON *agent_usage_obj(const agent_usage_in_t *in);
+
 /* ---- 工具循环域（agent_run_loop.c） ---- */
 
 /**
