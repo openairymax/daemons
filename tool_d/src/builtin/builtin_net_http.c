@@ -188,10 +188,10 @@ static int build_argv(const net_http_req_t *req, const char *url, const char *bo
     argv[n++] = (char *)"-w";
     argv[n++] = (char *)meta;
     if (req->extra_argv) {
-        for (const char *const *p = req->extra_argv; *p; p++) {
+        for (char *const *p = req->extra_argv; *p; p++) {
             if (n + 2 >= argv_cap)
                 return -1;
-            argv[n++] = (char *)*p;
+            argv[n++] = *p;
         }
     }
     if (n + 2 > argv_cap)
