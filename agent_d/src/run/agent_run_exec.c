@@ -794,6 +794,22 @@ static void run_tools_evt(run_ctx_t *c)
     cJSON_Delete(evt);
 }
 
+/* D-11：usage 结构化。provider 实报优先；无实报按字符数估算并标注来源，
+ * 避免客户端把缺失计量误读成零消耗。形状的唯一实现在 agent_run_ledger.c，
+ * 此处只做字段搬运，result/run_end/run_result 三处共用同一键名。 */
+static cJSON *run_usage_obj(const run_ctx_t *c)
+{
+    agent_usage_in_t in = {
+        c->tokens,
+        c->tokens_in,
+        c->tokens_out,
+        c->prompt ? strlen(c->prompt) : 0,
+        c->text ? strlen(c->text) : 0,
+        c->cost,
+    };
+    return agent_usage_obj(&in);
+}
+
 /* 决策链收尾：工具轨迹事件 + run_result（GCCP 交互轮不发 run_result）。 */
 static void run_chain(run_ctx_t *c)
 {
@@ -941,22 +957,6 @@ static cJSON *run_fail_obj(const run_ctx_t *c)
     if (c->verify)
         cJSON_AddItemToObject(f, AIRY_RS_K_VERIFICATION, cJSON_Duplicate(c->verify, 1));
     return f;
-}
-
-/* D-11：usage 结构化。provider 实报优先；无实报按字符数估算并标注来源，
- * 避免客户端把缺失计量误读成零消耗。形状的唯一实现在 agent_run_ledger.c，
- * 此处只做字段搬运，result/run_end/run_result 三处共用同一键名。 */
-static cJSON *run_usage_obj(const run_ctx_t *c)
-{
-    agent_usage_in_t in = {
-        c->tokens,
-        c->tokens_in,
-        c->tokens_out,
-        c->prompt ? strlen(c->prompt) : 0,
-        c->text ? strlen(c->text) : 0,
-        c->cost,
-    };
-    return agent_usage_obj(&in);
 }
 
 /* 契约字段：会话/任务元数据、终态、失败载荷、用量与续跑令牌。 */
