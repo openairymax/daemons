@@ -37,6 +37,11 @@ static int chan_connect(const char *endpoint, int with_rcv, int *out_fd)
     struct sockaddr_un addr;
     __builtin_memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
+    /* P1-1：超长 endpoint 显式失败，不静默截断到另一个 socket 地址。 */
+    if (strlen(endpoint) >= sizeof(addr.sun_path)) {
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "channel endpoint too long");
+        return AIRY_ERR_INVALID_PARAM;
+    }
     AIRY_STRNCPY_TERM(addr.sun_path, endpoint, sizeof(addr.sun_path));
     addr.sun_path[sizeof(addr.sun_path) - 1] = '\0';
 
