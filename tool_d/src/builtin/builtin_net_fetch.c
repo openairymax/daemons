@@ -161,31 +161,18 @@ static int web_fetch_via_network(const builtin_url_t *u, tool_result_t *res)
 }
 #endif
 
-/* 校验 URL 形态、解析出 scheme/host/port/path，并套用 SSRF 主机策略；
- * 合法返回 0。 */
+/* 校验 URL 形态、解析出 scheme/host/port/path，并套用统一 URL 策略
+ * （net_url_guard：字符集 + scheme + SSRF 主机）；合法返回 0。 */
 static int fetch_check_url(const char *url_str, builtin_url_t *u, tool_result_t *res)
 {
     char why[160];
 
-    if (strpbrk(url_str, "'\"`$\\") != NULL)
-        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
-                          "URL contains unsafe characters (', \", `, $, \\)");
+    if (net_url_guard(url_str, why, sizeof(why)) != 0)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "URL rejected: %s", why);
     if (net_url_parse(url_str, u) != 0)
         return btool_fail(res, AIRY_ERR_INVALID_PARAM,
                           "Invalid URL (only http:// and https:// are supported)");
-    if (net_ssrf_check(u->host, why, sizeof(why)) != 0)
-        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "URL host rejected: %s", why);
     return 0;
-}
-
-/* 剥离 curl -w 追加的状态标记并取回 HTTP 状态码。 */
-static void fetch_pop_status(char *out, long *http_status)
-{
-    char *mark = out ? strstr(out, "\n__AIRY_STATUS__:") : NULL;
-    if (!mark)
-        return;
-    *mark = '\0';
-    *http_status = strtol(mark + strlen("\n__AIRY_STATUS__:"), NULL, 10);
 }
 
 /* 按状态码落结果：4xx/5xx → IO 错误；>0 → OK；缺标记 → curl 整体失败。 */
@@ -223,33 +210,26 @@ int web_fetch_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
     if (uerr != 0)
         return uerr;
 
-    /* Main path: curl child process (curl.exe ships with Windows 10+).
-     * -sS silences progress but keeps errors; -L follows redirects;
-     * --max-time prevents hangs; -w appends a status marker (single quotes let
-     * curl interpret \n as newline); -A declares the UA.
+    /* Main path: curl child process without -L (curl.exe ships with Windows 10+).
+     * net_http_get 逐跳跟随重定向并在每一跳复检 SSRF 策略——盲跟 -L 会让
+     * 已通过首跳校验的 URL 被 302 到元数据/环回地址。
      *
      * 超时预算（2026-08-19）：CLI 侧工具 RPC 超时为 30s（cli_chat.c
      * CLI_TOOL_RPC_TIMEOUT_MS），curl --max-time 若同样 30s，慢网页会先
-     * 撞 RPC 超时（实测 rc=-31 超时）。curl 降到 20s、shell_run 降到
-     * 25s，给 RPC 返回留出余量——20s 足够绝大多数页面（大文件/流式站点
-     * 快速失败，不拖垮整个工具轮）。 */
-    char cmd[8192];
-    snprintf(cmd, sizeof(cmd),
-             "curl -sSL --max-time 20 -A \"AirymaxRT/0.1.2 web_fetch\" "
-             "-w '\\n__AIRY_STATUS__:%%{http_code}' '%s'",
-             url_str);
+     * 撞 RPC 超时（实测 rc=-31 超时）。整链预算 25s 给 RPC 返回留出余量。 */
+    static char *const fetch_extra[] = {"-A", "AirymaxRT/0.1.2 web_fetch", NULL};
+    net_http_req_t req;
+    req.url = url_str;
+    req.extra_argv = fetch_extra;
+    req.timeout_ms = timeout_ms ? timeout_ms : 25000;
 
-    char *out = NULL;
-    int exit_code = -1;
+    net_http_resp_t rsp = {0};
+    int rc = net_http_get(&req, &rsp);
+    if (rc < 0)
+        return btool_fail(res, AIRY_ERR_IO, "Web fetch rejected: %s", rsp.why);
 
-    int rc = builtin_shell_run(cmd, NULL, &out, &exit_code, timeout_ms ? timeout_ms : 25000, NULL,
-                               NULL, 0);
-    if (rc != 0)
-        return btool_fail(res, AIRY_ERR_EXEC_FAIL,
-                          "Failed to execute web fetch (pipe/process creation failed)");
-
-    if (exit_code == 127 || (out && strstr(out, "command not found"))) {
-        AIRY_FREE(out);
+    if (rc > 0) {
+        AIRY_FREE(rsp.body);
 #ifndef _WIN32
         /* Fallback: plain-HTTP via the built-in network layer (no TLS). */
         if (strcmp(u.scheme, "http") == 0) return web_fetch_via_network(&u, res);
@@ -260,10 +240,8 @@ int web_fetch_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
                           u.scheme);
     }
 
-    long http_status = 0;
-    fetch_pop_status(out, &http_status);
-    res->output = out ? out : AIRY_STRDUP("");
+    res->output = rsp.body ? rsp.body : AIRY_STRDUP("");
 
-    fetch_apply_status(res, http_status, exit_code);
+    fetch_apply_status(res, rsp.status, rsp.exit_code);
     return AIRY_OK;
 }

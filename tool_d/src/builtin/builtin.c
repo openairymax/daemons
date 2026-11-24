@@ -134,6 +134,15 @@ int builtin_deadline_hit(uint64_t deadline_ms)
     return airy_time_ms() >= deadline_ms;
 }
 
+int builtin_deadline_left_ms(uint64_t deadline_ms)
+{
+    if (deadline_ms == UINT64_MAX) return -1;
+    uint64_t now = airy_time_ms();
+    if (now >= deadline_ms) return 0;
+    uint64_t left = deadline_ms - now;
+    return (left > 600000u) ? 600000 : (int)left;
+}
+
 int builtin_scan_noise_dir(const char *name)
 {
     static const char *const noise[] = {".git",   "node_modules", "target",       ".venv",

@@ -55,10 +55,11 @@ set(TOOL_SERVICE_SOURCES
     src/builtin/builtin_fs_dir.c
     src/builtin/builtin_fs_glob.c
     src/builtin/builtin_fs_grep.c
-    # 网络内置工具按域拆分：抓取 / 搜索 / SSRF 守卫各一编译单元
+    # 网络内置工具按域拆分：抓取 / 搜索 / SSRF 守卫 / 逐跳重定向校验的共用 GET
     src/builtin/builtin_net_fetch.c
     src/builtin/builtin_net_search.c
     src/builtin/builtin_net_guard.c
+    src/builtin/builtin_net_http.c
     # 0.1.21 归位：网络通信族自 commons 迁入，唯一消费者是 builtin_net
     src/net/network_common.c
     src/net/network_http.c

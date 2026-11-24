@@ -216,6 +216,19 @@ static int resolve_denied(const char *host, char *why, size_t cap)
     return denied;
 }
 
+/* 主机名只允许 [a-z0-9.-]。拒绝 @ # % 等会被 curl 当作 userinfo、
+ * 片段或百分号转义解释的字符：否则 "evil.com@127.0.0.1" 能通过本策略，
+ * 而 curl 实际连接的是 127.0.0.1。 */
+static int host_charset_ok(const char *h)
+{
+    for (const char *p = h; *p; p++) {
+        if ((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '.' || *p == '-')
+            continue;
+        return 0;
+    }
+    return 1;
+}
+
 int net_ssrf_check(const char *host, char *why, size_t cap)
 {
     char h[256];
@@ -266,6 +279,11 @@ int net_ssrf_check(const char *host, char *why, size_t cap)
         return 0;
     }
 
+    if (!host_charset_ok(h)) {
+        snprintf(why, cap, "illegal characters in host (%s)", h);
+        return -1;
+    }
+
     unsigned char b[4];
     if (ipv4_parse(h, b) == 0) {
         if (!ipv4_blocked(b))
@@ -284,6 +302,37 @@ int net_ssrf_check(const char *host, char *why, size_t cap)
         return -1;
     }
     return resolve_denied(h, why, cap) ? -1 : 0;
+}
+
+int net_url_guard(const char *url, char *why, size_t cap)
+{
+    char sink[2];
+    builtin_url_t u;
+
+    if (!why || cap == 0) {
+        why = sink;
+        cap = sizeof(sink);
+    }
+    why[0] = '\0';
+    if (!url || !url[0]) {
+        snprintf(why, cap, "empty URL");
+        return -1;
+    }
+    /* 保守字符集：引号/反引号/美元符/反斜杠一律拒绝，避免 URL 在后续
+     * 任何一层被重新拼接成命令时成为注入点。 */
+    if (strpbrk(url, "'\"`$\\") != NULL) {
+        snprintf(why, cap, "URL contains shell-unsafe characters");
+        return -1;
+    }
+    if (net_url_parse(url, &u) != 0) {
+        snprintf(why, cap, "invalid URL (only http/https are allowed)");
+        return -1;
+    }
+    if (strcmp(u.scheme, "http") != 0 && strcmp(u.scheme, "https") != 0) {
+        snprintf(why, cap, "unsupported scheme (%s)", u.scheme);
+        return -1;
+    }
+    return net_ssrf_check(u.host, why, cap);
 }
 
 int net_cfg_provider(char *ep, size_t ep_cap, char *key, size_t key_cap)

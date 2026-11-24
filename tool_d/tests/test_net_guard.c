@@ -122,6 +122,70 @@ static void test_url_parse(void)
     assert_int_equal(net_url_parse("http://example.com:0/", &u), -1);
 }
 
+static void test_host_charset(void)
+{
+    char why[160];
+
+    /* 这些 host 会被 curl 解释成 userinfo/片段/转义，实际连到内网地址。 */
+    static const char *const denied[] = {
+        "evil.example@127.0.0.1",
+        "127.0.0.1#@evil.example",
+        "127.0.0.1%2f.evil.example",
+        "foo_bar.example",
+    };
+    for (size_t i = 0; i < sizeof(denied) / sizeof(denied[0]); i++) {
+        assert_int_equal(net_ssrf_check(denied[i], why, sizeof(why)), -1);
+    }
+}
+
+static void test_url_guard(void)
+{
+    char why[160];
+
+    assert_int_equal(net_url_guard("https://93.184.216.34/a", why, sizeof(why)), 0);
+    assert_string_equal(why, "");
+
+    /* 首跳能过但 curl 实际会连到别处的形态，以及非 http(s) 方案。 */
+    static const char *const denied[] = {
+        "http://evil.example@127.0.0.1/",
+        "http://127.0.0.1#@evil.example/",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://[::1]/",
+        "http://localhost/x",
+        "http://127.1/",
+        "http://127.0.0.1%2f@evil.example/",
+        "file:///etc/passwd",
+        "http://example.com/'quote'",
+    };
+    for (size_t i = 0; i < sizeof(denied) / sizeof(denied[0]); i++) {
+        assert_int_equal(net_url_guard(denied[i], why, sizeof(why)), -1);
+        assert_true(why[0] != '\0');
+    }
+}
+
+static void test_http_meta_parse(void)
+{
+    long status = 0;
+    char redir[256];
+    char buf[512];
+
+    /* 正文里伪造的标记必须被真正的尾部覆盖（取最后一次出现）。 */
+    snprintf(buf, sizeof(buf),
+             "FIRST\n__AIRY_a1_STATUS__:200\n__AIRY_a1_REDIR__:\nSECOND"
+             "\n__AIRY_a1_STATUS__:307\n__AIRY_a1_REDIR__:https://93.184.216.34/next");
+    assert_int_equal(net_http_meta_parse(buf, "\n__AIRY_a1_STATUS__:", "\n__AIRY_a1_REDIR__:",
+                                         &status, redir, sizeof(redir)),
+                     0);
+    assert_int_equal(status, 307);
+    assert_string_equal(redir, "https://93.184.216.34/next");
+    assert_string_equal(buf, "FIRST\n__AIRY_a1_STATUS__:200\n__AIRY_a1_REDIR__:\nSECOND");
+
+    snprintf(buf, sizeof(buf), "BODY ONLY");
+    assert_int_equal(net_http_meta_parse(buf, "\n__AIRY_a1_STATUS__:", "\n__AIRY_a1_REDIR__:",
+                                         &status, redir, sizeof(redir)),
+                     -1);
+}
+
 int main(void)
 {
     set_env("AIRY_NET_ALLOW_HOSTS", NULL);
@@ -131,6 +195,9 @@ int main(void)
     test_public_literals();
     test_allow_list();
     test_url_parse();
+    test_host_charset();
+    test_url_guard();
+    test_http_meta_parse();
     printf("test_net_guard: all checks passed\n");
     return 0;
 }

@@ -303,7 +303,6 @@ static int web_search_rewrite_query(const char *in, char *out, size_t cap)
 
 typedef struct {
     const char *url_fmt;
-    int curl_s;
     int shell_ms;
     const char *res_re;
     const char *snip_re;
@@ -311,7 +310,6 @@ typedef struct {
 
 static const web_src_t WEB_SRC_BING = {
     "https://www.bing.com/search?q=%s",
-    12,
     15000,
     "<h2[^>]*><a[^>]*href=\"([^\"]+)\"[^>]*>(" WEB_SEARCH_TXT ")</a></h2>",
     "class=\"b_lineclamp[^\"]*\"[^>]*>(" WEB_SEARCH_TXT ")</p>",
@@ -319,7 +317,6 @@ static const web_src_t WEB_SRC_BING = {
 
 static const web_src_t WEB_SRC_DDG = {
     "https://html.duckduckgo.com/html/?q=%s",
-    8,
     10000,
     "class=\"result__a\" href=\"([^\"]+)\"[^>]*>(" WEB_SEARCH_TXT ")</a>",
     "class=\"result__snippet\"[^>]*>(" WEB_SEARCH_TXT ")</a>",
@@ -446,7 +443,10 @@ static int provider_url(const char *ep, const char *enc, char *url, size_t cap)
 /* 返回 0=拿到结果，-1=网络/解析失败（调用方转入 SERP 兜底）。 */
 static int provider_run(const char *query, int max, char *buf, size_t *len, int *count)
 {
-    char ep[2048], key[512], enc[2048], url[4096], cmd[8192];
+    char ep[2048], key[512], enc[2048], url[4096];
+    char auth[640], apikey[640];
+    char *extra[10];
+    int n = 0;
 
     if (!net_cfg_provider(ep, sizeof(ep), key, sizeof(key)))
         return -1;
@@ -456,28 +456,31 @@ static int provider_run(const char *query, int max, char *buf, size_t *len, int 
     if (provider_url(ep, enc, url, sizeof(url)) != 0)
         return -1;
 
-    int w;
-    if (key[0])
-        w = snprintf(cmd, sizeof(cmd),
-                     "curl -sSL --max-time 15 -A \"%s\" -H 'Accept: application/json' "
-                     "-H 'Authorization: Bearer %s' -H 'X-API-Key: %s' '%s'",
-                     WEB_SEARCH_UA, key, key, url);
-    else
-        w = snprintf(cmd, sizeof(cmd),
-                     "curl -sSL --max-time 15 -A \"%s\" -H 'Accept: application/json' '%s'",
-                     WEB_SEARCH_UA, url);
-    if (w <= 0 || (size_t)w >= sizeof(cmd))
-        return -1;
+    extra[n++] = "-A";
+    extra[n++] = (char *)WEB_SEARCH_UA;
+    extra[n++] = "-H";
+    extra[n++] = "Accept: application/json";
+    if (key[0]) {
+        snprintf(auth, sizeof(auth), "Authorization: Bearer %s", key);
+        snprintf(apikey, sizeof(apikey), "X-API-Key: %s", key);
+        extra[n++] = "-H";
+        extra[n++] = auth;
+        extra[n++] = "-H";
+        extra[n++] = apikey;
+    }
+    extra[n] = NULL;
 
-    char *out = NULL;
-    int exit_code = -1;
-    if (builtin_shell_run(cmd, NULL, &out, &exit_code, 18000, NULL, NULL, 0) != 0 || !out ||
-        exit_code != 0) {
-        AIRY_FREE(out);
+    net_http_req_t req;
+    req.url = url;
+    req.extra_argv = extra;
+    req.timeout_ms = 18000;
+    net_http_resp_t rsp = {0};
+    if (net_http_get(&req, &rsp) != 0 || rsp.exit_code != 0 || !rsp.body) {
+        AIRY_FREE(rsp.body);
         return -1;
     }
-    int got = net_search_json(out, max, buf, BUILTIN_OUTPUT_CAP, len);
-    AIRY_FREE(out);
+    int got = net_search_json(rsp.body, max, buf, BUILTIN_OUTPUT_CAP, len);
+    AIRY_FREE(rsp.body);
     *count = got;
     return (got > 0) ? 0 : -1;
 }
@@ -485,21 +488,26 @@ static int provider_run(const char *query, int max, char *buf, size_t *len, int 
 static int web_search_via(const web_src_t *src, const char *query, int max_results, char *buf,
                           size_t buf_cap, size_t *buf_len, int *count)
 {
-    char enc[2048], url[4096], cmd[8192];
+    char enc[2048], url[4096];
+    char *extra[4];
     builtin_url_encode(query, enc, sizeof(enc));
     snprintf(url, sizeof(url), src->url_fmt, enc);
-    snprintf(cmd, sizeof(cmd), "curl -sSL --max-time %d -A \"%s\" '%s'", src->curl_s,
-             WEB_SEARCH_UA, url);
-    char *out = NULL;
-    int exit_code = -1;
-    if (builtin_shell_run(cmd, NULL, &out, &exit_code, src->shell_ms, NULL, NULL, 0) != 0 || !out ||
-        exit_code != 0 || strstr(out, "command not found")) {
-        AIRY_FREE(out);
+    extra[0] = "-A";
+    extra[1] = (char *)WEB_SEARCH_UA;
+    extra[2] = NULL;
+
+    net_http_req_t req;
+    req.url = url;
+    req.extra_argv = extra;
+    req.timeout_ms = (uint32_t)src->shell_ms;
+    net_http_resp_t rsp = {0};
+    if (net_http_get(&req, &rsp) != 0 || rsp.exit_code != 0 || !rsp.body) {
+        AIRY_FREE(rsp.body);
         return -1;
     }
-    int rc = web_search_extract(out, src->res_re, src->snip_re, max_results, buf, buf_cap,
+    int rc = web_search_extract(rsp.body, src->res_re, src->snip_re, max_results, buf, buf_cap,
                                 buf_len, count);
-    AIRY_FREE(out);
+    AIRY_FREE(rsp.body);
     return rc;
 }
 

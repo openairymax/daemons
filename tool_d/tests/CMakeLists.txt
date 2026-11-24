@@ -33,10 +33,11 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_fs_dir.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_fs_glob.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_fs_grep.c
-    # 网络内置工具按域拆分：抓取 / 搜索 / SSRF 守卫
+    # 网络内置工具按域拆分：抓取 / 搜索 / SSRF 守卫 / 逐跳重定向校验的共用 GET
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_net_fetch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_net_search.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_net_guard.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_net_http.c
     # 0.1.21 归位：网络通信族随 builtin_net 迁入 tool_d
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/net/network_common.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/net/network_http.c
