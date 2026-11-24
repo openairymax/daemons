@@ -411,11 +411,32 @@ static cJSON *agent_spec_from_file(const char *path)
 
 /* ---- run 阶段编排 ---- */
 
+/* 记忆召回：在既有 messages 前追加一条 system 上下文；无命中时原样返回
+ * 复制体（工具循环内部仍会再复制一次，此处只负责注入边界）。 */
+static cJSON *run_msgs_mem(run_ctx_t *c, const cJSON *history)
+{
+    cJSON *msgs = (history && cJSON_IsArray(history)) ? cJSON_Duplicate(history, 1)
+                                                      : cJSON_CreateArray();
+    char *mem = msgs ? run_mem_recall(c->sess, c->prompt) : NULL;
+
+    if (!mem)
+        return msgs;
+    cJSON *sys = cJSON_CreateObject();
+    if (sys) {
+        cJSON_AddStringToObject(sys, "role", "system");
+        cJSON_AddStringToObject(sys, "content", mem);
+        cJSON_InsertItemInArray(msgs, 0, sys);
+    }
+    AIRY_FREE(mem);
+    return msgs;
+}
+
 /* 工具循环：产物所有权移交给上下文。 */
 static void run_loop(run_ctx_t *c, const cJSON *history)
 {
+    cJSON *msgs = run_msgs_mem(c, history);
     agent_run_loop_args_t args = {.prompt = c->prompt,
-                                  .history = history,
+                                  .history = msgs,
                                   .model = c->mname,
                                   .session = c->active,
                                   .sink = c->sink,
@@ -425,6 +446,7 @@ static void run_loop(run_ctx_t *c, const cJSON *history)
     agent_run_loop_result_t lr = {0};
 
     c->rc = agent_run_tool_loop(&args, &lr);
+    cJSON_Delete(msgs);
     c->llm_ms += lr.llm_ms;
     c->tool_ms += lr.tool_ms;
     c->trace = lr.trace;
