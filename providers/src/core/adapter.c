@@ -23,6 +23,7 @@
 #include "airy_prov/provider_rec.h"
 #include "airy_prov/prov_diag.h"
 #include "airy_prov/provider_http.h"
+#include "airy_prov/provider_texttool.h"
 #include "airy_prov/secrets.h"
 #include "airy_prov/toolstream.h"
 #include "svc_logger.h"
@@ -168,6 +169,9 @@ static int complete_parse(const provider_adapter_t *ops, const provider_base_ctx
         return ret;
     }
 
+    /* 本地/自托管模型可能把调用写在 content 文本里（原生 tool_calls 缺席），
+     * 补全后再盖章，避免上层回路把「说话」当最终答案。 */
+    prov_text_tool_fallback(*out_response);
     resp_stamp_capacity(*out_response, base);
     SVC_LOG_INFO("C-L02: %s: COMPLETE-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
                  "http_code=%ld",
@@ -213,6 +217,7 @@ static int stream_finish(const provider_adapter_t *ops, const provider_base_ctx_
     provider_stream_acc_free(acc);
 
     if (resp) {
+        prov_text_tool_fallback(resp);
         resp_stamp_capacity(resp, base);
         SVC_LOG_INFO("C-L02: %s: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
                      "http_code=%ld",

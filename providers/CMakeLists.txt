@@ -39,6 +39,8 @@ set(AIRY_TRANSPORT_SOURCES
     src/core/retry.c
     # 流式 tool_calls 装配 SSoT
     src/core/toolstream.c
+    # 文本形态工具调用补全（本地模型 content 内 <tool_call> 块）
+    src/core/texttool.c
     # 通用 completion driver——适配层四槽入口的唯一编排实现
     src/core/adapter.c
     # 调用方并发预算
