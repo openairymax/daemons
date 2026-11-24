@@ -143,7 +143,7 @@ static int parse_content(const char *content, cJSON *arr)
     return added;
 }
 
-int prov_text_tool_fallback(llm_response_t *resp)
+int prov_text_tool(llm_response_t *resp)
 {
     if (!resp || !resp->choices)
         return 0;

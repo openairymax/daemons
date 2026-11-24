@@ -25,7 +25,7 @@ extern "C" {
 /* 遍历 resp->choices，对「无原生 tool_calls 且 content 含 <tool_call> 块」的
  * choice 补建 tool_calls_json。返回补入的调用条数（0 表示未改动）。
  * resp 为 NULL 时返回 0。 */
-int prov_text_tool_fallback(llm_response_t *resp);
+int prov_text_tool(llm_response_t *resp);
 
 #ifdef __cplusplus
 }
