@@ -96,16 +96,6 @@ cJSON *agent_usage_obj(const agent_usage_in_t *in);
 
 /* ---- 工具循环域（agent_run_loop.c） ---- */
 
-/**
- * @brief 组装 §2.4 v1 事件信封 JSON 并交给 sink->emit（agent_run_engine.c）。
- * data 与信封所有权均由本函数持有；sink 仅在调用期内借用（不得留存）。
- * emit 不得阻塞。sink 类型见 agent_run_engine.h。
- * run_id 为本次运行标识（§2.4.2 信封字段，每帧携带，可 NULL）。
- */
-void agent_run_emit_event(const agent_run_event_sink_t *sink, uint64_t *seq,
-                          const char *run_id, const char *session_id, const char *type,
-                          cJSON *data);
-
 /** 工具循环入参（契约 §6：超 4 参数以结构体封装）。 */
 typedef struct {
     const char *prompt;                      /* 用户输入（history 为空时构造首条消息） */
