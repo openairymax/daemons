@@ -8,8 +8,9 @@
  * agent.run 由 gateway 迁入 agent_d 的进程内引擎后，外部调用方
  * （CLI/SDK/经 gateway 转发）以 JSON-RPC `agent.run` / `agent.cancel`
  * 访问。本文件把请求参数解析为引擎入参，并把引擎结果组装为与旧
- * gateway 一致的 JSON-RPC 响应（session_id/response/tokens/cost/
- * tool_trace/thinking 契约不变），保证 CLI/TUI/SDK 零改动迁移。
+ * gateway 一致的 JSON-RPC 响应（session_id/response/usage/tool_trace/
+ * thinking 契约不变），保证 CLI/TUI/SDK 零改动迁移。usage 是唯一的
+ * 计量载荷（prompt/completion/total/cost/source），不再下发平铺键。
  */
 
 #include "run/agent_run_engine.h"

@@ -159,6 +159,45 @@ static void test_apply(void)
     cJSON_Delete(messages);
 }
 
+/* S30-P0-5：result/run_end/run_result 三处必须共用同一 usage 形状。
+ * 这里直测唯一构建点，断言键集合与来源标注，防止再出现平铺键分叉。 */
+static void test_usage_obj(void)
+{
+    agent_usage_in_t in = {120, 100, 20, 400, 80, 0.0015};
+    cJSON *u = agent_usage_obj(&in);
+    CHECK(u != NULL, "usage: built");
+    if (!u)
+        return;
+    CHECK(cJSON_GetObjectItem(u, "prompt")->valuedouble == 100, "usage: prompt reported");
+    CHECK(cJSON_GetObjectItem(u, "completion")->valuedouble == 20, "usage: completion reported");
+    CHECK(cJSON_GetObjectItem(u, "total")->valuedouble == 120, "usage: total reported");
+    CHECK(cJSON_GetObjectItem(u, "cost")->valuedouble == 0.0015, "usage: cost carried");
+    CHECK(strcmp(cJSON_GetObjectItem(u, "source")->valuestring, "provider") == 0,
+          "usage: source provider");
+    CHECK(cJSON_GetObjectItem(u, "tokens_used") == NULL, "usage: no flat token key");
+    CHECK(cJSON_GetObjectItem(u, "cost_usd") == NULL, "usage: no flat cost key");
+    cJSON_Delete(u);
+
+    /* provider 只报 total：分量之和必须等于 total，客户端不会算出负差额。 */
+    agent_usage_in_t only_total = {50, 0, 0, 0, 0, 0};
+    u = agent_usage_obj(&only_total);
+    CHECK(u && cJSON_GetObjectItem(u, "prompt")->valuedouble == 50 &&
+              cJSON_GetObjectItem(u, "completion")->valuedouble == 0,
+          "usage: total-only folded into prompt");
+    cJSON_Delete(u);
+
+    /* 全无实报：按 4 字节/token 估算并标记 estimated，不得伪装成 provider。 */
+    agent_usage_in_t none = {0, 0, 0, 400, 40, 0};
+    u = agent_usage_obj(&none);
+    CHECK(u && cJSON_GetObjectItem(u, "prompt")->valuedouble == 100 &&
+              cJSON_GetObjectItem(u, "completion")->valuedouble == 10 &&
+              cJSON_GetObjectItem(u, "total")->valuedouble == 110,
+          "usage: estimated split from bytes");
+    CHECK(u && strcmp(cJSON_GetObjectItem(u, "source")->valuestring, "estimated") == 0,
+          "usage: source estimated");
+    cJSON_Delete(u);
+}
+
 int main(void)
 {
     test_init();
@@ -166,6 +205,7 @@ int main(void)
     test_protect_start();
     test_cand_entries();
     test_apply();
+    test_usage_obj();
     if (g_fail) {
         printf("FAILED: %d\n", g_fail);
         return 1;
