@@ -40,6 +40,7 @@
       "run/agent_run_exec.c",
       "run/agent_run_ledger.c",
       "run/agent_run_loop.c",
+      "run/agent_run_mem.c",
       "run/agent_run_stream.c",
       "run/agent_task_ledger.c",
       "run/agent_task_orchestrate.c",

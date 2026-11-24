@@ -260,6 +260,20 @@ int agent_run_orchestrate(const cJSON *agent_spec, const char *prompt, char **ou
  */
 int agent_evt_ok(const char *line);
 
+/* ---- 记忆召回（agent_run_mem.c） ---- */
+
+/**
+ * @brief 取本会话记忆上下文（最近记录 + 检索命中），拼为 system 正文。
+ *
+ * 范围按 conv 收窄到当前会话；mem_d 不可达、无记录或全部命中重复时
+ * 返回 NULL，调用方按「无记忆」继续本轮。
+ *
+ * @param sess [in] 会话 ID（BORROW）。
+ * @param prompt [in] 本轮用户输入（BORROW）。
+ * @return 堆字符串（TRANSFER，调用方 AIRY_FREE）；无内容为 NULL。
+ */
+char *run_mem_recall(const char *sess, const char *prompt);
+
 #ifdef __cplusplus
 }
 #endif

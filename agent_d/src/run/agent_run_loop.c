@@ -403,6 +403,21 @@ typedef struct loop_ctx_s {
     int user_cancel; /* R11：在途工具调用被用户取消，本轮立即收口 */
 } loop_ctx_t;
 
+/* 历史判定只看非 system 消息：工具契约与记忆上下文由机制侧注入，
+ * 不构成「本次请求携带了历史」。 */
+static int run_has_turns(const cJSON *msgs)
+{
+    const cJSON *m = NULL;
+
+    cJSON_ArrayForEach(m, msgs)
+    {
+        const char *role = cJSON_GetStringValue(cJSON_GetObjectItem((cJSON *)m, "role"));
+        if (role && strcmp(role, "system") != 0)
+            return 1;
+    }
+    return 0;
+}
+
 /* 首条 system：工具路径锚点契约（缺陷 #4）声明 fs_* 与 shell_run 的相对
  * 路径以 tool_d 工作目录为基准、回执回显绝对路径；0.1.18 B1 轮次归属约束
  * 仅在携带历史时合并入同一条，防止模型把多轮历史当作同一篇待续写文本。 */
@@ -426,7 +441,7 @@ static void run_preamble(cJSON *msgs)
         return;
     char content[1024];
     snprintf(content, sizeof(content), "%s%s%s", base, toolmake,
-             cJSON_GetArraySize(msgs) > 1 ? boundary : "");
+             run_has_turns(msgs) ? boundary : "");
     cJSON_AddStringToObject(sys, "role", "system");
     cJSON_AddStringToObject(sys, "content", content);
     cJSON_InsertItemInArray(msgs, 0, sys);
