@@ -39,11 +39,9 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id)
         return AIRY_ERR_NOT_FOUND;
 
     airy_mtx_lock(&agent->entry_lock);
-#if AIRY_PLATFORM_POSIX
     if (agent->child_pid > 0) {
         agent_kill_and_reap(&agent->child_pid, &agent->stdin_fd, &agent->stdout_fd);
     }
-#endif
 
     agent->status = AGENT_STATUS_TERMINATED;
     airy_mtx_unlock(&agent->entry_lock);
@@ -70,7 +68,6 @@ static int inv_reject(agent_service_t *svc, char **out_output, const char *json,
     return err;
 }
 
-#if AIRY_PLATFORM_POSIX
 /* Child exchange status codes; INV_FALLBACK keeps the entry lock held so the
  * caller can run the fallback path. */
 enum { INV_OK = 0, INV_FALLBACK = 1, INV_NOBUF = 2, INV_IO = 3 };
@@ -249,7 +246,6 @@ static int inv_child(agent_service_t *svc, agent_entry_internal_t *agent, const 
     SVC_LOG_DEBUG("Agent invoke via child: agent_id=%s", agent_id);
     return AIRY_SUCCESS;
 }
-#endif
 
 int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char *input, size_t len,
                          const char *workspace_dir, const char *session_id,
@@ -280,14 +276,12 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char 
                           AIRY_ERR_STATE_ERROR);
     }
 
-#if AIRY_PLATFORM_POSIX
     if (agent->child_pid > 0 && agent->stdin_fd >= 0) {
         int crc = inv_child(svc, agent, agent_id, input, workspace_dir, session_id, history_json,
                             parent_task_id, read_timeout_s, cancel_token, out_output, perf_t0);
         if (crc != INV_FALLBACK)
             return crc;
     }
-#endif
 
     /* P0-2: no child or communication failure -> return a clear error instead
      * of faking "invocation processed" success. Upper layers (taskflow/SDK)

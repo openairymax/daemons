@@ -109,11 +109,9 @@ void agent_service_destroy(agent_service_t *svc)
     airy_mtx_lock(&svc->lock);
     for (size_t i = 0; i < svc->agent_count; i++) {
         agent_entry_internal_t *agent = &svc->agents[i];
-#if AIRY_PLATFORM_POSIX
         if (agent->child_pid > 0) {
             agent_kill_and_reap(&agent->child_pid, &agent->stdin_fd, &agent->stdout_fd);
         }
-#endif
         AIRY_FREE(agent->agent_id);
         AIRY_FREE(agent->spec);
         agent->agent_id = NULL;

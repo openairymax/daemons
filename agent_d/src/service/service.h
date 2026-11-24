@@ -52,18 +52,19 @@ typedef struct {
      * operations run under this lock, allowing true parallelism for
      * thousands of agents. */
     airy_mtx_t entry_lock;
-#if AIRY_PLATFORM_POSIX
-    /* Stage5+ todo4: real spawn - handles after forking the agent runner
-     * child (Python/Rust dual-language support).
-     * child_pid > 0 means an active child; -1 means none (old logic fallback).
+    /* Real spawn handles for the agent runner child (Python/Rust dual
+     * language). Shared by both platforms as of 0.1.21 (P0-1) so the invoke
+     * path no longer degrades on Windows.
+     * child_pid > 0 means an active child; -1 means none.
      * stdin_fd writes requests to the child, stdout_fd reads responses.
+     * POSIX: pipe fds. Windows: CRT fds produced by _open_osfhandle over the
+     * pipe ends, so the same io helpers apply. long holds pid_t and DWORD.
      * last_active: last successful child communication time (s), basis for
      * idle reaping. */
-    pid_t child_pid;
+    long child_pid;
     int stdin_fd;
     int stdout_fd;
     uint64_t last_active;
-#endif
 } agent_entry_internal_t;
 
 struct agent_service {
