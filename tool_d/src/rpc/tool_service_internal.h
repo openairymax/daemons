@@ -28,7 +28,9 @@ extern "C" {
 
 /* ---- Builtin 工具注册域（service_builtin.c） ---- */
 void tool_service_register_acl_from_env(void);
-void register_builtin_tools(tool_service_t *svc);
+/* 返回 0 全部注册成功；-1 存在注册失败（service_create 据此 fail-closed，
+ * 避免工具静默消失而 ACL 仍放行）。 */
+int register_builtin_tools(tool_service_t *svc);
 
 /* ---- 工具可用性视图（service.c） ---- */
 tool_avail_t *tool_service_avail(tool_service_t *svc);

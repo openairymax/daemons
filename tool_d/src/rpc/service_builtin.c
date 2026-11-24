@@ -165,8 +165,9 @@ static const tool_contract_t k_contract[] = {
     {"priv_exec", NULL, NULL, TOOL_FX_FS | TOOL_FX_NET | TOOL_FX_PROC, 0, 1},
 };
 
-void register_builtin_tools(tool_service_t *svc)
+int register_builtin_tools(tool_service_t *svc)
 {
+    int failed = 0;
     /* Params schema aligned with the OpenStandards tool description. The
      * required flags match the gateway tool schema's required array (SSoT,
      * T2 fix): fs_list.path is optional (builtin defaults to "." when
@@ -337,10 +338,15 @@ void register_builtin_tools(tool_service_t *svc)
             .permission_rule = d->id,
         };
         int rc = tool_service_register(svc, &meta);
-        if (rc == 0)
-            SVC_LOG_INFO("Builtin tool registered: %s", d->id);
-        else
+        if (rc != 0) {
+            /* P1-7：注册失败不得继续——否则工具从目录里静默消失，而下面
+             * 的 ACL 仍按 id 放行，表现为「模型调了工具却没执行」。失败
+             * 计数上抛给 service_create 作 fail-closed。 */
             SVC_LOG_ERROR("Failed to register builtin tool: %s (rc=%d)", d->id, rc);
+            failed++;
+            continue;
+        }
+        SVC_LOG_INFO("Builtin tool registered: %s", d->id);
 
         daemon_security_add_acl_rule("tool_d", d->id, true);
 
@@ -351,4 +357,5 @@ void register_builtin_tools(tool_service_t *svc)
             tool_avail_dep(svc->avail, d->id, c->dep_sock) != 0)
             SVC_LOG_WARN("C-L06: TOOL-AVAIL: dep declare failed %s -> %s", d->id, c->dep_sock);
     }
+    return failed == 0 ? 0 : -1;
 }

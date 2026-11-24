@@ -139,11 +139,20 @@ tool_service_t *tool_service_create(const char *config_path)
         daemon_security_init(&sec_cfg, NULL);
     }
 
-    /* Static ACL pre-authorization from AIRY_AGENT_ACL (server deployments
-     * without an interactive approver). Must run after daemon_security_init. */
-    tool_service_register_acl_from_env();
+    /* P1-7：内置工具注册失败一律 fail-closed。此前只 LOG 后继续，结果
+     * 是工具从 catalog 里静默消失、而 ACL 仍按 id 放行，模型调用得到
+     * 「工具不存在/未执行」。注册失败意味着契约表损坏或注册表容量错配，
+     * 必须让服务起不来，交给 supervisor 暴露故障。 */
+    if (register_builtin_tools(svc) != 0) {
+        SVC_LOG_ERROR("P1-7: builtin tool registration failed — refuse to serve (fail-closed)");
+        tool_service_destroy(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "builtin tool registration failed");
+    }
 
-    register_builtin_tools(svc);
+    /* Static ACL pre-authorization from AIRY_AGENT_ACL (server deployments
+     * without an interactive approver). Must run after daemon_security_init
+     * AND after the builtin registry is complete——ACL 不得先于目录生效。 */
+    tool_service_register_acl_from_env();
 
     /* P3.17 (ACC-DT18): enable tool approval by default
      * (enable_approval=true). Create the default approval gate and inject it
