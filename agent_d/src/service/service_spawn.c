@@ -8,7 +8,7 @@
  *        AIRY_AGENT_NO_SPAWN deterministic-mode support).
  */
 
-#include "agent_service_internal.h"
+#include "agent_child_internal.h"
 
 /* Find a free agent slot under the global lock; on failure the lock is
  * already released and the error is returned to the caller. */

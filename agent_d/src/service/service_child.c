@@ -12,7 +12,7 @@
 
 #include "io.h"
 
-#include "agent_service_internal.h"
+#include "agent_child_internal.h"
 
 #include "airy_dirent.h"
 #include "platform.h"
@@ -53,6 +53,32 @@ int agent_spawn_ready_timeout_s(void)
     return env_int("AIRY_AGENT_SPAWN_TIMEOUT_S", AGENT_SPAWN_READY_TIMEOUT_S);
 }
 
+/* 逐字节读行循环的公共状态机：POSIX/Windows 传输共用同一份语义，避免两
+ * 平台各自维护尾段后在换行/EOF/截断边界上漂移（G26 重复行）。返回码直接
+ * 用作读行入口的返回值，AGENT_LINE_MORE 之外的码都可以就地返回。 */
+int agent_line_step(char *buf, size_t buf_size, size_t *pos, int eof)
+{
+    if (eof)
+        return -1;
+    if (buf[*pos] == '\n') {
+        buf[*pos] = '\0';
+        return 0;
+    }
+    (*pos)++;
+    if (*pos >= buf_size - 1) {
+        buf[buf_size - 1] = '\0';
+        return 1;
+    }
+    return AGENT_LINE_MORE;
+}
+
+/* 无取消令牌的读行入口；平台传输只实现 _ex，本包装留在平台中立层，
+ * 免得两个传输文件各抄一份同样的三行（G26）。 */
+int agent_read_line_timeout(int fd, char *buf, size_t buf_size, int timeout_s)
+{
+    return agent_read_line_timeout_ex(fd, buf, buf_size, timeout_s, NULL);
+}
+
 /* Extract the language field from the spec JSON, default "python".
  * Writes to buf (size bytes), always null-terminated. */
 void agent_spec_language(const char *spec, char *buf, size_t size)
@@ -80,7 +106,7 @@ void agent_spec_language(const char *spec, char *buf, size_t size)
 /* Resolve the Rust agent binary path.
  * Priority: spec.binary_path > ${AIRY_RUST_AGENT_DIR}/<role>_agent.
  * Result written to out_path (cap bytes), always null-terminated. */
-void agent_spec_rust_binary(const char *spec, char *out_path, size_t cap)
+void agent_spec_rust_bin(const char *spec, char *out_path, size_t cap)
 {
     if (!out_path || cap == 0)
         return;
@@ -197,7 +223,7 @@ static size_t prune_scan(const char *logdir, char **paths, time_t *mtimes)
     return count;
 }
 
-void agent_child_logs_prune(void)
+void agent_logs_prune(void)
 {
     const char *logdir = airy_log_dir();
     if (!logdir || !logdir[0])

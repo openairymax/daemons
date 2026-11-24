@@ -11,7 +11,7 @@
 #include "io.h"
 #include "platform_misc.h"
 
-#include "agent_service_internal.h"
+#include "agent_child_internal.h"
 
 /* Resolve the agent entry under the service lock; NULL when absent. */
 static agent_entry_internal_t *inv_lookup(agent_service_t *svc, const char *agent_id)

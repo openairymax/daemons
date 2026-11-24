@@ -10,7 +10,7 @@
 
 #include "io.h"
 
-#include "agent_service_internal.h"
+#include "agent_child_internal.h"
 
 #if AIRY_PLATFORM_POSIX
 
@@ -63,21 +63,11 @@ int agent_read_line_timeout_ex(int fd, char *buf, size_t buf_size, int timeout_s
                 continue;
             return -1;
         }
-        if (n == 0)
-            return -1;
-        if (buf[pos] == '\n') {
-            buf[pos] = '\0';
-            return 0;
-        }
-        pos++;
+        int st = agent_line_step(buf, buf_size, &pos, n == 0);
+        if (st != AGENT_LINE_MORE)
+            return st;
     }
-    buf[buf_size - 1] = '\0';
     return 1;
-}
-
-int agent_read_line_timeout(int fd, char *buf, size_t buf_size, int timeout_s)
-{
-    return agent_read_line_timeout_ex(fd, buf, buf_size, timeout_s, NULL);
 }
 
 /* fork the Agent runner child process and set up bidirectional stdin/stdout
@@ -140,7 +130,7 @@ int agent_spawn_child(const char *spec, const char *agent_id, long *out_pid, int
         if (strcmp(lang, "rust") == 0) {
 
             char bin_path[AIRY_PATH_MAX] = {0};
-            agent_spec_rust_binary(spec, bin_path, sizeof(bin_path));
+            agent_spec_rust_bin(spec, bin_path, sizeof(bin_path));
             if (bin_path[0] == '\0') {
 
                 SVC_LOG_WARN("Rust agent binary path empty, fallback to python3: agent_id=%s",
@@ -195,7 +185,7 @@ int agent_spawn_child(const char *spec, const char *agent_id, long *out_pid, int
     *out_stdout = stdout_pipe[0];
 
     /* 2026-08-25：spawn 成功后收敛 agent 子进程日志数量（保留最近 64 个）。 */
-    agent_child_logs_prune();
+    agent_logs_prune();
     return 0;
 }
 
