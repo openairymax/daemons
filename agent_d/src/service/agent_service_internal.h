@@ -46,15 +46,22 @@ void agent_perf_accumulate(atomic_ullong *us_total, atomic_ullong *us_max, uint6
 int agent_invoke_timeout_s(void);
 int agent_spawn_ready_timeout_s(void);
 
-#if AIRY_PLATFORM_POSIX
-/* Child process communication (service_child.c) */
+/* Spec parsing and agent log retention shared by both transports
+ * (service_child.c). */
+void agent_spec_language(const char *spec, char *buf, size_t size);
+void agent_spec_rust_binary(const char *spec, char *out_path, size_t cap);
+void agent_child_log_path(const char *agent_id, char *out_path, size_t cap);
+void agent_child_logs_prune(void);
+
+/* Child process communication (service_child_posix.c / service_child_win.c) -
+ * implemented on POSIX and Windows alike (0.1.21 P0-1); pid is carried as
+ * long, which holds pid_t and Windows DWORD. */
 int agent_read_line_timeout(int fd, char *buf, size_t buf_size, int timeout_s);
 int agent_read_line_timeout_ex(int fd, char *buf, size_t buf_size, int timeout_s,
                                airy_cancel_token_t *token);
-int agent_spawn_child(const char *spec, const char *agent_id, pid_t *out_pid, int *out_stdin,
+int agent_spawn_child(const char *spec, const char *agent_id, long *out_pid, int *out_stdin,
                       int *out_stdout);
-void agent_kill_and_reap(pid_t *pid_ptr, int *stdin_ptr, int *stdout_ptr);
-#endif
+void agent_kill_and_reap(long *pid_ptr, int *stdin_ptr, int *stdout_ptr);
 
 #ifdef __cplusplus
 }

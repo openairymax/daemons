@@ -3,9 +3,11 @@
 
 /**
  * @file service_child.c
- * @brief Agent service child-process communication domain: runner child
- *        fork / bidirectional pipes / readiness handshake / timed reads and
- *        writes / terminate-and-reap (Python/Rust dual-language startup).
+ * @brief Agent service child-process domain, platform-neutral part: timeout
+ *        budgets, spec parsing and agent log retention. The transport itself
+ *        lives in service_child_posix.c and service_child_win.c (0.1.21 P0-1:
+ *        Windows had no child transport at all, so spawn answered
+ *        AIRY_ERR_NOT_SUPPORTED and orchestration could not run there).
  */
 
 #include "io.h"
@@ -13,10 +15,9 @@
 #include "agent_service_internal.h"
 
 #include "airy_dirent.h"
+#include "platform.h"
 
-#if AIRY_PLATFORM_POSIX
 #include <sys/stat.h>
-#endif
 
 /* invoke read-response timeout (seconds). Default 300s (5 min) covers real LLM
  * calls; overridable via AIRY_AGENT_INVOKE_TIMEOUT_S. */
@@ -52,76 +53,14 @@ int agent_spawn_ready_timeout_s(void)
     return env_int("AIRY_AGENT_SPAWN_TIMEOUT_S", AGENT_SPAWN_READY_TIMEOUT_S);
 }
 
-#if AIRY_PLATFORM_POSIX
-
-/* Read one line ('\n'-terminated) from fd with timeout, short-polling a cancel
- * token (improvement 1). On success buf holds a '\n'-less null-terminated
- * string. Returns: 0=full line; 1=buffer full/truncated (buf null-terminated,
- * caller must mark it); -1=timeout/EOF/error; -2=cancel (token hit).
- * select polls in 200ms slices to keep cancellation granularity; byte-by-byte
- * reads avoid cross-line buffering. */
-int agent_read_line_timeout_ex(int fd, char *buf, size_t buf_size, int timeout_s,
-                               airy_cancel_token_t *token)
-{
-    if (buf_size < 2)
-        return -1;
-    uint64_t deadline_ms = airy_time_ms() + (uint64_t)(timeout_s > 0 ? timeout_s : 300) * 1000U;
-    size_t pos = 0;
-    while (pos < buf_size - 1) {
-
-        if (token && airy_cancel_token_is_canceled(token))
-            return -2;
-        uint64_t now = airy_time_ms();
-        if (now >= deadline_ms)
-            return -1;
-        uint32_t remain = (uint32_t)(deadline_ms - now);
-        if (remain > 200U)
-            remain = 200U;
-
-        fd_set rfds;
-        struct timeval tv;
-        FD_ZERO(&rfds);
-        FD_SET(fd, &rfds);
-        tv.tv_sec = remain / 1000U;
-        tv.tv_usec = (remain % 1000U) * 1000U;
-        int rv = select(fd + 1, &rfds, NULL, NULL, &tv);
-        if (rv < 0) {
-            if (errno == EINTR)
-                continue;
-            return -1;
-        }
-        if (rv == 0)
-            continue;
-        ssize_t n = read(fd, buf + pos, 1);
-        if (n < 0) {
-            if (errno == EINTR)
-                continue;
-            return -1;
-        }
-        if (n == 0)
-            return -1;
-        if (buf[pos] == '\n') {
-            buf[pos] = '\0';
-            return 0;
-        }
-        pos++;
-    }
-    buf[buf_size - 1] = '\0';
-    return 1;
-}
-
-int agent_read_line_timeout(int fd, char *buf, size_t buf_size, int timeout_s)
-{
-    return agent_read_line_timeout_ex(fd, buf, buf_size, timeout_s, NULL);
-}
-
 /* Extract the language field from the spec JSON, default "python".
  * Writes to buf (size bytes), always null-terminated. */
-static void spec_get_language(const char *spec, char *buf, size_t size)
+void agent_spec_language(const char *spec, char *buf, size_t size)
 {
-    if (!spec || size == 0) {
-        if (size > 0)
-            buf[0] = '\0';
+    if (!buf || size == 0)
+        return;
+    if (!spec) {
+        buf[0] = '\0';
         return;
     }
     cJSON *root = cJSON_Parse(spec);
@@ -140,47 +79,62 @@ static void spec_get_language(const char *spec, char *buf, size_t size)
 
 /* Resolve the Rust agent binary path.
  * Priority: spec.binary_path > ${AIRY_RUST_AGENT_DIR}/<role>_agent.
- * Result written to out_path (AIRY_PATH_MAX bytes), always null-terminated. */
-static void spec_resolve_rust_binary(const char *spec, const char *agent_id, char *out_path)
+ * Result written to out_path (cap bytes), always null-terminated. */
+void agent_spec_rust_binary(const char *spec, char *out_path, size_t cap)
 {
-    if (!spec || !out_path) {
-        if (out_path)
-            out_path[0] = '\0';
+    if (!out_path || cap == 0)
         return;
-    }
+    out_path[0] = '\0';
+    if (!spec)
+        return;
+
     cJSON *root = cJSON_Parse(spec);
-    if (!root) {
-        out_path[0] = '\0';
+    if (!root)
         return;
-    }
 
     cJSON *bin = cJSON_GetObjectItem(root, "binary_path");
     if (bin && cJSON_IsString(bin) && bin->valuestring[0] != '\0') {
-        snprintf(out_path, AIRY_PATH_MAX, "%s", bin->valuestring);
+        snprintf(out_path, cap, "%s", bin->valuestring);
         cJSON_Delete(root);
         return;
     }
-    /* 2. ${AIRY_RUST_AGENT_DIR}/<role>_agent */
+    /* 2. ${AIRY_RUST_AGENT_DIR}/<role>_agent[.exe] */
     cJSON *role = cJSON_GetObjectItem(root, "role");
     const char *role_str = (role && cJSON_IsString(role)) ? role->valuestring : "unknown";
     const char *agent_dir = getenv("AIRY_RUST_AGENT_DIR");
     if (agent_dir && agent_dir[0] != '\0') {
-        snprintf(out_path, AIRY_PATH_MAX, "%s/%s_agent", agent_dir, role_str);
-    } else {
-        out_path[0] = '\0';
+#ifdef _WIN32
+        snprintf(out_path, cap, "%s/%s_agent.exe", agent_dir, role_str);
+#else
+        snprintf(out_path, cap, "%s/%s_agent", agent_dir, role_str);
+#endif
     }
     cJSON_Delete(root);
-
-    (void)agent_id;
 }
 
-/* ── agent 子进程日志保留策略（2026-08-25）────────────────────────
+/* agent 子进程日志保留策略（2026-08-25）────────────────────────
  * agent_<id>.log 随每次 spawn 创建，长期运行会无限堆积（实测数百个、
  * 数十 MB 量级）。每次 spawn 成功后清理，仅保留最近 AGENT_LOG_KEEP_MAX
  * 个（按 mtime，最旧优先删除），防止日志目录失控（AIRY_LOG_DIR 现
  * 统一收敛于 $AIRY_HOME/data/agentrt/logs）。 */
 #define AGENT_LOG_KEEP_MAX 64
 #define AGENT_LOG_SCAN_MAX 512
+
+/* agent_<id>.log 的落盘路径；stderr 重定向与清理都以它为唯一口径。 */
+void agent_child_log_path(const char *agent_id, char *out_path, size_t cap)
+{
+    if (!out_path || cap == 0)
+        return;
+    const char *dir = airy_log_dir();
+    if (!dir || !dir[0])
+        dir = ".";
+    snprintf(out_path, cap, "%s/agent_%s.log", dir, agent_id ? agent_id : "unknown");
+}
+
+/* 常规文件判定：MSVC 的 UCRT 不提供 S_ISREG，用 _S_IFMT/_S_IFREG 等价替换。 */
+#ifndef S_ISREG
+#define S_ISREG(mode) (((mode) & _S_IFMT) == _S_IFREG)
+#endif
 
 /* 是否 agent_*.log 常规文件；命中时回填完整路径与 mtime，返回 1。 */
 static int prune_match(const char *logdir, const char *name, char *full, size_t cap,
@@ -193,9 +147,15 @@ static int prune_match(const char *logdir, const char *name, char *full, size_t 
         return 0;
 
     snprintf(full, cap, "%s/%s", logdir, name);
+#ifdef _WIN32
+    struct _stat st;
+    if (_stat(full, &st) != 0 || !S_ISREG(st.st_mode))
+        return 0;
+#else
     struct stat st;
     if (stat(full, &st) != 0 || !S_ISREG(st.st_mode))
         return 0;
+#endif
     *mtime = st.st_mtime;
     return 1;
 }
@@ -237,7 +197,7 @@ static size_t prune_scan(const char *logdir, char **paths, time_t *mtimes)
     return count;
 }
 
-static void agent_logs_prune(void)
+void agent_child_logs_prune(void)
 {
     const char *logdir = airy_log_dir();
     if (!logdir || !logdir[0])
@@ -261,162 +221,3 @@ static void agent_logs_prune(void)
     for (size_t i = excess; i < count; i++)
         AIRY_FREE(paths[i]);
 }
-
-/* fork the Agent runner child process and set up bidirectional stdin/stdout
- * pipes. Startup is chosen by spec.language:
- *   - "python" (default): python3 -m airymax_agents.runner --spec <spec>
- *   - "rust": <binary_path> --spec <spec>
- * Uses execvp (no shell, no injection risk).
- * Returns 0 on success with out_pid/out_stdin/out_stdout filled; -1 on failure.
- * stderr is redirected to ${AIRY_RUNTIME_DIR}/agent_<agent_id>.log for debugging. */
-int agent_spawn_child(const char *spec, const char *agent_id, pid_t *out_pid, int *out_stdin,
-                      int *out_stdout)
-{
-    char lang[16] = {0};
-    spec_get_language(spec, lang, sizeof(lang));
-
-    int stdin_pipe[2], stdout_pipe[2];
-    if (pipe(stdin_pipe) < 0)
-        return -1;
-    if (pipe(stdout_pipe) < 0) {
-        close(stdin_pipe[0]);
-        close(stdin_pipe[1]);
-        return -1;
-    }
-
-    pid_t pid = fork();
-    if (pid < 0) {
-        close(stdin_pipe[0]);
-        close(stdin_pipe[1]);
-        close(stdout_pipe[0]);
-        close(stdout_pipe[1]);
-        return -1;
-    }
-
-    if (pid == 0) {
-
-        close(stdin_pipe[1]);
-        close(stdout_pipe[0]);
-        /* Improvement 1: create own process group (setpgid(0,0)) so termination
-         * cascades SIGTERM/SIGKILL to all processes spawned by the runner
-         * (graceful kill of the whole process tree). */
-        setpgid(0, 0);
-        if (dup2(stdin_pipe[0], STDIN_FILENO) < 0)
-            _exit(127);
-        if (dup2(stdout_pipe[1], STDOUT_FILENO) < 0)
-            _exit(127);
-        close(stdin_pipe[0]);
-        close(stdout_pipe[1]);
-
-        /* stderr -> log file (best-effort; on failure inherit parent stderr).
-         * Logs are collected under AIRY_HOME/logs (run/ holds only sockets
-         * and pid files; agent logs belong with the other daemon logs). */
-        char log_path[AIRY_PATH_MAX];
-        snprintf(log_path, sizeof(log_path), "%s/agent_%s.log", airy_log_dir(), agent_id);
-        int log_fd = open(log_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (log_fd >= 0) {
-            dup2(log_fd, STDERR_FILENO);
-            close(log_fd);
-        }
-
-        if (strcmp(lang, "rust") == 0) {
-
-            char bin_path[AIRY_PATH_MAX] = {0};
-            spec_resolve_rust_binary(spec, agent_id, bin_path);
-            if (bin_path[0] == '\0') {
-
-                SVC_LOG_WARN("Rust agent binary path empty, fallback to python3: agent_id=%s",
-                             agent_id);
-                goto fallback_python;
-            }
-            char *argv[] = {
-                bin_path,
-                (char *)"--spec",
-                (char *)spec,
-                NULL,
-            };
-            execvp(bin_path, argv);
-
-            SVC_LOG_WARN("execvp Rust agent failed, fallback to python3: binary=%s, agent_id=%s",
-                         bin_path, agent_id);
-        }
-
-    fallback_python:
-        /* Python runner (default & fallback path)
-         *
-         * Dependency resolution: airymax_agents / openlab / agentrt SDK are
-         * resolved through standard Python package installation (pip install
-         * -e, see ecosystem three-package packaging); no more PYTHONPATH
-         * injection or source-tree inference from the executable location
-         * (removal of the historical P0-1 mechanism, see
-         * 06-agent-gateway-wiring.md §3.1). */
-        {
-            /* 0.1.14 修复：剥离运行时 lib 目录的 LD_LIBRARY_PATH 污染。
-             * agent_d 进程环境的 LD_LIBRARY_PATH 含 $AIRY_LIB_DIR（自包含
-             * 打包的 agentrt 私有 .so），子进程 python3 加载 _sqlite3 等
-             * 系统扩展时会优先解析到打包的旧版 libsqlite3.so.0（缺
-             * sqlite3_deserialize 符号）→ import 崩溃 → readiness 握手
-             * EOF → agent.spawn 全部失败 → DAG 任务节点执行必败
-             * （0.1.13 实机回归实锤）。Python runner 为纯 Python 自包含，
-             * 无需 runtime lib；系统库走默认加载路径即可。 */
-            unsetenv("LD_LIBRARY_PATH");
-            char *argv[] = {
-                (char *)"python3", (char *)"-m", (char *)"airymax_agents.runner",
-                (char *)"--spec",  (char *)spec, NULL,
-            };
-            execvp("python3", argv);
-        }
-
-        _exit(127);
-    }
-
-    close(stdin_pipe[0]);
-    close(stdout_pipe[1]);
-    *out_pid = pid;
-    *out_stdin = stdin_pipe[1];
-    *out_stdout = stdout_pipe[0];
-
-    /* 2026-08-25：spawn 成功后收敛 agent 子进程日志数量（保留最近 64 个）。 */
-    agent_logs_prune();
-    return 0;
-}
-
-/* Reap the child process and close the pipe handles (terminate / invoke
- * failure / destroy calls). First SIGTERM the process group, wait up to 2
- * seconds, SIGKILL the group if it still does not exit, then waitpid reaps the
- * group-leader zombie (the child called setpgid(0,0) at spawn, so the negative
- * pid signal cascades to all processes spawned by the runner). */
-void agent_kill_and_reap(pid_t *pid_ptr, int *stdin_ptr, int *stdout_ptr)
-{
-    pid_t pid = *pid_ptr;
-    if (pid <= 0)
-        return;
-
-    kill(-pid, SIGTERM);
-
-    for (int i = 0; i < 20; i++) {
-        int status = 0;
-        pid_t r = waitpid(pid, &status, WNOHANG);
-        if (r == pid || r < 0)
-            break;
-
-        airy_sleep_ms(100);
-    }
-
-    int status = 0;
-    if (waitpid(pid, &status, WNOHANG) == 0) {
-        kill(-pid, SIGKILL);
-        waitpid(pid, &status, 0);
-    }
-
-    if (*stdin_ptr >= 0) {
-        close(*stdin_ptr);
-        *stdin_ptr = -1;
-    }
-    if (*stdout_ptr >= 0) {
-        close(*stdout_ptr);
-        *stdout_ptr = -1;
-    }
-    *pid_ptr = -1;
-}
-#endif /* AIRY_PLATFORM_POSIX */
