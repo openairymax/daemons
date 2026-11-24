@@ -24,6 +24,9 @@ extern "C" {
 uint64_t builtin_deadline_ms(uint32_t timeout_ms);
 int builtin_deadline_hit(uint64_t deadline_ms);
 
+/* 距 deadline 的剩余毫秒：无预算返回 -1，已到期返回 0。 */
+int builtin_deadline_left_ms(uint64_t deadline_ms);
+
 #ifdef __cplusplus
 }
 #endif
