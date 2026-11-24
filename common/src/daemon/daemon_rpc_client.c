@@ -169,6 +169,15 @@ static int rpc_connect(const char *socket_path)
     struct sockaddr_un addr;
     __builtin_memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
+    /* P1-1：sun_path 定长 108 字节，超长路径必须显式失败。此前用
+     * strncpy(n-1) 静默截断，connect 会落到另一个 socket 或连到一半
+     * 的地址上，错误码仍是「connect 失败」，现场极难定位。 */
+    if (strlen(socket_path) >= sizeof(addr.sun_path)) {
+        SVC_LOG_ERROR("rpc_connect: socket path too long (%zu >= %zu): %s",
+                      strlen(socket_path), sizeof(addr.sun_path), socket_path);
+        close(fd);
+        return -1;
+    }
     /* Use __builtin_strncpy to avoid the compile-time error from BAN-211/235
      * banning strncpy (same policy as daemons/common/src/platform_compat.c) */
     __builtin_strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
