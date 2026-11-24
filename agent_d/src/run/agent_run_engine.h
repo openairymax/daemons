@@ -146,6 +146,15 @@ typedef struct {
 } agent_run_event_sink_t;
 
 /**
+ * @brief 组装 §2.4 v1 事件信封 JSON 并交给 sink->emit（agent_run_engine.c）。
+ * data 与信封所有权均由本函数持有；sink 仅在调用期内借用（不得留存）。
+ * emit 不得阻塞。run_id 为本次运行标识（每帧携带，可 NULL）。
+ */
+void agent_run_emit_event(const agent_run_event_sink_t *sink, uint64_t *seq,
+                          const char *run_id, const char *session_id, const char *type,
+                          cJSON *data);
+
+/**
  * @brief 执行一次 agent.run（同步阻塞，事件驱动并发客户端下每请求一线程）。
  *
  * @param prompt       用户输入（非空）
