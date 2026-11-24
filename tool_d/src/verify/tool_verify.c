@@ -18,7 +18,6 @@
 #include "airy_sandbox.h"
 #include "airy_verify.h"
 #include "builtin/builtin_exec_internal.h"
-#include "builtin/builtin_limits_internal.h"
 #include "daemon_rpc_client.h"
 #include "error.h"
 #include "platform_paths.h"

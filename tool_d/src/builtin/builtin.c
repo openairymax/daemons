@@ -134,7 +134,7 @@ int builtin_deadline_hit(uint64_t deadline_ms)
     return airy_time_ms() >= deadline_ms;
 }
 
-int builtin_deadline_left_ms(uint64_t deadline_ms)
+int builtin_dl_left_ms(uint64_t deadline_ms)
 {
     if (deadline_ms == UINT64_MAX) return -1;
     uint64_t now = airy_time_ms();

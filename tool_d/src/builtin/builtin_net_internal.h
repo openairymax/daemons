@@ -27,6 +27,7 @@
 
 #include "builtin/builtin_result_internal.h"
 #include "builtin/builtin_shell_internal.h"
+#include "builtin/builtin_time_internal.h"
 
 #ifdef __cplusplus
 extern "C" {
