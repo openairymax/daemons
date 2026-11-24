@@ -44,6 +44,8 @@ set(AGENT_RUN_CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_task_orchestrate.c
     # S-P0-05: 每角色记忆记录由 exec 收尾调用，白盒测试须同编该单元
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_turn_rec.c
+    # S31-P0-1: exec 组装 messages 前调用记忆召回，白盒测试须同编该单元
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_mem.c
 )
 
 set(AGENT_COMMON_INCLUDES
