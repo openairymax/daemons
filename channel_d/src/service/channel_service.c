@@ -83,6 +83,11 @@ static int create_socket_channel(channel_entry_t *entry, const char *endpoint)
     struct sockaddr_un addr;
     __builtin_memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
+    /* P1-1：超长 endpoint 不静默截断（unlink 与 bind 会指向不同路径）。 */
+    if (strlen(endpoint) >= sizeof(addr.sun_path)) {
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "channel endpoint too long");
+        return AIRY_ERR_INVALID_PARAM;
+    }
     AIRY_STRNCPY_TERM(addr.sun_path, endpoint, sizeof(addr.sun_path));
     (addr.sun_path)[sizeof(addr.sun_path) - 1] = '\0';
 
