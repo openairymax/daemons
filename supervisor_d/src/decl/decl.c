@@ -32,11 +32,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "platform_paths.h"
+
 #ifndef _WIN32
-#include <pwd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>
 #endif
 
 #ifdef _WIN32
@@ -100,24 +100,12 @@ void ensure_dirs(const sup_ctx_t *ctx)
     mkdir_p(d);
 }
 
+/* 安装根 SSoT：platform_paths（AIRY_HOME / install.env 自锚定 / 用户主目录
+ * 逐级回落）。supervisor 与 launcher、客户端必须解析到同一根，本地复刻
+ * 一份 HOME 推导会在跨前缀安装时把 profile.env 读到另一套实例。 */
 static void home_default(char *out, size_t sz)
 {
-    const char *env = getenv("AIRY_HOME");
-    if (env && *env) {
-        snprintf(out, sz, "%s", env);
-        return;
-    }
-#ifdef _WIN32
-    const char *up = getenv("USERPROFILE");
-    snprintf(out, sz, "%s\\.airymaxrt", up ? up : "C:");
-#else
-    const char *up = getenv("HOME");
-    if (!up) {
-        struct passwd *pw = getpwuid(getuid());
-        up = pw ? pw->pw_dir : ".";
-    }
-    snprintf(out, sz, "%s/.airymaxrt", up);
-#endif
+    snprintf(out, sz, "%s", airy_home_dir());
 }
 
 /* name "notify_d" -> ns "notify"（去 _d 尾缀） */
