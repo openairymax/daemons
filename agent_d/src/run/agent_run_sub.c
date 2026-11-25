@@ -22,18 +22,19 @@
 
 #include <cjson/cJSON.h>
 
-#include "agent_run_internal.h"
+#include "agent_run_loop.h"
 #include "agent_sub_policy.h"
 #include "airy_delegate.h"
 #include "airy_memory.h"
 #include "airy_run_stream.h"
 #include "error.h"
+#include "platform.h"
 
 /* 子任务标识序号：只在进程内区分同一次 run 的多次委派，不承担全局唯一。 */
 static airy_atomic_int_t g_sub_seq;
 
 typedef struct {
-    const agent_run_session_t *session;
+    const struct agent_run_session_s *session;
     const agent_run_event_sink_t *up;
     agent_run_event_sink_t own;
     uint64_t *seq;

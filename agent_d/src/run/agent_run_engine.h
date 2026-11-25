@@ -30,6 +30,9 @@
 #include "airy_budget.h"
 #include "cancel_token.h"
 
+/* run_stream 事件通道（sink + v1 信封）：引擎、循环与委派共用 */
+#include "agent_run_evt.h"
+
 /* C-15 统一任务编排入口契约（mode/状态/预算/task 元数据） */
 #include "agent_task_contract.h"
 
@@ -40,13 +43,7 @@ extern "C" {
 /* ---- 会话注册表（原 gateway_biz_agent_session.c gw_active_* 迁移） ---- */
 
 #define AGENT_RUN_SESSION_ID_LEN 64
-/* 工具环轮次策略（N-7）：默认不设轮次上限——运行持续到任务完成，停止只由
- * 三个安全阀之一触发：同参重复失败、token 预算越限、取消。客户端
- * params.rounds / budget.rounds 为正数时按其显式上限收口，策略面
- * AIRY_AGENT_TOOL_ROUNDS 亦可显式收紧；不存在 32 之类的机制硬界。
- * 到点是暂停不是崩溃：已执行 trace 与中间正文完整移交，并返回 AIRY_EBUDGET
- * + resume_token 供客户端续跑。 */
-#define AGENT_RUN_ROUNDS_AUTO 0
+/* 工具环轮次策略（N-7）见 agent_run_loop.h：AGENT_RUN_ROUNDS_AUTO 随循环域。 */
 /* token 预算（N-7 第二安全阀）：单次 run 的累计 token 上限。客户端
  * budget.tokens 优先，其次策略面 AIRY_AGENT_TOKEN_BUDGET（显式 0 = 不限），
  * 再缺省本值。命中按 AIRY_EBUDGET 收口并下发续跑令牌。 */
@@ -136,27 +133,6 @@ const char *run_state_name(int rc, int cancelled);
 const char *run_rc_msg(int rc);
 
 /* ---- run 引擎主入口（原 gateway handle_agent_run 迁移） ---- */
-
-/**
- * @brief run_stream 事件推送 sink（M1-1d 协议先行）。
- *
- * 引擎在 run_start / plan / tool_start / tool_end / token_delta /
- * message / run_end / error 节点调用 emit，把结构化事件信封推送出去。
- * emit 回调不得阻塞（写 socket 失败即丢弃）；ud 为回调上下文。
- */
-typedef struct {
-    void (*emit)(const char *type, cJSON *data, void *ud);
-    void *ud;
-} agent_run_event_sink_t;
-
-/**
- * @brief 组装 §2.4 v1 事件信封 JSON 并交给 sink->emit（agent_run_engine.c）。
- * data 与信封所有权均由本函数持有；sink 仅在调用期内借用（不得留存）。
- * emit 不得阻塞。run_id 为本次运行标识（每帧携带，可 NULL）。
- */
-void agent_run_emit_event(const agent_run_event_sink_t *sink, uint64_t *seq,
-                          const char *run_id, const char *session_id, const char *type,
-                          cJSON *data);
 
 /**
  * @brief 执行一次 agent.run（同步阻塞，事件驱动并发客户端下每请求一线程）。

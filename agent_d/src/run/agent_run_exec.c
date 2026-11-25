@@ -18,6 +18,7 @@
 #include "agent_review.h"
 #include "agent_run_engine.h"
 #include "agent_run_internal.h"
+#include "agent_run_loop.h"
 #include "agent_task_ledger.h"
 #include "agent_turn_rec.h"
 #include "agent_verify.h"
