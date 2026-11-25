@@ -17,7 +17,6 @@
  */
 
 #include "supervisor_d_internal.h"
-#include "daemon_platform_ext.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,9 +41,8 @@ int sup_ctrl_listen(const sup_ctx_t *ctx)
 #ifdef _WIN32
     return sup_tcp_bind(ctx->ctrl_ep);
 #else
-    /* 端点仪式收敛到 commons/platform：清理陈旧节点 → bind → chmod 0600 → listen。 */
-    int fd = (int)airy_sock_bind_unix(ctx->ctrl_ep, 4, 0600);
-    return fd < 0 ? -1 : fd;
+    /* 端点仪式落本模块 net 层唯一落点：清理陈旧节点 → bind → chmod 0600 → listen。 */
+    return sup_uds_bind(ctx->ctrl_ep, 4, 0600);
 #endif
 }
 
@@ -239,7 +237,7 @@ static int client_run(const sup_ctx_t *ctx, const char *req)
     if (fd < 0)
         return -1;
 #else
-    int fd = (int)airy_sock_conn_unix(ctx->ctrl_ep, 0);
+    int fd = sup_uds_conn(ctx->ctrl_ep, -1);
     if (fd < 0)
         return -1;
 #endif
