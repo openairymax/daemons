@@ -19,7 +19,6 @@
  */
 
 #include "sup_net.h"
-#include "daemon_platform_ext.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +32,7 @@
 #include <stdint.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 #else
@@ -91,6 +91,76 @@ static int sup_conn_wait(int fd, const struct sockaddr *sa, socklen_t salen,
     }
     return 0;
 }
+
+#ifndef _WIN32
+/* ---- UDS 端点装配 SSoT（零项目库依赖下的模块内唯一落点） ----
+ * 填充 sun_path 并做 108 字节超长判定：截断会让 bind 与 connect 指向
+ * 不同 inode，同机多实例互相踢掉，故超长一律拒绝并置 errno。 */
+static int sup_uds_fill(const char *path, struct sockaddr_un *addr)
+{
+    if (!path || !path[0]) {
+        errno = EINVAL;
+        return -1;
+    }
+    memset(addr, 0, sizeof(*addr));
+    addr->sun_family = AF_UNIX;
+    if (strlen(path) >= sizeof(addr->sun_path)) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    snprintf(addr->sun_path, sizeof(addr->sun_path), "%s", path);
+    return 0;
+}
+
+/* 监听装配：清理陈旧节点 → bind →（mode>0 时）chmod → listen。
+ * backlog<=0 按 1 兜底，避免各平台 listen(0) 语义差异。 */
+int sup_uds_bind(const char *path, int backlog, int mode)
+{
+    struct sockaddr_un addr;
+    int fd;
+
+    if (sup_uds_fill(path, &addr) != 0)
+        return -1;
+    fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0)
+        return -1;
+    unlink(path);
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+        (mode > 0 && chmod(path, (mode_t)mode) != 0) ||
+        listen(fd, backlog > 0 ? backlog : 1) != 0) {
+        int saved = errno;
+        close(fd);
+        unlink(path);
+        errno = saved;
+        return -1;
+    }
+    return fd;
+}
+
+/* 连接装配：timeout_ms<0 阻塞 connect，>=0 走 sup_conn_wait 超时机制。 */
+int sup_uds_conn(const char *path, int timeout_ms)
+{
+    struct sockaddr_un addr;
+    int fd, rc;
+
+    if (sup_uds_fill(path, &addr) != 0)
+        return -1;
+    fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0)
+        return -1;
+    if (timeout_ms < 0)
+        rc = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
+    else
+        rc = sup_conn_wait(fd, (struct sockaddr *)&addr, sizeof(addr), timeout_ms);
+    if (rc != 0) {
+        int saved = errno;
+        close(fd);
+        errno = saved;
+        return -1;
+    }
+    return fd;
+}
+#endif /* _WIN32 */
 
 #ifdef _WIN32
 /* ---- WSA 初始化（幂等）：Windows 专有，POSIX 无需且不暴露 ---- */
@@ -189,7 +259,7 @@ static int probe_tcp(const char *ep)
 #else
 static int probe_unix(const char *path)
 {
-    airy_sock_t fd = airy_sock_conn_unix(path, SUP_PROBE_TIMEOUT_MS);
+    int fd = sup_uds_conn(path, SUP_PROBE_TIMEOUT_MS);
 
     if (fd < 0)
         return -1;

@@ -38,6 +38,12 @@ int sup_probe_sock(const char *sock);
 /* Windows 专有：TCP 回环装配（POSIX 走 UDS，不经此路） */
 int sup_tcp_conn(const char *ep, int timeout_ms);
 int sup_tcp_bind(const char *ep);
+#else
+/* POSIX 专有：UDS 端点装配（零项目库依赖下的模块内唯一落点）。
+ * bind 侧清理陈旧节点、按需 chmod、backlog<=0 兜底；conn 侧 -1 走阻塞，
+ * >=0 走非阻塞 connect + select 超时。失败返回 -1 并保留 errno。 */
+int sup_uds_bind(const char *path, int backlog, int mode);
+int sup_uds_conn(const char *path, int timeout_ms);
 #endif
 
 #ifdef __cplusplus
