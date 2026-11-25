@@ -7,11 +7,15 @@
  *
  * 语义缓存：跨会话、跨时刻的 LLM 响应复用（省 Token、降延迟）。
  * 实现 AirymaxRT 13-semantic-cache-context-ledger.md 第 3 章：
- *   - L0 精确命中：SHA-256(canonical_text + model_id) 精确键（O(1)）
+ *   - L0 精确命中：SHA-256(canonical_text|model_id[|cache_ns]) 精确键（O(1)）
  *   - L1 语义命中：归一化 Jaccard token 集合相似度 + 长度比（可配阈值）
  *   - LRU + TTL 双维度淘汰，条目数/字节数双容量上限
  *   - 仅缓存在 mem_cache_admit() 准入范围内的调用（B5 安全门禁，fail-closed），
  *     命中附加 cache_hit/cache_id 元数据
+ *
+ * N-6 命名空间：可选 cache_ns 参与精确键派生并随条目存储，L1 只在同作用域
+ * 内匹配；cache_ns 缺省（NULL/空）时键输入与旧版逐字节一致，老缓存在新
+ * mem_d 上仍可命中，新请求在旧 mem_d 上因无此字段而按旧键工作。
  */
 
 #ifndef AIRY_RT_MEM_CACHE_H
@@ -38,7 +42,7 @@ typedef struct {
      */
     double hit_rate;
     size_t evictions;   /**< 累计淘汰数（TTL 过期 + LRU） */
-    size_t bytes;       /**< 当前占用字节（text+response 合计） */
+    size_t bytes;       /**< 当前占用字节（text+response+model_id+cache_ns 合计） */
 } mem_cache_stats_t;
 
 /**
@@ -75,10 +79,22 @@ int mem_cache_admit(const char *text);
  * @param out_cache_id 返回 32 位十六进制 cache_id（调用方 AIRY_FREE）
  * @param out_exact_key 返回 SHA-256 精确键（调用方 AIRY_FREE）
  * @return AIRY_SUCCESS 或错误码
+ *
+ * 不带作用域的入口，等价于 cache_ns=NULL（旧键：SHA-256("text|model_id")）。
  */
 int mem_cache_put(mem_cache_t *cache, const char *text, const char *response,
                   const char *model_id, uint64_t ttl_ms,
                   char **out_cache_id, char **out_exact_key);
+
+/**
+ * @brief 带缓存作用域（N-6）的写入：cache_ns 参与精确键派生并写入条目，
+ *        L1 语义命中只在同作用域内匹配。
+ * @param cache_ns  作用域串（NULL/空 = 旧键，与 mem_cache_put 逐字节一致）
+ * @return AIRY_SUCCESS 或错误码
+ */
+int mem_cache_putns(mem_cache_t *cache, const char *text, const char *response,
+                    const char *model_id, const char *cache_ns, uint64_t ttl_ms,
+                    char **out_cache_id, char **out_exact_key);
 
 /**
  * @brief 查询缓存（L0 精确 → L1 语义）。
@@ -91,10 +107,21 @@ int mem_cache_put(mem_cache_t *cache, const char *text, const char *response,
  * @param out_cache_id 命中条目的 cache_id（未命中为 NULL；调用方 AIRY_FREE）
  * @param out_response 命中响应（未命中为 NULL；调用方 AIRY_FREE）
  * @return AIRY_SUCCESS
+ *
+ * 不带作用域的入口，等价于 cache_ns=NULL。
  */
 int mem_cache_get(mem_cache_t *cache, const char *text, const char *model_id,
                   double threshold, int *out_hit, double *out_score,
                   char **out_cache_id, char **out_response);
+
+/**
+ * @brief 带缓存作用域（N-6）的查询；cache_ns 须与写入侧同值。
+ * @param cache_ns  作用域串（NULL/空 = 旧键）
+ * @return AIRY_SUCCESS
+ */
+int mem_cache_getns(mem_cache_t *cache, const char *text, const char *model_id,
+                    const char *cache_ns, double threshold, int *out_hit,
+                    double *out_score, char **out_cache_id, char **out_response);
 
 /**
  * @brief 删除指定缓存条目。

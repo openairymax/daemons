@@ -17,6 +17,22 @@
 #include "daemon_main.h"
 #include "engine/cache.h"
 
+#include <string.h>
+
+/* 可选作用域（N-6）：非字符串 / 空串 / 超长（>64 字节）一律按缺省处理，
+ * 回落旧键派生，不向调用方报错（线协议向后兼容）。 */
+#define CACHE_NS_MAX 64
+
+static const char *cache_ns_arg(cJSON *params)
+{
+    cJSON *ns = cJSON_GetObjectItem(params, "cache_ns");
+    if (!cJSON_IsString(ns) || !ns->valuestring || !ns->valuestring[0])
+        return NULL;
+    if (strlen(ns->valuestring) > CACHE_NS_MAX)
+        return NULL;
+    return ns->valuestring;
+}
+
 /* ── mem.cache_put ───────────────────────────────────────────────────── */
 
 void handle_cache_put(cJSON *params, int id, airy_sock_t client_fd)
@@ -48,8 +64,9 @@ void handle_cache_put(cJSON *params, int id, airy_sock_t client_fd)
     uint64_t ttl_ms = ttl && cJSON_IsNumber(ttl) && ttl->valuedouble >= 0
                           ? (uint64_t)ttl->valuedouble
                           : 0;
-    int ret = mem_cache_put(g_cache, text->valuestring, response->valuestring,
-                            model_id->valuestring, ttl_ms, &cache_id, &exact_key);
+    int ret = mem_cache_putns(g_cache, text->valuestring, response->valuestring,
+                              model_id->valuestring, cache_ns_arg(params), ttl_ms, &cache_id,
+                              &exact_key);
     if (ret != AIRY_SUCCESS || !cache_id) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "cache_put 失败", id);
         AIRY_FREE(cache_id);
@@ -81,8 +98,8 @@ void handle_cache_get(cJSON *params, int id, airy_sock_t client_fd)
     double score = 0.0;
     char *cache_id = NULL, *response = NULL;
     double thr = threshold && cJSON_IsNumber(threshold) ? threshold->valuedouble : 0.0;
-    int ret = mem_cache_get(g_cache, text->valuestring, model_id->valuestring, thr,
-                            &hit, &score, &cache_id, &response);
+    int ret = mem_cache_getns(g_cache, text->valuestring, model_id->valuestring,
+                              cache_ns_arg(params), thr, &hit, &score, &cache_id, &response);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "cache_get 失败", id);
         AIRY_FREE(cache_id);

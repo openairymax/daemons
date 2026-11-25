@@ -8,6 +8,8 @@
  * 存储：自包含哈希表（exact_key 链地址法），无外部存储依赖，
  * 与 mem_d records 引擎解耦（缓存为易失层，重启可重建）。
  * 淘汰：TTL 过期优先，其次按 access_count 升序 / last_access 最旧（LRU）。
+ * 命名空间（N-6）：可选 cache_ns 只参与精确键与 L1 作用域过滤；为空时
+ * 键输入与旧版逐字节一致。
  */
 
 #include "cache.h"
@@ -167,6 +169,7 @@ typedef struct cache_entry {
     char *text;
     char *response;
     char *model_id;
+    char *cache_ns;        /* N-6 作用域；旧条目为空串 */
     uint64_t created_at;   /* monotonic ns */
     uint64_t ttl_ms;       /* 0 = 不过期 */
     uint64_t last_access;  /* monotonic ns */
@@ -352,6 +355,7 @@ void mem_cache_destroy(mem_cache_t *cache)
             AIRY_FREE(e->text);
             AIRY_FREE(e->response);
             AIRY_FREE(e->model_id);
+            AIRY_FREE(e->cache_ns);
             AIRY_FREE(e);
             e = next;
         }
@@ -372,6 +376,7 @@ static void entry_unlink(mem_cache_t *cache, cache_entry_t *prev, cache_entry_t 
     AIRY_FREE(e->text);
     AIRY_FREE(e->response);
     AIRY_FREE(e->model_id);
+    AIRY_FREE(e->cache_ns);
     AIRY_FREE(e);
 }
 
@@ -495,17 +500,26 @@ int mem_cache_admit(const char *text)
     return 1;
 }
 
-/* 精确键派生唯一来源：SHA-256("text|model_id")，put/get 共用。 */
-static int cache_key_build(const char *text, const char *model_id,
+/* 精确键派生唯一来源：SHA-256("text|model_id[|cache_ns]")，put/get 共用。
+ * cache_ns 为空时输入与旧键逐字节一致，老缓存条目不失效（N-6）。 */
+static int cache_key_build(const char *text, const char *model_id, const char *cache_ns,
                            char out[SHA256_HEX + 1])
 {
     size_t tl = strlen(text), ml = strlen(model_id);
-    char *key_src = AIRY_MALLOC(tl + ml + 2);
+    size_t nl = (cache_ns && cache_ns[0]) ? strlen(cache_ns) : 0;
+    size_t len = tl + ml + 2 + (nl ? nl + 1 : 0);
+    char *key_src = AIRY_MALLOC(len);
     if (!key_src)
         return AIRY_ERR_OUT_OF_MEMORY;
     AIRY_MEMCPY(key_src, text, tl);
     key_src[tl] = '|';
-    AIRY_MEMCPY(key_src + tl + 1, model_id, ml + 1);
+    AIRY_MEMCPY(key_src + tl + 1, model_id, ml);
+    if (nl) {
+        key_src[tl + ml + 1] = '|';
+        AIRY_MEMCPY(key_src + tl + ml + 2, cache_ns, nl + 1);
+    } else {
+        key_src[tl + ml + 1] = '\0';
+    }
     sha256_hex(key_src, out);
     AIRY_FREE(key_src);
     return AIRY_SUCCESS;
@@ -573,12 +587,14 @@ static int cache_l0(mem_cache_t *cache, const char *key, uint64_t now,
     return CACHE_FOUND;
 }
 
-/* 语义层：只在同模型、未过期条目里取最高分；过期条目留给 cache_evict
- * 统一清理，不在此摘链。 */
+/* 语义层：只在同作用域、同模型、未过期条目里取最高分；他作用域条目整体
+ * 不可见（旧条目只对缺省作用域的请求可见），避免换版后旧结果被语义命中
+ * （N-6）。过期条目留给 cache_evict 统一清理，不在此摘链。 */
 static cache_entry_t *cache_l1(mem_cache_t *cache, const char *text,
-                               const char *model_id, uint64_t now, double thr,
-                               double *out_score)
+                               const char *model_id, const char *cache_ns,
+                               uint64_t now, double thr, double *out_score)
 {
+    const char *ns = (cache_ns && cache_ns[0]) ? cache_ns : "";
     cache_entry_t *best_e = NULL;
     double best = 0.0;
 
@@ -586,7 +602,8 @@ static cache_entry_t *cache_l1(mem_cache_t *cache, const char *text,
         for (cache_entry_t *cur = cache->buckets[i]; cur; cur = cur->next) {
             double s;
 
-            if (strcmp(cur->model_id, model_id) != 0 || entry_expired(cur, now))
+            if (strcmp(cur->model_id, model_id) != 0 || strcmp(cur->cache_ns, ns) != 0 ||
+                entry_expired(cur, now))
                 continue;
             s = semantic_score(text, cur->text);
             if (s > best) {
@@ -601,10 +618,13 @@ static cache_entry_t *cache_l1(mem_cache_t *cache, const char *text,
     return best_e;
 }
 
-int mem_cache_put(mem_cache_t *cache, const char *text, const char *response,
-                  const char *model_id, uint64_t ttl_ms,
-                  char **out_cache_id, char **out_exact_key)
+/* 写入唯一实现：cache_ns 参与精确键派生并随条目存储，供 L1 作用域过滤
+ * 使用；ns 为空即旧键（N-6）。 */
+static int cache_put_impl(mem_cache_t *cache, const char *text, const char *response,
+                          const char *model_id, const char *cache_ns, uint64_t ttl_ms,
+                          char **out_cache_id, char **out_exact_key)
 {
+    const char *ns = (cache_ns && cache_ns[0]) ? cache_ns : "";
     char exact_key[SHA256_HEX + 1];
     cache_entry_t *e;
     uint64_t h;
@@ -612,7 +632,7 @@ int mem_cache_put(mem_cache_t *cache, const char *text, const char *response,
     if (!cache || !text || !response || !model_id)
         return AIRY_ERR_INVALID_PARAM;
 
-    if (cache_key_build(text, model_id, exact_key) != AIRY_SUCCESS)
+    if (cache_key_build(text, model_id, ns, exact_key) != AIRY_SUCCESS)
         return AIRY_ERR_OUT_OF_MEMORY;
 
     /* 同键覆盖：删除旧条目再插入（保持 LRU 语义） */
@@ -625,10 +645,12 @@ int mem_cache_put(mem_cache_t *cache, const char *text, const char *response,
     e->text = AIRY_STRDUP(text);
     e->response = AIRY_STRDUP(response);
     e->model_id = AIRY_STRDUP(model_id);
-    if (!e->text || !e->response || !e->model_id) {
+    e->cache_ns = AIRY_STRDUP(ns);
+    if (!e->text || !e->response || !e->model_id || !e->cache_ns) {
         AIRY_FREE(e->text);
         AIRY_FREE(e->response);
         AIRY_FREE(e->model_id);
+        AIRY_FREE(e->cache_ns);
         AIRY_FREE(e);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
@@ -638,7 +660,7 @@ int mem_cache_put(mem_cache_t *cache, const char *text, const char *response,
     e->last_access = e->created_at;
     e->access_count = 0;
     e->ttl_ms = ttl_ms > 0 ? ttl_ms : cache->default_ttl_ms;
-    e->bytes = strlen(text) + strlen(response) + strlen(model_id);
+    e->bytes = strlen(text) + strlen(response) + strlen(model_id) + strlen(ns);
 
     h = cache_hash64(exact_key) % CACHE_HASH_BUCKETS;
     e->next = cache->buckets[h];
@@ -655,9 +677,26 @@ int mem_cache_put(mem_cache_t *cache, const char *text, const char *response,
     return AIRY_SUCCESS;
 }
 
-int mem_cache_get(mem_cache_t *cache, const char *text, const char *model_id,
-                  double threshold, int *out_hit, double *out_score,
-                  char **out_cache_id, char **out_response)
+int mem_cache_put(mem_cache_t *cache, const char *text, const char *response,
+                  const char *model_id, uint64_t ttl_ms,
+                  char **out_cache_id, char **out_exact_key)
+{
+    return cache_put_impl(cache, text, response, model_id, NULL, ttl_ms, out_cache_id,
+                          out_exact_key);
+}
+
+int mem_cache_putns(mem_cache_t *cache, const char *text, const char *response,
+                    const char *model_id, const char *cache_ns, uint64_t ttl_ms,
+                    char **out_cache_id, char **out_exact_key)
+{
+    return cache_put_impl(cache, text, response, model_id, cache_ns, ttl_ms, out_cache_id,
+                          out_exact_key);
+}
+
+/* 查询唯一实现：L0 精确键与 L1 语义层均按同一作用域判定（N-6）。 */
+static int cache_get_impl(mem_cache_t *cache, const char *text, const char *model_id,
+                          const char *cache_ns, double threshold, int *out_hit,
+                          double *out_score, char **out_cache_id, char **out_response)
 {
     cache_out_t out = {out_hit, out_score, out_cache_id, out_response};
     char exact_key[SHA256_HEX + 1];
@@ -677,7 +716,7 @@ int mem_cache_get(mem_cache_t *cache, const char *text, const char *model_id,
     now = airy_time_ns();
     thr = threshold > 0.0 && threshold <= 1.0 ? threshold : cache->semantic_threshold;
 
-    if (cache_key_build(text, model_id, exact_key) != AIRY_SUCCESS)
+    if (cache_key_build(text, model_id, cache_ns, exact_key) != AIRY_SUCCESS)
         return AIRY_ERR_OUT_OF_MEMORY;
 
     state = cache_l0(cache, exact_key, now, &e);
@@ -690,13 +729,29 @@ int mem_cache_get(mem_cache_t *cache, const char *text, const char *model_id,
         return AIRY_SUCCESS;
     }
 
-    e = cache_l1(cache, text, model_id, now, thr, &score);
+    e = cache_l1(cache, text, model_id, cache_ns, now, thr, &score);
     if (!e) {
         cache->misses++;
         return AIRY_SUCCESS;
     }
     cache_hit(cache, e, score, now, &out);
     return AIRY_SUCCESS;
+}
+
+int mem_cache_get(mem_cache_t *cache, const char *text, const char *model_id,
+                  double threshold, int *out_hit, double *out_score,
+                  char **out_cache_id, char **out_response)
+{
+    return cache_get_impl(cache, text, model_id, NULL, threshold, out_hit, out_score,
+                          out_cache_id, out_response);
+}
+
+int mem_cache_getns(mem_cache_t *cache, const char *text, const char *model_id,
+                    const char *cache_ns, double threshold, int *out_hit,
+                    double *out_score, char **out_cache_id, char **out_response)
+{
+    return cache_get_impl(cache, text, model_id, cache_ns, threshold, out_hit, out_score,
+                          out_cache_id, out_response);
 }
 
 int mem_cache_del(mem_cache_t *cache, const char *cache_id, int *out_deleted)
