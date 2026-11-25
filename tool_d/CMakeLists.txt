@@ -140,6 +140,10 @@ target_include_directories(airy_tool_service PRIVATE
     ${CJSON_INCLUDE_DIRS}
     # B16-S0：跨 daemon 头依赖显式化（svc_common 不再代传 llm_d/include）
     ${CMAKE_CURRENT_SOURCE_DIR}/../llm_d/include
+    # N-3：内置网络工具改用 providers 进程内传输（provider_http_hop_get）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../providers/include
+    ${CURL_INCLUDE_DIRS}
+    ${LIBCURL_INCLUDE_DIRS}
 )
 
 # 链接库：svc_common 提供 daemon 公共层，cupolas 提供 SafetyGuard
@@ -147,6 +151,11 @@ target_include_directories(airy_tool_service PRIVATE
 # 依赖链：airy_tool_service → airy_syscall → airy_coreloopthree → airy_core
 # 无循环依赖（coreloopthree 不链接 tool_service，仅 include 头文件）
 target_link_libraries(airy_tool_service PUBLIC svc_common cupolas airy_syscall)
+
+# N-3：内置网络工具改走 providers 进程内 libcurl（provider_http_hop_get）。
+# 静态库的 PRIVATE 依赖以 LINK_ONLY 传播到最终可执行文件，使各消费者在
+# 单遍库序下也能解析该符号（llm_service 在库序中先于 tool_service）。
+target_link_libraries(airy_tool_service PRIVATE airy_llm_transport)
 
 # daemon_tool_ops_bootstrap 注入 atoms 侧 tool ops 抽象表。
 # ops 存储（are_ops_set/get_tool）在独立小库 airy_tool_ops 中，而非
