@@ -23,6 +23,8 @@
 
 #include "builtin/builtin_net_internal.h"
 
+#include "airy_prov/provider_transport.h"
+
 #include "airy_regex.h"
 
 #include "builtin/builtin_buf_internal.h"
@@ -284,7 +286,7 @@ static int web_search_rewrite_query(const char *in, char *out, size_t cap)
     return (strcmp(in, out) != 0) ? 1 : 0;
 }
 
-/* 搜索后端描述表：URL 模板 + curl 超时 + 结果/摘要正则。两家 SERP 的
+/* 搜索后端描述表：URL 模板 + 请求预算 + 结果/摘要正则。两家 SERP 的
  * 差异全部收敛在此，抓取与解析骨架只有一份。
  *
  * Bing 排首位：多数网络下响应快。--max-time 12s（shell 15s）是为串联
@@ -401,7 +403,7 @@ int net_search_json(const char *json, int max, char *buf, size_t cap, size_t *le
     return count;
 }
 
-/* endpoint 只允许 http(s) 且不得含 shell 元字符（命令经 sh -c 执行）。 */
+/* endpoint 只允许 http(s) 且不得含易混字符（配置卫生）。 */
 static int ep_check(const char *ep)
 {
     if (!ep || !ep[0])
@@ -411,7 +413,7 @@ static int ep_check(const char *ep)
     return (strncmp(ep, "http://", 7) == 0 || strncmp(ep, "https://", 8) == 0) ? 0 : -1;
 }
 
-/* key 只允许 token 安全字符，避免拼进 curl 命令时形成注入面。 */
+/* key 只允许 token 安全字符，避免写入请求头时形成注入面。 */
 static int key_check(const char *k)
 {
     for (const unsigned char *p = (const unsigned char *)k; *p; p++) {
@@ -444,8 +446,6 @@ static int provider_run(const char *query, int max, char *buf, size_t *len, int 
 {
     char ep[2048], key[512], enc[2048], url[4096];
     char auth[640], apikey[640];
-    char *extra[10];
-    int n = 0;
 
     if (!net_cfg_provider(ep, sizeof(ep), key, sizeof(key)))
         return -1;
@@ -455,26 +455,24 @@ static int provider_run(const char *query, int max, char *buf, size_t *len, int 
     if (provider_url(ep, enc, url, sizeof(url)) != 0)
         return -1;
 
-    extra[n++] = "-A";
-    extra[n++] = (char *)WEB_SEARCH_UA;
-    extra[n++] = "-H";
-    extra[n++] = "Accept: application/json";
+    struct curl_slist *hdr = curl_slist_append(NULL, "User-Agent: " WEB_SEARCH_UA);
+    hdr = curl_slist_append(hdr, "Accept: application/json");
     if (key[0]) {
         snprintf(auth, sizeof(auth), "Authorization: Bearer %s", key);
         snprintf(apikey, sizeof(apikey), "X-API-Key: %s", key);
-        extra[n++] = "-H";
-        extra[n++] = auth;
-        extra[n++] = "-H";
-        extra[n++] = apikey;
+        hdr = curl_slist_append(hdr, auth);
+        hdr = curl_slist_append(hdr, apikey);
     }
-    extra[n] = NULL;
 
     net_http_req_t req;
     req.url = url;
-    req.extra_argv = extra;
+    req.headers = hdr;
     req.timeout_ms = 18000;
     net_http_resp_t rsp = {0};
-    if (net_http_get(&req, &rsp) != 0 || rsp.exit_code != 0 || !rsp.body) {
+    int rc = net_http_get(&req, &rsp);
+    if (hdr)
+        curl_slist_free_all(hdr);
+    if (rc != 0 || rsp.exit_code != 0 || !rsp.body) {
         AIRY_FREE(rsp.body);
         return -1;
     }
@@ -488,26 +486,26 @@ static int web_search_via(const web_src_t *src, const char *query, int max_resul
                           size_t buf_cap, size_t *buf_len, int *count)
 {
     char enc[2048], url[4096];
-    char *extra[4];
     builtin_url_encode(query, enc, sizeof(enc));
     snprintf(url, sizeof(url), src->url_fmt, enc);
-    extra[0] = "-A";
-    extra[1] = (char *)WEB_SEARCH_UA;
-    extra[2] = NULL;
+    struct curl_slist *hdr = curl_slist_append(NULL, "User-Agent: " WEB_SEARCH_UA);
 
     net_http_req_t req;
     req.url = url;
-    req.extra_argv = extra;
+    req.headers = hdr;
     req.timeout_ms = (uint32_t)src->shell_ms;
     net_http_resp_t rsp = {0};
-    if (net_http_get(&req, &rsp) != 0 || rsp.exit_code != 0 || !rsp.body) {
+    int rc = net_http_get(&req, &rsp);
+    if (hdr)
+        curl_slist_free_all(hdr);
+    if (rc != 0 || rsp.exit_code != 0 || !rsp.body) {
         AIRY_FREE(rsp.body);
         return -1;
     }
-    int rc = web_search_extract(rsp.body, src->res_re, src->snip_re, max_results, buf, buf_cap,
-                                buf_len, count);
+    int rc2 = web_search_extract(rsp.body, src->res_re, src->snip_re, max_results, buf, buf_cap,
+                                 buf_len, count);
     AIRY_FREE(rsp.body);
-    return rc;
+    return rc2;
 }
 
 /* 搜索编排：可配置 provider → Bing → DuckDuckGo → 退化查询改写重试；

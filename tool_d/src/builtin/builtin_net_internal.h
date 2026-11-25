@@ -8,7 +8,7 @@
  *
  *        The network domain is split into three translation units so each
  *        one stays small and independently testable:
- *          - builtin_net_fetch.c  web_fetch (URL parse + curl + fallback)
+ *          - builtin_net_fetch.c  web_fetch (URL parse + in-process transport)
  *          - builtin_net_search.c web_search (provider JSON + SERP scrape)
  *          - builtin_net_guard.c  SSRF host policy + provider config reader
  *
@@ -55,33 +55,28 @@ int net_ssrf_check(const char *host, char *why, size_t cap);
  * 策略。0 允许，-1 拒绝（why 写原因）。重定向目标必须逐跳走这里。 */
 int net_url_guard(const char *url, char *why, size_t cap);
 
-/* 跟随重定向的 GET 请求描述。extra_argv 是追加给 curl 的参数数组
- * （NULL 结尾，不含程序名），以 argv 形式传递、不经 shell。 */
+struct curl_slist;
+
+/* 逐跳跟随重定向的 GET 请求描述。headers 为附加请求头链（可为 NULL），
+ * 由调用方持有，net_http_get 返回后自行释放。 */
 typedef struct {
     const char *url;
-    char *const *extra_argv;
+    struct curl_slist *headers;
     uint32_t timeout_ms; /* 整条重定向链的总预算；0 = 无预算 */
 } net_http_req_t;
 
 typedef struct {
     char *body;    /* AIRY_MALLOC 分配，调用方 AIRY_FREE */
     long status;   /* 最后一跳 HTTP 状态码；0 = 无 */
-    int exit_code; /* 最后一跳 curl 退出码 */
+    int exit_code; /* 最后一跳传输结果；0 = 成功 */
     int redirects; /* 实际跟随的跳数 */
     char why[160];
 } net_http_resp_t;
 
 /* 执行 GET 并跟随重定向，每一跳都复检 net_url_guard。
- * 返回 0 = 已得到最终响应（含 4xx/5xx 与 curl 失败）；
- *      1 = curl 不可用（调用方可回退）；
- *     -1 = 被策略拒绝 / 超跳 / 超预算 / 无法建临时文件。 */
+ * 返回 0 = 已得到最终响应（含 4xx/5xx）；
+ *     -1 = 传输失败 / 被策略拒绝 / 超跳 / 超预算。 */
 int net_http_get(const net_http_req_t *req, net_http_resp_t *resp);
-
-/* 从 curl -w 追加的元数据尾解析状态码与重定向目标，并把正文截断到
- * 元数据之前。标记由调用方生成（含前导换行），取最后一次出现。
- * 返回 0 成功，-1 未找到合法尾部。 */
-int net_http_meta_parse(char *out, const char *status_mark, const char *redir_mark, long *status,
-                        char *redir, size_t redir_cap);
 
 /* 读取可配置搜索 provider：endpoint 为含 %s 的 JSON API URL 模板
  * （无 %s 时按 ?q=/%s 追加），key 可为空。返回 1=已配置 endpoint，
