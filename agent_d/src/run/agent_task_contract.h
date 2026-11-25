@@ -102,8 +102,8 @@ typedef struct {
     bool allow_dangerous;              /* 调用方显式接受高危工具风险（审计留痕） */
     const char *success_criteria;      /* 可 NULL；计划/验收的判定依据 */
     const char *client;                /* cli / tui / sdk（审计用，可 NULL） */
-    int budget_rounds;                 /* 已夹取到 [1,32] */
-    long budget_tokens;                /* 0 = 不设预算 */
+    int budget_rounds;                 /* 0 = 不设轮次上限（N-7）；正数按显式上限 */
+    long budget_tokens;                /* 0 = 取策略 AIRY_AGENT_TOKEN_BUDGET / 机制缺省 */
     long budget_seconds;               /* 0 = 不设预算 */
 } agent_run_task_meta_t;
 

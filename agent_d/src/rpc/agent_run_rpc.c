@@ -221,6 +221,8 @@ typedef struct {
     bool mode_declared;        /* 客户端显式声明 chat/task（非 auto） */
     const char *client;
     int rounds;
+    long tokens;              /* budget.tokens（0 = 取策略/机制缺省） */
+    long seconds;             /* budget.seconds（0 = 不设时间预算） */
     bool gccp_confirmed;
     bool allow_dangerous; /* 高危工具放行声明（透传到 tool_d 审批门） */
 } task_args_t;
@@ -250,18 +252,20 @@ static int parse_goal(cJSON *params, task_args_t *out, int id, airy_sock_t fd)
     return 0;
 }
 
-/* 轮次：顶层 rounds 兼容 budget.rounds。 */
-static int parse_rounds(cJSON *params)
+/* 预算：线协议以 budget{rounds,tokens,seconds} 为主形态，顶层 rounds 保留
+ * 兼容旧调用面（N-7：tokens 此前只解析未生效，现在直通引擎作为安全阀）。 */
+static void parse_budget(cJSON *params, task_args_t *out)
 {
+    cJSON *budget = cJSON_GetObjectItem(params, "budget");
     cJSON *rounds = cJSON_GetObjectItem(params, "rounds");
-    if (!cJSON_IsNumber(rounds)) {
-        /* 线协议以 budget{rounds,tokens,seconds} 为主形态；顶层 rounds 保留
-         * 兼容旧调用面。 */
-        cJSON *budget = cJSON_GetObjectItem(params, "budget");
-        if (cJSON_IsObject(budget))
-            rounds = cJSON_GetObjectItem(budget, "rounds");
-    }
-    return cJSON_IsNumber(rounds) ? rounds->valueint : 0;
+    cJSON *tok = cJSON_IsObject(budget) ? cJSON_GetObjectItem(budget, "tokens") : NULL;
+    cJSON *sec = cJSON_IsObject(budget) ? cJSON_GetObjectItem(budget, "seconds") : NULL;
+    if (!cJSON_IsNumber(rounds) && cJSON_IsObject(budget))
+        rounds = cJSON_GetObjectItem(budget, "rounds");
+    out->rounds = cJSON_IsNumber(rounds) ? rounds->valueint : 0;
+    /* token 计数可越 int 上界，按 double 取值后收敛到 long。 */
+    out->tokens = cJSON_IsNumber(tok) && tok->valuedouble > 0 ? (long)tok->valuedouble : 0;
+    out->seconds = cJSON_IsNumber(sec) && sec->valuedouble > 0 ? (long)sec->valuedouble : 0;
 }
 
 /* "auto" 与缺省同义：交给服务端规则裁决，客户端不自行推断模式。 */
@@ -317,7 +321,7 @@ static int parse_task_args(cJSON *params, int id, airy_sock_t fd, task_args_t *o
     out->declared_mode = parse_mode(params, &out->mode_declared);
     parse_criteria(params, out);
     out->client = json_str(params, "client");
-    out->rounds = parse_rounds(params);
+    parse_budget(params, out);
     out->gccp_confirmed = cJSON_IsBool(conf) && cJSON_IsTrue(conf);
     out->allow_dangerous = cJSON_IsBool(ad) && cJSON_IsTrue(ad);
     parse_answers(params, out);
@@ -428,6 +432,8 @@ static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
     meta.success_criteria = a.success_criteria;
     meta.client = a.client;
     meta.budget_rounds = a.rounds;
+    meta.budget_tokens = a.tokens;
+    meta.budget_seconds = a.seconds;
     meta.gccp_confirmed = a.gccp_confirmed;
     meta.allow_dangerous = a.allow_dangerous;
 
