@@ -25,6 +25,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
 static airy_mtx_t g_secrets_refresh_lock;
 static bool g_secrets_lock_inited = false;
 
@@ -68,6 +72,33 @@ static char *env_val_take(char *v)
 }
 
 /**
+ * @brief 打开 secrets.env，读前把权限收紧到 0600。
+ *
+ * 文件内是明文密钥，组/其他用户可读即等同于泄漏。既有的写入方（CLI
+ * `key` 命令）已按 0600 落盘，但用户手工创建、从备份恢复或用宽权限
+ * 重写后文件可能带上 0644 及以上。此处读前收紧：收紧成功继续读，
+ * 失败则不读——宁可表现为「未配置密钥」，也不把已对他人可见的密钥
+ * 装进进程内存。
+ *
+ * Windows 无 POSIX 模式位，凭据目录位于用户 profile 内，由系统 ACL 按
+ * 用户隔离，故不在此处理。
+ */
+static FILE *secrets_file_open(const char *path)
+{
+#ifndef _WIN32
+    struct stat st;
+    if (stat(path, &st) == 0 && (st.st_mode & 077) != 0) {
+        if (chmod(path, 0600) != 0) {
+            SVC_LOG_WARN("C-L02: PROVIDER: SECRETS-MODE 无法收紧 secrets.env 权限，拒绝读取");
+            return NULL;
+        }
+        SVC_LOG_WARN("C-L02: PROVIDER: SECRETS-MODE secrets.env 权限过宽，已收紧为 0600");
+    }
+#endif
+    return fopen(path, "r");
+}
+
+/**
  * @brief Read the value of the given key from $AIRY_HOME/config/secrets.env.
  * @return Dynamically-allocated string (caller AIRY_FREEs), NULL if not
  *         found or read failed
@@ -79,7 +110,7 @@ static char *secrets_env_read(const char *key_name)
     char path[1024];
     snprintf(path, sizeof(path), "%s/secrets.env", airy_config_dir());
 
-    FILE *f = fopen(path, "r");
+    FILE *f = secrets_file_open(path);
     if (!f) return NULL;
 
     char line[1024];
