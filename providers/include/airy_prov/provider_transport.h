@@ -54,27 +54,6 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
 int provider_http_get(const char *url, struct curl_slist *headers, double timeout_sec,
                       provider_http_resp_t **out_response, long *out_http_code);
 
-/* 单跳 GET 请求面：不跟随重定向，供需要逐跳复核 URL 策略的调用方
- * （内置网络工具的 SSRF 防护）使用。max_body=0 表示不限制体积。 */
-typedef struct {
-    const char *url;
-    struct curl_slist *headers;
-    double timeout_sec;
-    size_t max_body;
-} provider_hop_req_t;
-
-/* 单跳 GET 结果面：传输完成（含 4xx/5xx）返回 AIRY_OK；失败返回 AIRY_ERR_*
- * 并在 why 里给出阶段诊断。response 与 location 归调用方释放
- * （provider_http_resp_free / AIRY_FREE）。3xx 才交付 location。 */
-typedef struct {
-    provider_http_resp_t *response;
-    long http_code;
-    char *location;
-    char why[128];
-} provider_hop_resp_t;
-
-int provider_http_hop_get(const provider_hop_req_t *req, provider_hop_resp_t *out);
-
 void provider_http_resp_free(provider_http_resp_t *resp);
 
 /* api_base 与 path 拼装 SSoT：归一 api_base 尾部斜杠后拼接（调用方只声明

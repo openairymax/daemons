@@ -14,7 +14,7 @@
  *        失败阶段直接写回 out->why，不另建线程局域诊断槽。
  */
 
-#include "airy_prov/provider_transport.h"
+#include "airy_prov/provider_http.h"
 
 #include "airy_memory.h"
 #include "error.h"
@@ -107,7 +107,7 @@ static size_t hop_header_cb(char *buf, size_t size, size_t nitems, void *userp)
     return len;
 }
 
-int provider_http_hop_get(const provider_hop_req_t *req, provider_hop_resp_t *out)
+int prov_hop_get(const prov_hop_req_t *req, prov_hop_resp_t *out)
 {
     if (!req || !out || !req->url || !req->url[0]) {
         errno = EINVAL;
