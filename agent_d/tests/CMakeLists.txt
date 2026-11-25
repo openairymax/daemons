@@ -128,13 +128,6 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
         )
     endif()
 
-    # N-8 配额策略面直测：进程内单编策略件（无 daemon/RPC 依赖）。
-    if(TEST_NAME STREQUAL "test_sub_policy")
-        target_sources(test_agent_${TEST_NAME} PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_sub_policy.c
-        )
-    endif()
-
     target_include_directories(test_agent_${TEST_NAME} PRIVATE ${AGENT_COMMON_INCLUDES})
 
     target_link_libraries(test_agent_${TEST_NAME} PRIVATE
