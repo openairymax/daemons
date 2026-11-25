@@ -14,6 +14,8 @@
 #include "agent_run_internal.h"
 
 #include "agent_run_alt.h"
+#include "agent_run_sub.h"
+#include "agent_sub_policy.h"
 #include "agent_turn_ckpt.h"
 #include "airy_memory.h"
 #include "airy_run_stream.h"
@@ -618,10 +620,16 @@ static void run_reason_add(loop_ctx_t *r, const char *add)
     snprintf(np + old, cap - old, old > 0 ? "\n%s" : "%s", add);
 }
 
+/* 事件序号取用点：嵌套 run（子任务）沿用父计数器，两条链的帧不能撞号。 */
+static uint64_t *run_seqp(loop_ctx_t *r)
+{
+    return r->args->seq_ext ? r->args->seq_ext : &r->seq;
+}
+
 /* 事件投递：agent_run_emit_event 自行处理无 sink / 建包失败时的载荷释放。 */
 static void run_ev_send(loop_ctx_t *r, const char *type, cJSON *ev)
 {
-    agent_run_emit_event(r->args->sink, &r->seq, r->run_id, r->sess, type, ev);
+    agent_run_emit_event(r->args->sink, run_seqp(r), r->run_id, r->sess, type, ev);
 }
 
 /* 上游失败：回填原始码与文案供终态帧，返回终局失败码。 */
@@ -699,7 +707,7 @@ static int run_llm_round(loop_ctx_t *r, cJSON **tool_calls)
         return -1;
 
     agent_stream_t st;
-    run_delta_ctx_t dctx = {r->args->sink, &r->seq, r->run_id, r->sess};
+    run_delta_ctx_t dctx = {r->args->sink, run_seqp(r), r->run_id, r->sess};
     agent_stream_sink_t ssink = {run_emit_delta, &dctx};
     agent_stream_init(&st, &ssink);
 
@@ -930,9 +938,32 @@ static void catalog_take(loop_ctx_t *r, const cJSON *it, cJSON *next)
                 cJSON_GetObjectItem(it, "input_schema"));
 }
 
+/* 子任务委派能力注入（N-8）：只在本层仍可下探时出现在目录里。到顶后目录
+ * 没有这项能力，模型不会再试着派活，也不需要靠报错教会它边界。 */
+static void run_cat_inject_sub(loop_ctx_t *r)
+{
+    const cJSON *it = NULL;
+    cJSON *schema = NULL;
+    if (!r->catalog || sub_depth() >= sub_limits().max_depth)
+        return;
+    cJSON_ArrayForEach(it, r->catalog)
+    {
+        const char *n = cJSON_GetStringValue(
+            cJSON_GetObjectItem(cJSON_GetObjectItem(it, "function"), "name"));
+        if (n && strcmp(n, AGENT_SUB_TOOL) == 0)
+            return;
+    }
+    schema = cJSON_Parse(sub_schema());
+    if (!schema)
+        return;
+    run_cat_add(r->catalog, AGENT_SUB_TOOL, sub_desc(), schema);
+    cJSON_Delete(schema);
+}
+
 /* 目录已换：摘要变化才推送快照事件。 */
 static void catalog_publish(loop_ctx_t *r)
 {
+    run_cat_inject_sub(r);
     uint64_t sig = run_cat_sig(r);
     if (sig != r->cat_hash) {
         r->cat_hash = sig;
@@ -1272,12 +1303,53 @@ static void run_tc_cancel(loop_ctx_t *r, run_tc_t *c)
     run_ev_send(r, AIRY_RS_TYPE_TOOL_END, ev);
 }
 
+/* 委派工具的本地派发（N-8）：不经 tool_d，直接跑一次子 run，再把结论按
+ * 普通工具结果的形状回填。用量并入父账本；取消按在途取消收口本轮。 */
+static int run_tc_sub(loop_ctx_t *r, run_tc_t *c)
+{
+    agent_sub_req_t q = {0};
+    agent_sub_out_t o;
+    uint64_t t0 = airy_time_ms();
+    int rc;
+
+    q.args = c->targs;
+    q.model = r->args->model;
+    q.session = r->args->session;
+    q.sink = r->args->sink;
+    q.seq = run_seqp(r);
+    q.run_id = r->run_id;
+    q.sess_id = r->sess;
+    q.token_cap = tokens_resolve(r->args->token_budget);
+    q.allow_dangerous = r->args->allow_dangerous;
+
+    rc = sub_task_run(&q, &o);
+    r->out->tool_ms += airy_time_ms() - t0;
+    r->out->tokens += o.tokens;
+    r->out->tokens_in += o.tokens_in;
+    r->out->tokens_out += o.tokens_out;
+    r->out->llm_ms += o.llm_ms;
+    r->out->tool_ms += o.tool_ms;
+    r->out->cost += o.cost;
+
+    if (rc == AIRY_ECANCELLED) {
+        r->user_cancel = 1;
+        run_tc_cancel(r, c);
+        AIRY_FREE(o.text);
+        return 1;
+    }
+    c->res = o.text;
+    c->erc = rc == 0 ? 0 : -1;
+    return 0;
+}
+
 /* 真实执行 + 目录撤销 + C-25 等价换路；返回 1 表示已按取消终止（结果不入账）。 */
 static int run_tc_exec(loop_ctx_t *r, run_tc_t *c)
 {
     int code = 0;
     uint64_t t0 = airy_time_ms();
 
+    if (sub_is_tool(c->tname))
+        return run_tc_sub(r, c);
     c->erc = run_execute_tool(c->tname, c->targs, &c->res, &code, r->args->allow_dangerous,
                               run_tok(r->args->session));
     r->out->tool_ms += airy_time_ms() - t0;

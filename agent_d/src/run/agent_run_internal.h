@@ -107,6 +107,9 @@ typedef struct {
     uint64_t token_budget;                   /* 请求 token 预算（0 = 取策略/机制缺省） */
     const char *resume_token;                /* 续跑令牌（可 NULL；非空时不重放全量历史） */
     bool allow_dangerous;                    /* 高危工具放行声明（透传 tool_d 审批门） */
+    /* 事件序号外部化（N-8）：嵌套 run（子任务）与父 run 共用一条序号，
+     * 调用方传入父计数器即可，NULL 则本 run 自持。 */
+    uint64_t *seq_ext;
 } agent_run_loop_args_t;
 
 /** 工具循环产物（成功/熔断/预算耗尽时所有权移交调用方）。 */
