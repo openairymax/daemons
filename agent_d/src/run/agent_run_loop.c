@@ -1514,7 +1514,6 @@ static int run_loop_rounds(loop_ctx_t *r, agent_run_loop_result_t *out, int limi
             SVC_LOG_INFO("agent.run: token budget reached (limit=%llu used=%llu round=%d)",
                          (unsigned long long)tokens, (unsigned long long)out->tokens, i + 1);
             r->hit_tokens = 1;
-            r->more = 1;
             break;
         }
         agent_ledger_fit(&r->lg, r->messages);
@@ -1527,8 +1526,10 @@ static int run_loop_rounds(loop_ctx_t *r, agent_run_loop_result_t *out, int limi
             rc = st;
             break;
         }
-        r->more = 1;
     }
+    /* 「还有活」只由自然走完（rc 未被终止码改写）推出：失败与取消都
+     * 必须先归零，否则前面某轮的成功会把终局篡改成预算暂停。 */
+    r->more = (rc == -1);
     return rc;
 }
 
