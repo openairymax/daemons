@@ -80,20 +80,34 @@ static char *make_cache_text(const llm_request_config_t *manager)
  * 模型段取实际服务该请求的模型，而非请求模型：链式切换后同一逻辑请求
  * 可能落在他处，两者答案不可互相冒充（0.1.19 §3.8.4 H8）。
  */
-static char *make_cache_key(const char *model, const char *text)
+static char *make_cache_key(const char *model, const char *ns, const char *text)
 {
     if (!model || !text) {
         return NULL;
     }
 
-    size_t len = strlen(model) + 1 + strlen(text) + 1;
+    const char *scope = (ns && ns[0]) ? ns : "";
+    size_t len = strlen(model) + 1 + strlen(scope) + 1 + strlen(text) + 1;
     char *key = (char *)AIRY_MALLOC(len);
     if (!key) {
         return NULL;
     }
 
-    snprintf(key, len, "%s|%s", model, text);
+    snprintf(key, len, "%s|%s|%s", model, scope, text);
     return key;
+}
+
+/* 语义缓存作用域指纹（N-6）：请求级采样参数的唯一格式化点，读写两侧同源。
+ * 未声明的项记 -1000（千分位），与显式 0 区分（沿用 temperature_set /
+ * top_p>0 语义）。按千分位整数格式化：不依赖 LC_NUMERIC 小数点，且长度
+ * 有界，不会把不同参数截断成同一指纹。
+ * 模型级默认采样参数不在此列，其变更须 bump 契约版本或靠 TTL 收敛。 */
+static void sample_ns_hint(const llm_request_config_t *manager, char *buf, size_t size)
+{
+    long temp = (manager && manager->temperature_set) ? (long)(manager->temperature * 1000.0f)
+                                                     : -1000L;
+    long top_p = (manager && manager->top_p > 0.0f) ? (long)(manager->top_p * 1000.0f) : -1000L;
+    snprintf(buf, size, "t=%ld;p=%ld", temp, top_p);
 }
 
 /**
@@ -103,7 +117,7 @@ static char *make_cache_key(const char *model, const char *text)
  * @return 1 命中（*out_response 已填充）；0 未命中
  */
 static int cache_lookup(llm_service_t *svc, const char *key, const char *text, const char *model,
-                        int cacheable, llm_response_t **out_response)
+                        const char *ns_hint, int cacheable, llm_response_t **out_response)
 {
     if (!svc || !key || !text || !model || !out_response) {
         SVC_LOG_ERROR("cache_lookup: NULL parameter (svc=%p, key=%p, text=%p, model=%p, out=%p)",
@@ -130,7 +144,7 @@ static int cache_lookup(llm_service_t *svc, const char *key, const char *text, c
     AIRY_FREE(cached_json);
 
     char *sem_json = NULL;
-    if (llm_semantic_cache_fetch(text, model, &sem_json) != 1 || !sem_json) {
+    if (llm_semantic_cache_fetch(text, model, ns_hint, &sem_json) != 1 || !sem_json) {
         AIRY_FREE(sem_json);
         return 0;
     }
@@ -278,7 +292,7 @@ static const provider_t *pick_provider(llm_service_t *svc, const llm_request_con
  *        cacheable 时不写；敏感面另由 mem_d 的 mem_cache_admit() 拒绝。
  */
 static void cache_store(llm_service_t *svc, const char *key, const char *text, const char *model,
-                        llm_response_t *resp, int cacheable)
+                        const char *ns_hint, llm_response_t *resp, int cacheable)
 {
     if (!svc || !key || !text || !model || !resp) {
         return;
@@ -293,7 +307,7 @@ static void cache_store(llm_service_t *svc, const char *key, const char *text, c
     }
 
     cache_put_string(svc->cache, key, resp_json);
-    llm_semantic_cache_save(text, model, resp_json);
+    llm_semantic_cache_save(text, model, ns_hint, resp_json);
     AIRY_FREE(resp_json);
 }
 
@@ -579,7 +593,11 @@ static int complete_impl(llm_service_t *svc, const llm_request_config_t *manager
         return grc;
 
     char *cache_text = make_cache_text(manager);
-    char *cache_key = cache_text ? make_cache_key(manager->model, cache_text) : NULL;
+    char ns_hint[32];
+    sample_ns_hint(manager, ns_hint, sizeof(ns_hint));
+    /* 进程内 L0 与跨进程 L1 必须同作用域，否则换采样参数后仍会命中
+     * 旧请求的结果。 */
+    char *cache_key = cache_text ? make_cache_key(manager->model, ns_hint, cache_text) : NULL;
     if (!cache_text || !cache_key) {
         SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL cache key alloc, STACK: llm_service_complete");
         AIRY_FREE(cache_text);
@@ -588,8 +606,8 @@ static int complete_impl(llm_service_t *svc, const llm_request_config_t *manager
     }
 
     llm_response_t *cached_resp = NULL;
-    int cache_status =
-        cache_lookup(svc, cache_key, cache_text, manager->model, manager->cacheable, &cached_resp);
+    int cache_status = cache_lookup(svc, cache_key, cache_text, manager->model, ns_hint,
+                                    manager->cacheable, &cached_resp);
     if (cache_status > 0 && cached_resp) {
         /* 缓存命中仍消耗上游 token 配额，按响应自带用量计费。 */
         update_cost_tracking(svc, manager->model, cached_resp);
@@ -631,9 +649,9 @@ static int complete_impl(llm_service_t *svc, const llm_request_config_t *manager
     update_cost_tracking(svc, hit.model, resp);
 
     /* 写入键改用实际模型：同一逻辑请求换端点后答案不可互相冒充（H8）。 */
-    char *store_key = make_cache_key(hit.model, cache_text);
+    char *store_key = make_cache_key(hit.model, ns_hint, cache_text);
     if (store_key) {
-        cache_store(svc, store_key, cache_text, hit.model, resp, manager->cacheable);
+        cache_store(svc, store_key, cache_text, hit.model, ns_hint, resp, manager->cacheable);
         AIRY_FREE(store_key);
     } else {
         SVC_LOG_WARN("C-L02: SVC: cache store skipped (key alloc failed, model=%s)", hit.model);
