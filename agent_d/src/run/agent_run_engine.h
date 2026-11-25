@@ -40,14 +40,18 @@ extern "C" {
 /* ---- 会话注册表（原 gateway_biz_agent_session.c gw_active_* 迁移） ---- */
 
 #define AGENT_RUN_SESSION_ID_LEN 64
-/* 工具环轮次预算（C-14）：请求参数优先，缺省取策略面
- * （AIRY_AGENT_TOOL_ROUNDS），再缺省 16（与执行体 TOOL_ROUNDS_DEFAULT
- * 同值）；上限 32 是机制硬界，策略不得突破。model.yaml 的 tool_rounds
- * 由执行体消费，超出硬界一律夹取。
- * 到点不是崩溃：已执行 trace 与中间正文完整移交，并返回 AIRY_EBUDGET +
- * resume_token 供客户端续跑。 */
-#define AGENT_RUN_ROUNDS_DEFAULT 16
-#define AGENT_RUN_ROUNDS_MAX 32
+/* 工具环轮次策略（N-7）：默认不设轮次上限——运行持续到任务完成，停止只由
+ * 三个安全阀之一触发：同参重复失败、token 预算越限、取消。客户端
+ * params.rounds / budget.rounds 为正数时按其显式上限收口，策略面
+ * AIRY_AGENT_TOOL_ROUNDS 亦可显式收紧；不存在 32 之类的机制硬界。
+ * 到点是暂停不是崩溃：已执行 trace 与中间正文完整移交，并返回 AIRY_EBUDGET
+ * + resume_token 供客户端续跑。 */
+#define AGENT_RUN_ROUNDS_AUTO 0
+/* token 预算（N-7 第二安全阀）：单次 run 的累计 token 上限。客户端
+ * budget.tokens 优先，其次策略面 AIRY_AGENT_TOKEN_BUDGET（显式 0 = 不限），
+ * 再缺省本值。命中按 AIRY_EBUDGET 收口并下发续跑令牌。 */
+#define AGENT_RUN_TOKENS_DEFAULT 1000000ULL
+#define AGENT_RUN_TOKENS_ENV "AIRY_AGENT_TOKEN_BUDGET"
 /* 续跑令牌上界：只装「原始诉求 + 已完成步骤摘要 + 剩余子目标」，不装全量
  * 历史；二次续跑必须显著小于首次请求体。 */
 #define AGENT_RUN_RESUME_TOKEN_MAX 4096
@@ -164,7 +168,7 @@ void agent_run_emit_event(const agent_run_event_sink_t *sink, uint64_t *seq,
  * @param agent_spec   params.agent 对象（可 NULL；存在时走编排分支）
  * @param agent_file   params.agent_file 路径（可 NULL；回退构建 spec）
  * @param session_id   调用方预分配会话 ID（可 NULL；为空则引擎生成）
- * @param rounds       工具环轮次预算（<=0 取策略缺省；上限 32）
+ * @param rounds       工具环轮次预算（<=0 不设上限，交策略解析；N-7）
  * @param resume_token 续跑令牌（可 NULL；非空时忽略 prompt/history 的全量重放）
  * @param task         task.submit 元数据（可 NULL；非 NULL 时 run_id 取
  *                     task_id，事件与结果附带 mode/plan 字段，并按

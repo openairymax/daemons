@@ -329,8 +329,8 @@ static void resume_fill_ctx(loop_ctx_t *r, agent_run_loop_args_t *args,
         cJSON_AddItemToArray(r->trace, it);
     }
     r->text = AIRY_STRDUP("halfway there");
-    out->rounds_limit = AGENT_RUN_ROUNDS_MAX;
-    out->rounds_used = AGENT_RUN_ROUNDS_MAX;
+    out->rounds_limit = 32;
+    out->rounds_used = 32;
 }
 
 /* C-14：续跑令牌必须 URL 安全、无填充，且无论诉求与步骤多长都收敛到硬上限；
@@ -377,8 +377,8 @@ static void test_resume_roundtrip(void)
     cJSON_AddNumberToObject(it, "ok", 0);
     cJSON_AddItemToArray(r.trace, it);
     r.text = AIRY_STRDUP("next: retry via the mirror endpoint");
-    out.rounds_limit = AGENT_RUN_ROUNDS_DEFAULT;
-    out.rounds_used = AGENT_RUN_ROUNDS_DEFAULT;
+    out.rounds_limit = 16;
+    out.rounds_used = 16;
 
     char *tok = run_resume_emit(&r);
     CHECK(tok != NULL, "roundtrip: token emitted");
@@ -586,9 +586,32 @@ static void test_alt_retry(void)
     cJSON_Delete(cat);
 }
 
+/* N-7：轮次策略与停止原因。轮次默认不设机制上限（不再夹取 32），
+ * 请求值原样生效；停止原因在 done/cancelled/rounds_limit/budget 之间可判。 */
+static void test_round_policy(void)
+{
+    CHECK(rounds_resolve(7) == 7, "policy: explicit rounds honored");
+    CHECK(rounds_resolve(1000) == 1000, "policy: no mechanism hard cap");
+    CHECK(rounds_resolve(0) >= 0, "policy: auto resolves non-negative");
+    CHECK(tokens_resolve(500) == 500, "policy: explicit token budget honored");
+    CHECK(tokens_resolve(0) > 0, "policy: default token valve is finite");
+
+    CHECK(strcmp(run_stop_reason(0, 0, 0, 0), AIRY_RS_STOP_DONE) == 0,
+          "stop: success is done");
+    CHECK(strcmp(run_stop_reason(1, 1, 0, 0), AIRY_RS_STOP_CANCELLED) == 0,
+          "stop: cancel is cancelled");
+    CHECK(strcmp(run_stop_reason(AIRY_EBUDGET, 0, 0, 0), AIRY_RS_STOP_ROUNDS) == 0,
+          "stop: explicit round cap is rounds_limit");
+    CHECK(strcmp(run_stop_reason(AIRY_EBUDGET, 0, 1, 0), AIRY_RS_REASON_BUDGET) == 0,
+          "stop: token valve is budget");
+    CHECK(strcmp(run_stop_reason(AGENT_RUN_RC_TOOL_FUSE, 0, 0, 1), AIRY_RS_REASON_DENIED) == 0,
+          "stop: denied fuse is denied");
+}
+
 int main(void)
 {
     test_fail_streak();
+    test_round_policy();
     test_emit_delta();
     test_stream_result_free();
     test_orch_contract();

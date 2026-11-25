@@ -57,6 +57,7 @@ typedef struct {
     char *resume_out;           /* 本轮生成的续跑令牌（自持有，可 NULL） */
     int rounds_used;
     int rounds_limit;
+    const char *stop_reason;    /* N-7：静态串，来自工具循环终局分类 */
 
     char sess[AGENT_RUN_SESSION_ID_LEN];
     agent_run_session_t *active;
@@ -441,6 +442,7 @@ static void run_loop(run_ctx_t *c, const cJSON *history)
                                   .session = c->active,
                                   .sink = c->sink,
                                   .rounds = c->rounds,
+                                  .token_budget = c->task ? (uint64_t)c->task->budget_tokens : 0,
                                   .resume_token = c->resume_token,
                                   .allow_dangerous = c->task && c->task->allow_dangerous};
     agent_run_loop_result_t lr = {0};
@@ -455,6 +457,7 @@ static void run_loop(run_ctx_t *c, const cJSON *history)
     c->resume_out = lr.resume_token;
     c->rounds_used = lr.rounds_used;
     c->rounds_limit = lr.rounds_limit;
+    c->stop_reason = lr.stop_reason;
     c->tokens = lr.tokens;
     c->cost = lr.cost;
     c->tokens_in = lr.tokens_in;
@@ -959,6 +962,15 @@ static cJSON *run_fail_obj(const run_ctx_t *c)
     return f;
 }
 
+/* 停止原因（N-7）：工具循环未跑到时（如取值失败）按取消/错误兜底，
+ * 保证 result / run_end / error 三处字段恒在，客户端不必判空。 */
+static const char *run_stop_of(const run_ctx_t *c)
+{
+    if (c->stop_reason)
+        return c->stop_reason;
+    return c->cancelled ? AIRY_RS_STOP_CANCELLED : AIRY_RS_REASON_AGENT;
+}
+
 /* 契约字段：会话/任务元数据、终态、失败载荷、用量与续跑令牌。 */
 static void run_fill_meta(run_ctx_t *c, cJSON *result)
 {
@@ -996,6 +1008,7 @@ static void run_fill_meta(run_ctx_t *c, cJSON *result)
         cJSON_AddItemToObject(result, AIRY_RS_K_USAGE, usage);
     cJSON_AddNumberToObject(result, AIRY_RS_K_ROUNDS_USED, c->rounds_used);
     cJSON_AddNumberToObject(result, AIRY_RS_K_ROUNDS_LIMIT, c->rounds_limit);
+    cJSON_AddStringToObject(result, AIRY_RS_K_STOP_REASON, run_stop_of(c));
     if (c->resume_out) {
         cJSON_AddStringToObject(result, AIRY_RS_K_RESUME_TOKEN, c->resume_out);
         AIRY_FREE(c->resume_out);
@@ -1085,6 +1098,7 @@ static void run_tail_end(run_ctx_t *c, const cJSON *res, const cJSON *rt, bool r
     cJSON_AddNumberToObject(end, AIRY_RS_K_USE_TICKS, (double)c->tokens);
     cJSON_AddNumberToObject(end, AIRY_RS_K_ROUNDS_USED, c->rounds_used);
     cJSON_AddNumberToObject(end, AIRY_RS_K_ROUNDS_LIMIT, c->rounds_limit);
+    cJSON_AddStringToObject(end, AIRY_RS_K_STOP_REASON, run_stop_of(c));
     if (resumable)
         cJSON_AddStringToObject(end, AIRY_RS_K_RESUME_TOKEN, rt->valuestring);
     /* C-17：复核证据随终态帧下发（成功亦包含 ok=true），客户端据此逐条
@@ -1122,6 +1136,7 @@ static void run_tail_err(run_ctx_t *c, const cJSON *rt, bool resumable)
     cJSON_AddBoolToObject(err, AIRY_RS_K_RECOVER, 1);
     cJSON_AddNumberToObject(err, AIRY_RS_K_ROUNDS_USED, c->rounds_used);
     cJSON_AddNumberToObject(err, AIRY_RS_K_ROUNDS_LIMIT, c->rounds_limit);
+    cJSON_AddStringToObject(err, AIRY_RS_K_STOP_REASON, run_stop_of(c));
     if (resumable)
         cJSON_AddStringToObject(err, AIRY_RS_K_RESUME_TOKEN, rt->valuestring);
     cJSON *fail = run_fail_obj(c);

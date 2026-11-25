@@ -36,22 +36,36 @@
 /* 增量上屏的栈缓冲上限：常见逐字/逐片增量远小于此值，超限走堆。 */
 #define RUN_DELTA_STACK 1024
 
-/* 轮次预算解析：请求值优先；未给则读策略面环境变量；再缺省 16
- * （与执行体 TOOL_ROUNDS_DEFAULT 同值）；最后夹取到机制硬上限 32。
- * 策略只能收紧或放宽到上限，不能突破。 */
+/* 轮次上限解析（N-7）：请求值优先；未给则读策略面环境变量；都没有即 0
+ * （不设上限，运行到完成）。机制层不再设数字硬界——止损交给同参重复失败、
+ * token 预算与取消三个安全阀，轮次数字本身不是「失控」的判据。 */
 int rounds_resolve(int requested)
 {
-    int n = requested;
-    if (n <= 0) {
-        const char *env = getenv("AIRY_AGENT_TOOL_ROUNDS");
-        if (env && *env)
-            n = atoi(env);
+    if (requested > 0)
+        return requested;
+    const char *env = getenv("AIRY_AGENT_TOOL_ROUNDS");
+    if (env && *env) {
+        int n = atoi(env);
+        if (n >= 0)
+            return n;
     }
-    if (n <= 0)
-        n = AGENT_RUN_ROUNDS_DEFAULT;
-    if (n > AGENT_RUN_ROUNDS_MAX)
-        n = AGENT_RUN_ROUNDS_MAX;
-    return n;
+    return AGENT_RUN_ROUNDS_AUTO;
+}
+
+/* token 预算解析（N-7）：请求值优先；策略面覆盖（显式 0 = 不限）；否则机制
+ * 缺省。非法值按缺省处理——把解析失败当成「不限」会放走失控运行。 */
+uint64_t tokens_resolve(uint64_t requested)
+{
+    if (requested > 0)
+        return requested;
+    const char *env = getenv(AGENT_RUN_TOKENS_ENV);
+    if (env && *env) {
+        char *end = NULL;
+        unsigned long long v = strtoull(env, &end, 10);
+        if (end && *end == '\0')
+            return (uint64_t)v;
+    }
+    return AGENT_RUN_TOKENS_DEFAULT;
 }
 
 /* D-10：按原始退出码分类失败。只描述语义，不改码；retryable 表示原样重发
@@ -401,6 +415,9 @@ typedef struct loop_ctx_s {
     const char *cat_src;
     uint64_t cat_hash;
     int user_cancel; /* R11：在途工具调用被用户取消，本轮立即收口 */
+    int more;        /* 到点暂停时模型仍在推进（可续跑） */
+    int cancelled;   /* 本轮被用户/上层取消 */
+    int hit_tokens;  /* 停止原因是 token 预算越限（N-7 第二安全阀） */
 } loop_ctx_t;
 
 /* 历史判定只看非 system 消息：工具契约与记忆上下文由机制侧注入，
@@ -1461,21 +1478,43 @@ static int run_loop_init(loop_ctx_t *r, const agent_run_loop_args_t *args,
     return -1;
 }
 
-/* 主轮次推进；返回终局码，*more 表示预算耗尽时模型仍在推进。 */
-static int run_loop_rounds(loop_ctx_t *r, agent_run_loop_result_t *out, int limit, int *used,
-                           int *more, int *cancelled)
+/* 停止原因（N-7）：done / cancelled 之外一律复用失败原因词表，保证
+ * run_end / result / error 三处同源；显式轮次上限与 token 预算分开表述。 */
+static const char *run_stop_reason(int rc, int cancelled, int hit_tokens, int denied)
+{
+    if (cancelled || rc == 1)
+        return AIRY_RS_STOP_CANCELLED;
+    if (rc == 0)
+        return AIRY_RS_STOP_DONE;
+    if (rc == AIRY_EBUDGET)
+        return hit_tokens ? AIRY_RS_REASON_BUDGET : AIRY_RS_STOP_ROUNDS;
+    return agent_fail_desc(rc, denied).reason;
+}
+
+/* 主轮次推进（N-7）：limit<=0 不设上限，运行到完成；每轮先查取消与 token
+ * 预算，再由 run_step 推进一步。r->more 表示到点暂停时模型仍在推进（可
+ * 续跑），r->hit_tokens 区分 token 越限与显式轮次到点。 */
+static int run_loop_rounds(loop_ctx_t *r, agent_run_loop_result_t *out, int limit,
+                           uint64_t tokens)
 {
     int rc = -1;
 
-    for (int i = 0; i < limit; i++) {
-        *used = i + 1;
+    for (int i = 0; limit <= 0 || i < limit; i++) {
         /* 边界检查点与令牌复用同一轮次口径：先更新产物再进轮。 */
-        out->rounds_used = *used;
+        out->rounds_used = i + 1;
         if (agent_run_is_cancelled(r->args->session)) {
             SVC_LOG_INFO("agent.run: cancelled by user (session=%s)", r->sess ? r->sess : "?");
             rc = 1;
-            *cancelled = 1;
-            *more = 0;
+            r->cancelled = 1;
+            break;
+        }
+        /* token 安全阀只挡下一轮：已完成轮次的产物照常移交，命中按 budget
+         * 暂停并下发续跑令牌，而不是把已做的工作当失败丢弃。 */
+        if (i > 0 && tokens > 0 && out->tokens >= tokens) {
+            SVC_LOG_INFO("agent.run: token budget reached (limit=%llu used=%llu round=%d)",
+                         (unsigned long long)tokens, (unsigned long long)out->tokens, i + 1);
+            r->hit_tokens = 1;
+            r->more = 1;
             break;
         }
         agent_ledger_fit(&r->lg, r->messages);
@@ -1486,10 +1525,9 @@ static int run_loop_rounds(loop_ctx_t *r, agent_run_loop_result_t *out, int limi
         int st = run_step(r);
         if (st != 1) {
             rc = st;
-            *more = 0;
             break;
         }
-        *more = 1;
+        r->more = 1;
     }
     return rc;
 }
@@ -1555,9 +1593,6 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
 {
     loop_ctx_t r;
     int rc;
-    int more = 0;
-    int cancelled = 0;
-    int used = 0;
 
     if (!args || !out)
         return -1;
@@ -1566,22 +1601,24 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
 
     const int limit = rounds_resolve(args->rounds);
     out->rounds_limit = limit;
-    rc = run_loop_rounds(&r, out, limit, &used, &more, &cancelled);
+    rc = run_loop_rounds(&r, out, limit, tokens_resolve(args->token_budget));
     if (rc == AGENT_RUN_RC_TOOL_FUSE && r.fused)
         run_loop_fuse(&r, out);
     out->fail_denied = r.denied;
 
-    out->rounds_used = used;
-    /* 轮次预算耗尽不是崩溃：模型仍在推进（每轮都在调用工具），只是未收敛。
-     * 如实给出终局码与可读原因，并令 trace 随结果移交——此前这里 rc 停在
-     * -1，整轮产物被当作失败丢弃，调用方只得到一句通用错误。 */
-    if (more) {
+    /* 轮次/token 预算耗尽不是崩溃：模型仍在推进（每轮都在调用工具），只是
+     * 未收敛。如实给出终局码与可读原因，并令 trace 随结果移交——此前这里
+     * rc 停在 -1，整轮产物被当作失败丢弃，调用方只得到一句通用错误。 */
+    if (r.more) {
         rc = AIRY_EBUDGET;
         if (!r.text)
-            r.text = AIRY_STRDUP("Tool round budget exhausted; resume with the returned token");
+            r.text = AIRY_STRDUP(r.hit_tokens
+                                     ? "Token budget exhausted; resume with the returned token"
+                                     : "Tool round budget exhausted; resume with the returned token");
         /* 暂停即可续跑：令牌自包含已执行步骤与待续目标，客户端不必重发历史。 */
         out->resume_token = run_resume_emit(&r);
     }
-    run_loop_ckpt(&r, out, cancelled, rc);
+    out->stop_reason = run_stop_reason(rc, r.cancelled, r.hit_tokens, r.denied);
+    run_loop_ckpt(&r, out, r.cancelled, rc);
     return run_loop_fin(&r, out, rc);
 }

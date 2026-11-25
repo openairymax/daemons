@@ -103,7 +103,8 @@ typedef struct {
     const char *model;                       /* 模型名（非 NULL） */
     const agent_run_session_t *session;      /* 会话（轮间取消检查；可 NULL） */
     const agent_run_event_sink_t *sink;      /* run_stream 事件推送 sink（可 NULL） */
-    int rounds;                              /* 请求轮次预算（<=0 走策略缺省，夹取 [1,32]） */
+    int rounds;                              /* 请求轮次上限（<=0 = 不设上限，N-7） */
+    uint64_t token_budget;                   /* 请求 token 预算（0 = 取策略/机制缺省） */
     const char *resume_token;                /* 续跑令牌（可 NULL；非空时不重放全量历史） */
     bool allow_dangerous;                    /* 高危工具放行声明（透传 tool_d 审批门） */
 } agent_run_loop_args_t;
@@ -121,7 +122,10 @@ typedef struct {
     uint64_t llm_ms;   /* LLM 段累计耗时 */
     uint64_t tool_ms;  /* 工具段累计耗时 */
     int rounds_used;   /* 本轮实际消耗轮次 */
-    int rounds_limit;  /* 本轮生效轮次上限 */
+    int rounds_limit;  /* 本轮生效轮次上限（0 = 不设上限） */
+    /* 停止原因（N-7）：AIRY_RS_STOP_DONE / CANCELLED / ROUNDS 或
+     * AIRY_RS_REASON_*，静态串，不拥有内存。 */
+    const char *stop_reason;
     char fail_node[128]; /* 熔断工具 id（D-10 affected_node），无熔断为空 */
     int fail_denied;     /* D-10：失败前出现过审批/策略拒绝 */
     /* 上游失败明细（LLM 传输错误 / 'E' 帧码与文案）：终态错误帧优先采用，
@@ -142,8 +146,12 @@ typedef struct {
 /** @brief 按原始退出码分类失败（纯函数，无分配）。 */
 agent_fail_desc_t agent_fail_desc(int rc, int denied);
 
-/** @brief 轮次预算解析：请求 > 策略（AIRY_AGENT_TOOL_ROUNDS）> 缺省 8，夹取 [1,32]。 */
+/** @brief 轮次上限解析：请求 > 策略（AIRY_AGENT_TOOL_ROUNDS）> 0（不设上限）。 */
 int rounds_resolve(int requested);
+
+/** @brief token 预算解析：请求 > 策略（AIRY_AGENT_TOKEN_BUDGET，0=不限）
+ *         > 机制缺省 AGENT_RUN_TOKENS_DEFAULT。 */
+uint64_t tokens_resolve(uint64_t requested);
 
 /**
  * @brief ReAct 工具循环：LLM complete_stream -> 增量上屏 -> tool_calls ->
