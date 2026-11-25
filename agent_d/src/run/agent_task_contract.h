@@ -36,9 +36,6 @@ extern "C" {
 #define AGENT_TASK_MISSING_MAX 8    /* gccp_missing 槽位上限 */
 #define AGENT_TASK_MISSING_KEY_LEN 32 /* 单个缺失槽位名上界（含 NUL） */
 
-/* 缺省轮次预算沿用 C-14 的机制硬界 [1,32]；本入口只做夹取不另立上限。 */
-#define AGENT_TASK_ROUNDS_MAX 32
-
 /* 规则裁决阈值：长目标按字符（码点）计，与 §16.14.3 的 128 字基线一致。 */
 #define AGENT_TASK_LONG_GOAL_CHARS 128
 #define AGENT_TASK_SHORT_CHAT_CHARS 6
