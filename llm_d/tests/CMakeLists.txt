@@ -60,6 +60,8 @@ set(LLM_TEST_SOURCES
     # 0.1.21 C-19：角色槽位（tc3）单源——set 校验/落盘/重载、空槽位降级、
     # 悬空引用拒绝与旧 env 兼容
     test_slots.c
+    # 0.1.21 S30-P1-8：secrets.env 读前收紧 0600 与 env 覆盖优先级回归
+    test_secrets_perm.c
     # 0.1.20 Gate 37：计费热路径两臂证据（单请求 fsync 计数 + 对照臂 p99）
     bench_cost_hotpath.c
 )
