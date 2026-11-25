@@ -223,38 +223,11 @@ static int rpc_send_raw(int fd, const void *buf, int len)
 /** @brief 解析 "host:port" 并 TCP connect，返回 SOCKET（int）或 -1。 */
 static int rpc_connect(const char *socket_path)
 {
-    char host[128];
-    char port_str[16];
-    const char *colon = socket_path ? strrchr(socket_path, ':') : NULL;
-    if (!colon || colon == socket_path || (size_t)(colon - socket_path) >= sizeof(host) ||
-        strlen(colon + 1) >= sizeof(port_str)) {
-        SVC_LOG_ERROR("rpc_connect: invalid TCP endpoint '%s'", socket_path ? socket_path : "");
-        return -1;
-    }
-    size_t host_len = (size_t)(colon - socket_path);
-    __builtin_memcpy(host, socket_path, host_len);
-    host[host_len] = '\0';
-    strcpy(port_str, colon + 1);
-    uint16_t port = (uint16_t)atoi(port_str);
-    if (port == 0) {
-        SVC_LOG_ERROR("rpc_connect: invalid port in '%s'", socket_path);
-        return -1;
-    }
+    airy_sock_t fd = airy_sock_conn_endpoint(socket_path, 0);
 
-    SOCKET fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd == INVALID_SOCKET)
-        return -1;
-
-    struct sockaddr_in addr;
-    __builtin_memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    if (inet_pton(AF_INET, host, &addr.sin_addr) <= 0) {
-        addr.sin_addr.s_addr = INADDR_LOOPBACK;
-    }
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        SVC_LOG_ERROR("rpc_connect: connect(%s) failed: %d", socket_path, WSAGetLastError());
-        closesocket(fd);
+    if (fd == AIRY_INVALID_SOCKET) {
+        SVC_LOG_ERROR("rpc_connect: connect(%s) failed: %d", socket_path ? socket_path : "",
+                      WSAGetLastError());
         return -1;
     }
     return (int)fd;
