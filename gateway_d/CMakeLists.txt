@@ -157,7 +157,9 @@ target_include_directories(airy_gateway_service PUBLIC
     ${GATEWAY_INCLUDE_DIR}
     # Gateway 内部头文件（gateway_api.c 引用 http_gateway.h 等）
     ${GATEWAY_SRC_DIR}
-    ${GATEWAY_SRC_DIR}/gateway
+    # src/gateway 按协议族分层后的裸名解析面（与 gateway 模块共用同一份
+    # 清单，见 cmake/gateway-sources.cmake）
+    ${GATEWAY_COMMON_INCLUDE_DIRS}
     ${GATEWAY_SRC_DIR}/utils
     ${GATEWAY_SRC_DIR}/utils/syscall
     # Atom 模块（service.c 引用 "syscalls.h", "airy_rt.h"）
@@ -280,9 +282,9 @@ target_compile_definitions(gateway_lib_obj PUBLIC AIRY_HAS_CJSON)
 
 if(AIRY_HAS_LIBWEBSOCKETS)
     set_source_files_properties(
-        ${GATEWAY_SRC_DIR}/gateway/ws_gateway.c
-        ${GATEWAY_SRC_DIR}/gateway/ws_gateway_message.c
-        ${GATEWAY_SRC_DIR}/gateway/ws_gateway_callback.c
+        ${GATEWAY_SRC_DIR}/gateway/ws/ws_gateway.c
+        ${GATEWAY_SRC_DIR}/gateway/ws/ws_gateway_message.c
+        ${GATEWAY_SRC_DIR}/gateway/ws/ws_gateway_callback.c
         PROPERTIES COMPILE_DEFINITIONS "AIRY_COMPLIANCE_IMPL"
     )
 endif()
@@ -293,14 +295,14 @@ endif()
 # http2_gateway*.c 经共享清单无条件参与编译（缺库为空 TU），豁免必须
 # 无条件生效（与 gateway 模块一致），否则缺库平台会因 poisoned 失败。
 set_source_files_properties(
-    ${GATEWAY_SRC_DIR}/gateway/http2_gateway.c
-    ${GATEWAY_SRC_DIR}/gateway/http2_gateway_event.c
-    ${GATEWAY_SRC_DIR}/gateway/http2_gateway_frame.c
-    ${GATEWAY_SRC_DIR}/gateway/http2_gateway_headers.c
-    ${GATEWAY_SRC_DIR}/gateway/http2_gateway_response.c
-    ${GATEWAY_SRC_DIR}/gateway/http2_gateway_route.c
-    ${GATEWAY_SRC_DIR}/gateway/http2_gateway_session.c
-    ${GATEWAY_SRC_DIR}/gateway/http2_gateway_stream.c
+    ${GATEWAY_SRC_DIR}/gateway/http2/http2_gateway.c
+    ${GATEWAY_SRC_DIR}/gateway/http2/http2_gateway_event.c
+    ${GATEWAY_SRC_DIR}/gateway/http2/http2_gateway_frame.c
+    ${GATEWAY_SRC_DIR}/gateway/http2/http2_gateway_headers.c
+    ${GATEWAY_SRC_DIR}/gateway/http2/http2_gateway_response.c
+    ${GATEWAY_SRC_DIR}/gateway/http2/http2_gateway_route.c
+    ${GATEWAY_SRC_DIR}/gateway/http2/http2_gateway_session.c
+    ${GATEWAY_SRC_DIR}/gateway/http2/http2_gateway_stream.c
     PROPERTIES COMPILE_DEFINITIONS "AIRY_COMPLIANCE_IMPL"
 )
 # http2_gateway.c 内部使用 AIRY_HAS_HTTP2 宏控制真实/禁用实现
@@ -310,7 +312,9 @@ endif()
 target_include_directories(gateway_lib_obj PUBLIC
     ${GATEWAY_INCLUDE_DIR}
     ${GATEWAY_SRC_DIR}
-    ${GATEWAY_SRC_DIR}/gateway
+    # src/gateway 按协议族分层后的裸名解析面（与 gateway 模块共用同一份
+    # 清单，见 cmake/gateway-sources.cmake）
+    ${GATEWAY_COMMON_INCLUDE_DIRS}
     ${GATEWAY_SRC_DIR}/utils
     ${GATEWAY_SRC_DIR}/utils/syscall
     ${SYSCALL_INCLUDE_DIR}
