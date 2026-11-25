@@ -19,6 +19,7 @@
  */
 
 #include "sup_net.h"
+#include "daemon_platform_ext.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -188,21 +189,12 @@ static int probe_tcp(const char *ep)
 #else
 static int probe_unix(const char *path)
 {
-    struct sockaddr_un sa;
-    int fd, rc;
+    airy_sock_t fd = airy_sock_conn_unix(path, SUP_PROBE_TIMEOUT_MS);
 
-    if (strlen(path) >= sizeof(sa.sun_path))
-        return -1;
-    memset(&sa, 0, sizeof(sa));
-    sa.sun_family = AF_UNIX;
-    snprintf(sa.sun_path, sizeof(sa.sun_path), "%s", path);
-    fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0)
         return -1;
-    rc = sup_conn_wait(fd, (const struct sockaddr *)&sa, sizeof(sa),
-                       SUP_PROBE_TIMEOUT_MS);
     close(fd);
-    return rc;
+    return 0;
 }
 
 /* TCP 回环探活（与 probe_unix 同构；主机恒 127.0.0.1，直构 sockaddr_in） */

@@ -34,21 +34,16 @@
 /* 建立到 UNIX 端点的一次性连接：0 成功；失败返回 IO/TIMEOUT 且 fd 已关闭。 */
 static int chan_connect(const char *endpoint, int with_rcv, int *out_fd)
 {
-    struct sockaddr_un addr;
-    __builtin_memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    /* P1-1：超长 endpoint 显式失败，不静默截断到另一个 socket 地址。 */
-    if (strlen(endpoint) >= sizeof(addr.sun_path)) {
-        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "channel endpoint too long");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-    AIRY_STRNCPY_TERM(addr.sun_path, endpoint, sizeof(addr.sun_path));
-    addr.sun_path[sizeof(addr.sun_path) - 1] = '\0';
-
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    /* 地址填充与超长判定收敛在 commons/platform；此处只保留超时设置。 */
+    int fd = (int)airy_sock_conn_unix(endpoint, 0);
     if (fd < 0) {
-        AIRY_ERROR(AIRY_ERR_IO, "client socket creation failed");
-        return AIRY_ERR_IO;
+        if (errno == ENAMETOOLONG) {
+            AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "channel endpoint too long");
+            return AIRY_ERR_INVALID_PARAM;
+        }
+        int rc = (errno == EAGAIN || errno == ETIMEDOUT) ? AIRY_ERR_TIMEOUT : AIRY_ERR_IO;
+        AIRY_ERROR(rc, "channel endpoint connect failed");
+        return rc;
     }
     struct timeval tv;
     tv.tv_sec = 3;
@@ -56,11 +51,6 @@ static int chan_connect(const char *endpoint, int with_rcv, int *out_fd)
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     if (with_rcv)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        int rc = (errno == EAGAIN || errno == ETIMEDOUT) ? AIRY_ERR_TIMEOUT : AIRY_ERR_IO;
-        close(fd);
-        return rc;
-    }
     *out_fd = fd;
     return 0;
 }
