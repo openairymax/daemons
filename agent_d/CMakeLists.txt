@@ -18,6 +18,10 @@ set(DAEMON_COMMON_INCLUDE_DIR ${DAEMON_COMMON_DIR}/include)
 
 set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
+# 委派原语（N-8）：airy_delegate.h 为 coreloopthree 公共契约头，其内部
+# 引 airy_rt.h（corekern）。二者均非 commons 面，须显式补目录（sched_d
+# 同型先例：atoms 的 include 面只对显式消费者开放）。
+set(ATOMS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../atoms)
 
 # ==================== Agent 服务静态库 ====================
 # service 域独立静态库，供 agent_d 可执行文件与单元测试共用，
@@ -140,6 +144,8 @@ target_include_directories(agent_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/compat
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${COMMONS_INCLUDE_DIR}/utils/ds
+    ${ATOMS_DIR}/corekern/include
+    ${ATOMS_DIR}/coreloopthree/include
     ${CJSON_INCLUDE_DIRS}
 )
 
@@ -152,6 +158,9 @@ target_link_libraries(agent_d PRIVATE
 )
 # 0.1.19 §254b: boot 接线 vault 策略单元（daemon_dome_init_pep/_cleanup 符号面）
 target_link_libraries(agent_d PRIVATE airy_security_dome)
+# N-8：委派生命周期（create/assign/collect/cancel）走 coreloopthree 的
+# delegate 原语；静态归档只拉 delegate.o，不再在 daemon 内复制一份状态机。
+target_link_libraries(agent_d PRIVATE airy_coreloopthree)
 
 if(NOT MSVC)
 target_compile_options(agent_d PRIVATE

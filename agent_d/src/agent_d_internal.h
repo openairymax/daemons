@@ -35,6 +35,9 @@ extern uint64_t g_start_time;
  * 此处只暴露跨文件业务消费的容量键。 */
 typedef struct {
     size_t max_agents;
+    /* N-8：子任务委派配额。0 = 未配置，交策略面（环境变量/缺省）裁决。 */
+    int sub_depth;
+    int sub_conc;
 } agent_daemon_config_t;
 
 extern agent_daemon_config_t g_config;
