@@ -152,8 +152,8 @@ static airy_err_t sub_exec(const char *tool, const char *args, size_t alen, char
     (void)tool;
     (void)alen;
 
-    memset(&la, 0, sizeof(la));
-    memset(&res, 0, sizeof(res));
+    AIRY_MEMSET(&la, 0, sizeof(la));
+    AIRY_MEMSET(&res, 0, sizeof(res));
     la.prompt = args;
     la.model = c->model;
     la.session = c->session;
@@ -226,8 +226,8 @@ int sub_task_run(const agent_sub_req_t *q, agent_sub_out_t *out)
 
     if (!q || !out)
         return AIRY_EINVAL;
-    memset(out, 0, sizeof(*out));
-    memset(&c, 0, sizeof(c));
+    AIRY_MEMSET(out, 0, sizeof(*out));
+    AIRY_MEMSET(&c, 0, sizeof(c));
 
     args = cJSON_Parse(q->args && q->args[0] ? q->args : "{}");
     if (!args) {
@@ -286,7 +286,7 @@ int sub_task_run(const agent_sub_req_t *q, agent_sub_out_t *out)
         sub_ev(&c, AIRY_RS_TYPE_SUBAGENT_START, ev);
     }
 
-    memset(&cfg, 0, sizeof(cfg));
+    AIRY_MEMSET(&cfg, 0, sizeof(cfg));
     cfg.focus_prompt = goal;
     cfg.max_depth = sub_limits().max_depth;
     cfg.max_iterations = 1;
