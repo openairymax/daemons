@@ -55,6 +55,9 @@ void sub_limits_set(int max_depth, int max_conc);
 /** @brief 解析生效配额：配置 > 环境变量 > 缺省，逐项夹紧。 */
 agent_sub_limits_t sub_limits(void);
 
+/** @brief name 是否为委派工具（点号全等，不做前缀匹配；本判据只此一处）。 */
+int sub_is_tool(const char *name);
+
 /** @brief 当前线程调用链已处于第几层委派（顶层 run 为 0）。 */
 int sub_depth(void);
 

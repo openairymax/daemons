@@ -197,11 +197,6 @@ static airy_err_t sub_exec(const char *tool, const char *args, size_t alen, char
     return AIRY_ERR_UNKNOWN;
 }
 
-int sub_is_tool(const char *name)
-{
-    return name && strcmp(name, AGENT_SUB_TOOL) == 0;
-}
-
 /* 深度/并发配额的拒绝话术必须带生效值：模型据此知道原地收敛还是等待，
  * 运维据此判断是配置过小还是任务拆分过碎。 */
 static char *sub_deny(int depth_hit)

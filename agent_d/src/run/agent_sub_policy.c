@@ -9,6 +9,7 @@
 #include "agent_sub_policy.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "platform.h"
 
@@ -89,6 +90,11 @@ int sub_slot_try(void)
 void sub_slot_drop(void)
 {
     airy_atomic_fetch_sub(&g_live, 1);
+}
+
+int sub_is_tool(const char *name)
+{
+    return name && strcmp(name, AGENT_SUB_TOOL) == 0;
 }
 
 const char *sub_desc(void)

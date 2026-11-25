@@ -56,9 +56,6 @@ typedef struct {
     double cost;
 } agent_sub_out_t;
 
-/** @brief name 是否为委派工具（点号全等，不做前缀匹配）。 */
-int sub_is_tool(const char *name);
-
 /**
  * @brief 执行一次委派，把结论写入 out->text。
  *
