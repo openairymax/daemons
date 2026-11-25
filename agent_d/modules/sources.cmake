@@ -20,6 +20,8 @@ set(AGENT_D_SOURCES
     src/run/agent_run_loop.c
     src/run/agent_run_mem.c
     src/run/agent_run_stream.c
+    src/run/agent_run_sub.c
+    src/run/agent_sub_policy.c
     src/run/agent_task_ledger.c
     src/run/agent_task_orchestrate.c
     src/run/agent_turn_ckpt.c

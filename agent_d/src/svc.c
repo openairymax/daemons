@@ -16,6 +16,7 @@
 
 #include "agent_d_internal.h"
 #include "run/agent_run_internal.h"
+#include "run/agent_sub_policy.h"
 #include "run/agent_turn_ckpt.h"
 #include "airy_budget.h"
 #include "daemon_cfg_file.h"
@@ -37,6 +38,16 @@ static void cfg_keys(const cJSON *root, void *user)
     cJSON *item = cJSON_GetObjectItem(daemon_cfg, "max_agents");
     if (cJSON_IsNumber(item))
         g_config.max_agents = (size_t)item->valuedouble;
+
+    /* 委派配额（N-8）：只取配置文件里的显式值，未配置保持 0，由策略面
+     * 继续按环境变量/缺省解析——三层优先级不能在这里被提前定死。 */
+    cJSON *sub_cfg = cJSON_GetObjectItem(root, "subagent");
+    cJSON *depth = cJSON_GetObjectItem(sub_cfg, "max_depth");
+    cJSON *conc = cJSON_GetObjectItem(sub_cfg, "max_concurrent");
+    if (cJSON_IsNumber(depth))
+        g_config.sub_depth = depth->valueint;
+    if (cJSON_IsNumber(conc))
+        g_config.sub_conc = conc->valueint;
 }
 
 static void config_load(const char *config_path)
@@ -59,6 +70,7 @@ int svc_prepare(const char *config_path)
     airy_paths_init();
     g_start_time = (uint64_t)time(NULL);
     config_load(config_path);
+    sub_limits_set(g_config.sub_depth, g_config.sub_conc);
     SVC_LOG_INFO("Agent service starting, manager=%s",
                  config_path ? config_path : "default");
     g_service = agent_service_create(g_config.max_agents);

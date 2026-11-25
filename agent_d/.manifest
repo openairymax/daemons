@@ -42,6 +42,8 @@
       "run/agent_run_loop.c",
       "run/agent_run_mem.c",
       "run/agent_run_stream.c",
+      "run/agent_run_sub.c",
+      "run/agent_sub_policy.c",
       "run/agent_task_ledger.c",
       "run/agent_task_orchestrate.c",
       "run/agent_turn_ckpt.c",

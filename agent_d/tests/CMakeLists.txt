@@ -9,6 +9,7 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons)
 set(ATOMIC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../atoms)
 set(SYSCALL_INCLUDE_DIR ${ATOMIC_DIR}/syscall/include)
 set(COREKERN_INCLUDE_DIR ${ATOMIC_DIR}/corekern/include)
+set(CORELOOP_INCLUDE_DIR ${ATOMIC_DIR}/coreloopthree/include)
 
 set(AGENT_TEST_SOURCES
     test_service.c
@@ -17,6 +18,7 @@ set(AGENT_TEST_SOURCES
     test_run_open.c
     test_run_cancel.c
     test_run_stream.c
+    test_sub_policy.c
     test_task_orchestrate.c
     test_task_ledger.c
     test_turn_ckpt.c
@@ -46,6 +48,9 @@ set(AGENT_RUN_CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_turn_rec.c
     # S31-P0-1: exec 组装 messages 前调用记忆召回，白盒测试须同编该单元
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_mem.c
+    # N-8: 工具循环新增委派分支，白盒测试须同编策略面 + 机制件
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_sub_policy.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_sub.c
 )
 
 set(AGENT_COMMON_INCLUDES
@@ -67,6 +72,7 @@ set(AGENT_COMMON_INCLUDES
     ${COMMONS_DIR}/utils/hall
     ${SYSCALL_INCLUDE_DIR}
     ${COREKERN_INCLUDE_DIR}
+    ${CORELOOP_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
 )
 
@@ -122,6 +128,13 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
         )
     endif()
 
+    # N-8 配额策略面直测：进程内单编策略件（无 daemon/RPC 依赖）。
+    if(TEST_NAME STREQUAL "test_sub_policy")
+        target_sources(test_agent_${TEST_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_sub_policy.c
+        )
+    endif()
+
     target_include_directories(test_agent_${TEST_NAME} PRIVATE ${AGENT_COMMON_INCLUDES})
 
     target_link_libraries(test_agent_${TEST_NAME} PRIVATE
@@ -131,6 +144,12 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
         Threads::Threads
         airy_platform_libs
     )
+
+    # 同编委派机制件（agent_run_sub.c）的三个闭环测试需 delegate 符号面。
+    if(TEST_NAME STREQUAL "test_run_loop" OR TEST_NAME STREQUAL "test_run_open"
+       OR TEST_NAME STREQUAL "test_run_cancel")
+        target_link_libraries(test_agent_${TEST_NAME} PRIVATE airy_coreloopthree)
+    endif()
 
     if(AIRY_HAS_CJSON)
         target_link_libraries(test_agent_${TEST_NAME} PRIVATE cjson)
