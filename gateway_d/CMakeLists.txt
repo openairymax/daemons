@@ -435,7 +435,8 @@ target_include_directories(gateway_d PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/protocol
     ${GATEWAY_INCLUDE_DIR}
     ${GATEWAY_SRC_DIR}
-    ${GATEWAY_SRC_DIR}/gateway
+    # src/gateway 分层后的裸名解析面（SSoT 清单，禁止此处再拼子目录）
+    ${GATEWAY_COMMON_INCLUDE_DIRS}
     # 0.1.19 刀H：业务面头面（gateway_business_handler.h 等）随产品件迁出
     ${GATEWAY_BIZ_SRC_DIR}/include
     ${GATEWAY_SRC_DIR}/utils
