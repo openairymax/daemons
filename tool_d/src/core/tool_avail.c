@@ -68,7 +68,9 @@ static size_t sock_find(tool_avail_t *ta, const char *name)
 
 /* 单发可达探测：AF_UNIX connect 成功即可达。返回 1/0/-1（unknown）。
  * Windows 无法以 AF_UNIX 探测（maths_d 在 Windows 走 TCP），返回 unknown
- * 以保留既有暴露行为。 */
+ * 以保留既有暴露行为。
+ * 失败分档：端点侧失败（路径超长/不存在/拒连/超时）判不可达；本地资源
+ * 耗尽（fd 上限、内存不足）判 unknown，避免探测机制自身不可用时误摘工具。 */
 static int sock_probe(const char *name)
 {
 #ifdef _WIN32
@@ -81,7 +83,7 @@ static int sock_probe(const char *name)
 
     int fd = (int)airy_sock_conn_unix(path, 0);
     if (fd < 0)
-        return errno == ENAMETOOLONG ? 0 : -1;
+        return (errno == EMFILE || errno == ENFILE || errno == ENOMEM) ? -1 : 0;
     close(fd);
     return 1;
 #endif
