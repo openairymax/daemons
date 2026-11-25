@@ -128,7 +128,7 @@ foreach(TEST_SRC ${TEST_SOURCES})
         ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
         ${GATEWAY_INCLUDE_DIR}
         ${GATEWAY_SRC_DIR}
-        ${GATEWAY_SRC_DIR}/gateway
+        ${GATEWAY_COMMON_INCLUDE_DIRS}
         # 0.1.19 刀H：业务面头面随产品件迁出
         ${GATEWAY_BIZ_SRC_DIR}/include
         ${GATEWAY_SRC_DIR}/utils
