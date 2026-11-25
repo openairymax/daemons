@@ -31,6 +31,8 @@ set(AIRY_TRANSPORT_SOURCES
     src/core/secrets.c
     # 出网传输：URL/头链/超时/出站体
     src/core/http.c
+    # 单跳不跟随重定向的 GET（内置网络工具逐跳 SSRF 复核）
+    src/core/http_hop.c
     # 请求装配与响应解析信封
     src/core/envelope.c
     # 流式解析（SSE 帧）
