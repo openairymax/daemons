@@ -31,7 +31,7 @@
 #include "http2_gateway.h"
 #endif
 /* 入口鉴权纯策略（0.1.15 WS-2 T-11a bind 侧 fail-closed） */
-#include "gateway/gateway_auth.h"
+#include "gateway/auth/gateway_auth.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
