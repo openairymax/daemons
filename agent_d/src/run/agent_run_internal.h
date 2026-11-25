@@ -6,7 +6,9 @@
  * @brief Agent run engine 内部共享声明（模块私有，不对外导出）。
  *
  * agent_run_engine.c（会话注册表 + spec 解析 + 编排 + 主入口）与
- * agent_run_loop.c（工具循环 ReAct）之间的共享契约；RPC 适配层只依赖
+ * agent_run_loop.c（工具循环 ReAct）之间的共享契约；工具循环域的入参/
+ * 产物/策略解析单立在 agent_run_loop.h，事件通道在 agent_run_evt.h，
+ * 使循环与委派不必反向依赖引擎域头。RPC 适配层只依赖
  * agent_run_engine.h 的公共接口。
  */
 
@@ -93,79 +95,6 @@ typedef struct {
  * 载荷形状；调用方取得所有权（cJSON_Delete）；OOM 返回 NULL。
  */
 cJSON *agent_usage_obj(const agent_usage_in_t *in);
-
-/* ---- 工具循环域（agent_run_loop.c） ---- */
-
-/** 工具循环入参（契约 §6：超 4 参数以结构体封装）。 */
-typedef struct {
-    const char *prompt;                      /* 用户输入（history 为空时构造首条消息） */
-    const cJSON *history;                    /* OpenAI messages 数组（可 NULL） */
-    const char *model;                       /* 模型名（非 NULL） */
-    const agent_run_session_t *session;      /* 会话（轮间取消检查；可 NULL） */
-    const agent_run_event_sink_t *sink;      /* run_stream 事件推送 sink（可 NULL） */
-    int rounds;                              /* 请求轮次上限（<=0 = 不设上限，N-7） */
-    uint64_t token_budget;                   /* 请求 token 预算（0 = 取策略/机制缺省） */
-    const char *resume_token;                /* 续跑令牌（可 NULL；非空时不重放全量历史） */
-    bool allow_dangerous;                    /* 高危工具放行声明（透传 tool_d 审批门） */
-    /* 事件序号外部化（N-8）：嵌套 run（子任务）与父 run 共用一条序号，
-     * 调用方传入父计数器即可，NULL 则本 run 自持。 */
-    uint64_t *seq_ext;
-} agent_run_loop_args_t;
-
-/** 工具循环产物（成功/熔断/预算耗尽时所有权移交调用方）。 */
-typedef struct {
-    cJSON *trace;      /* 工具 trace 数组（调用方 cJSON_Delete）；无工具时为 NULL */
-    char *text;        /* 最终回复文本（AIRY_* 分配，调用方 AIRY_FREE） */
-    char *reason;      /* 累计思考链（AIRY_* 分配，可 NULL） */
-    char *resume_token;/* 预算耗尽时生成的续跑令牌（AIRY_* 分配，其余 NULL） */
-    uint64_t tokens;   /* 累计 token */
-    uint64_t tokens_in;  /* 累计 prompt token（provider 实报，未报为 0） */
-    uint64_t tokens_out; /* 累计 completion token（provider 实报，未报为 0） */
-    double cost;       /* 累计成本 */
-    uint64_t llm_ms;   /* LLM 段累计耗时 */
-    uint64_t tool_ms;  /* 工具段累计耗时 */
-    int rounds_used;   /* 本轮实际消耗轮次 */
-    int rounds_limit;  /* 本轮生效轮次上限（0 = 不设上限） */
-    /* 停止原因（N-7）：AIRY_RS_STOP_DONE / CANCELLED / ROUNDS 或
-     * AIRY_RS_REASON_*，静态串，不拥有内存。 */
-    const char *stop_reason;
-    char fail_node[128]; /* 熔断工具 id（D-10 affected_node），无熔断为空 */
-    int fail_denied;     /* D-10：失败前出现过审批/策略拒绝 */
-    /* 上游失败明细（LLM 传输错误 / 'E' 帧码与文案）：终态错误帧优先采用，
-     * 否则整条链路只剩一句兜底文案，客户端无法归类。 */
-    char fail_msg[256];
-    int fail_transport; /* 上游失败是否为传输层（决定是否可对用户说「不可达」） */
-    int fail_code;      /* 'E' 帧携带的真实上游码（0 = 未携带，仅有协议码） */
-} agent_run_loop_result_t;
-
-/** D-10 失败语义分类（纯函数，无分配）。 */
-typedef struct {
-    const char *origin;      /* AIRY_RS_ORIGIN_* */
-    const char *reason;      /* AIRY_RS_REASON_* */
-    int retryable;           /* 原样重试是否安全 */
-    const char *next_action; /* AIRY_RS_NEXT_* */
-} agent_fail_desc_t;
-
-/** @brief 按原始退出码分类失败（纯函数，无分配）。 */
-agent_fail_desc_t agent_fail_desc(int rc, int denied);
-
-/** @brief 轮次上限解析：请求 > 策略（AIRY_AGENT_TOOL_ROUNDS）> 0（不设上限）。 */
-int rounds_resolve(int requested);
-
-/** @brief token 预算解析：请求 > 策略（AIRY_AGENT_TOKEN_BUDGET，0=不限）
- *         > 机制缺省 AGENT_RUN_TOKENS_DEFAULT。 */
-uint64_t tokens_resolve(uint64_t requested);
-
-/**
- * @brief ReAct 工具循环：LLM complete_stream -> 增量上屏 -> tool_calls ->
- *        tool_d 执行 -> 回填 -> 继续。
- *
- * @param args 入参（非 NULL）
- * @param out  产物（非 NULL；成功与熔断时按上述所有权移交）
- * @return 0 成功；1 用户取消；AGENT_RUN_RC_TOOL_FUSE 熔断；
- *         AIRY_EBUDGET 轮次预算耗尽（产物照常移交）；负值失败
- */
-int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result_t *out);
 
 /* ---- 流式域（agent_run_stream.c） ---- */
 

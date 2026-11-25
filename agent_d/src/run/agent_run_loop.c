@@ -12,6 +12,7 @@
  */
 
 #include "agent_run_internal.h"
+#include "agent_run_loop.h"
 
 #include "agent_run_alt.h"
 #include "agent_run_sub.h"

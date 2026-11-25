@@ -20,11 +20,14 @@
 
 #include <stdint.h>
 
-#include "agent_run_engine.h"
+/* 只借事件通道（帧归组用）；会话类型仅作前置声明，不把引擎域头拉进委派层 */
+#include "agent_run_evt.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+struct agent_run_session_s;
 
 /* 子任务标识上界：随帧下发，客户端按它把子代理的步骤归到同一棵子树。 */
 #define AGENT_SUB_ID_LEN 40
@@ -33,7 +36,7 @@ extern "C" {
 typedef struct {
     const char *args;                 /* tool_call arguments JSON（goal/context/budget） */
     const char *model;                /* 父 run 生效模型（子任务同模型） */
-    const agent_run_session_t *session; /* 父会话（取消下探用） */
+    const struct agent_run_session_s *session; /* 父会话（取消下探用） */
     const agent_run_event_sink_t *sink; /* 父事件通道（可 NULL） */
     uint64_t *seq;                    /* 父事件序号计数器（可 NULL） */
     const char *run_id;               /* 父 run 标识（可 NULL） */
