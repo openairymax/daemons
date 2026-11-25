@@ -40,6 +40,27 @@ int prov_probe_get(const provider_base_ctx_t *base, const char *path,
  * 时延 p99 推导（floor 120s，无样本 180s）。返回值恒 > 0。 */
 double provider_budget_sec(const provider_base_ctx_t *base);
 
+/* 单跳 GET 请求面：不跟随重定向，供需要逐跳复核 URL 策略的调用方
+ * （内置网络工具的 SSRF 防护）使用。max_body=0 表示不限制体积。 */
+typedef struct {
+    const char *url;
+    struct curl_slist *headers;
+    double timeout_sec;
+    size_t max_body;
+} prov_hop_req_t;
+
+/* 单跳 GET 结果面：传输完成（含 4xx/5xx）返回 AIRY_OK；失败返回 AIRY_ERR_*
+ * 并在 why 里给出阶段诊断。response 与 location 归调用方释放
+ * （provider_http_resp_free / AIRY_FREE）。3xx 才交付 location。 */
+typedef struct {
+    provider_http_resp_t *response;
+    long http_code;
+    char *location;
+    char why[128];
+} prov_hop_resp_t;
+
+int prov_hop_get(const prov_hop_req_t *req, prov_hop_resp_t *out);
+
 #ifdef __cplusplus
 }
 #endif

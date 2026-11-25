@@ -6,7 +6,7 @@
  * @brief Redirect-safe HTTP(S) GET shared by web_fetch and web_search.
  *
  *        Requests are issued in process through the providers transport
- *        (airy_prov/provider_transport.h) instead of an external curl child
+ *        (airy_prov/provider_http.h) instead of an external curl child
  *        process: slim Windows/macOS images ship no curl binary, and a
  *        missing binary made every fetch indistinguishable from being
  *        offline. Transport failures now carry the failing stage
@@ -21,7 +21,7 @@
 
 #include "builtin/builtin_net_internal.h"
 
-#include "airy_prov/provider_transport.h"
+#include "airy_prov/provider_http.h"
 
 #include "builtin/builtin_limits_internal.h"
 
@@ -70,14 +70,14 @@ int net_http_get(const net_http_req_t *req, net_http_resp_t *resp)
             return -1;
         }
 
-        provider_hop_req_t hreq;
+        prov_hop_req_t hreq;
         hreq.url = cur;
         hreq.headers = req->headers;
         hreq.timeout_sec = (double)budget_ms / 1000.0;
         hreq.max_body = BUILTIN_OUTPUT_CAP;
 
-        provider_hop_resp_t hout;
-        int rc = provider_http_hop_get(&hreq, &hout);
+        prov_hop_resp_t hout;
+        int rc = prov_hop_get(&hreq, &hout);
         if (rc != AIRY_OK) {
             snprintf(resp->why, sizeof(resp->why), "http transport: %s",
                      hout.why[0] ? hout.why : "failed");
