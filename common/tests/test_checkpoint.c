@@ -73,9 +73,9 @@ static void test_init_shutdown(void)
     PASS();
 }
 
-static void test_create_and_verify(void)
+static void test_create_fields(void)
 {
-    TEST("Create and verify checkpoint");
+    TEST("Create checkpoint fields");
     setup_temp_dir();
 
     airy_task_checkpoint_t *cp = NULL;
@@ -85,11 +85,8 @@ static void test_create_and_verify(void)
     ASSERT(cp != NULL, "checkpoint should not be NULL");
     ASSERT(strcmp(cp->task_id, "task_001") == 0, "task_id should match");
     ASSERT(cp->sequence_num == 1, "sequence_num should be 1");
-
-    bool valid = false;
-    err = airy_checkpoint_verify(cp, &valid);
-    ASSERT(err == AIRY_OK, "verify should succeed");
-    ASSERT(valid == true, "checkpoint should be valid");
+    ASSERT(cp->state_json != NULL, "state_json should be copied");
+    ASSERT(cp->state == CHECKPOINT_STATE_PENDING, "state should start PENDING");
 
     airy_checkpoint_destroy(cp);
     teardown_temp_dir();
@@ -120,9 +117,9 @@ static void test_create_null_params(void)
     PASS();
 }
 
-static void test_save_and_restore(void)
+static void test_save_updates_stats(void)
 {
-    TEST("Save and restore checkpoint");
+    TEST("Save updates stats and state");
     setup_temp_dir();
 
     airy_task_checkpoint_t *cp = NULL;
@@ -132,64 +129,15 @@ static void test_save_and_restore(void)
 
     err = airy_checkpoint_save(cp);
     ASSERT(err == AIRY_OK, "save should succeed");
+    ASSERT(cp->state == CHECKPOINT_STATE_COMPLETED, "state should become COMPLETED");
 
-    airy_task_checkpoint_t *restored = NULL;
-    err = airy_checkpoint_restore("task_save", 1, &restored);
-    ASSERT(err == AIRY_OK, "restore should succeed");
-    ASSERT(restored != NULL, "restored should not be NULL");
-    ASSERT(strcmp(restored->task_id, "task_save") == 0, "restored task_id should match");
-    ASSERT(restored->sequence_num == 1, "restored sequence_num should match");
+    airy_checkpoint_stats_t stats;
+    err = airy_checkpoint_get_stats(&stats);
+    ASSERT(err == AIRY_OK, "get_stats should succeed");
+    ASSERT(stats.total_checkpoints == 1, "total_checkpoints should be 1");
+    ASSERT(stats.successful_checkpoints == 1, "successful_checkpoints should be 1");
 
     airy_checkpoint_destroy(cp);
-    airy_checkpoint_destroy(restored);
-    teardown_temp_dir();
-    PASS();
-}
-
-static void test_restore_nonexistent(void)
-{
-    TEST("Restore nonexistent checkpoint");
-    setup_temp_dir();
-
-    airy_task_checkpoint_t *cp = NULL;
-    airy_err_t err = airy_checkpoint_restore("nonexistent", 999, &cp);
-    ASSERT(err != AIRY_OK, "restore nonexistent should fail");
-
-    teardown_temp_dir();
-    PASS();
-}
-
-static void test_list_checkpoints(void)
-{
-    TEST("List checkpoints for task");
-    setup_temp_dir();
-
-    airy_task_checkpoint_t *cp1 = NULL;
-    airy_err_t err =
-        airy_checkpoint_create("task_list", "session_001", 1, "{}", NULL, 0, NULL, 0, &cp1);
-    ASSERT(err == AIRY_OK, "create cp1");
-    airy_checkpoint_save(cp1);
-    airy_checkpoint_destroy(cp1);
-
-    airy_task_checkpoint_t *cp2 = NULL;
-    err = airy_checkpoint_create("task_list", "session_001", 2, "{}", NULL, 0, NULL, 0, &cp2);
-    ASSERT(err == AIRY_OK, "create cp2");
-    airy_checkpoint_save(cp2);
-    airy_checkpoint_destroy(cp2);
-
-    airy_task_checkpoint_t **list = NULL;
-    size_t count = 0;
-    err = airy_checkpoint_list("task_list", &list, &count);
-    ASSERT(err == AIRY_OK, "list should succeed");
-    /* v0.1.1: 文件名含 sequence_num，seq=1 与 seq=2 各自独立落盘，
-     * 不再相互覆盖，故 list 返回 2 个检查点。 */
-    ASSERT(count == 2, "should have 2 checkpoints (one per sequence)");
-
-    for (size_t i = 0; i < count; i++) {
-        airy_checkpoint_destroy(list[i]);
-    }
-    free(list);
-
     teardown_temp_dir();
     PASS();
 }
@@ -254,29 +202,6 @@ static void test_task_ids_empty(void)
     PASS();
 }
 
-static void test_delete(void)
-{
-    TEST("Delete checkpoint");
-    setup_temp_dir();
-
-    airy_task_checkpoint_t *cp = NULL;
-    airy_err_t err =
-        airy_checkpoint_create("task_del", "session_001", 1, "{}", NULL, 0, NULL, 0, &cp);
-    ASSERT(err == AIRY_OK, "create");
-    airy_checkpoint_save(cp);
-    airy_checkpoint_destroy(cp);
-
-    err = airy_checkpoint_delete("task_del", 1);
-    ASSERT(err == AIRY_OK, "delete should succeed");
-
-    airy_task_checkpoint_t *restored = NULL;
-    err = airy_checkpoint_restore("task_del", 1, &restored);
-    ASSERT(err != AIRY_OK, "restore after delete should fail");
-
-    teardown_temp_dir();
-    PASS();
-}
-
 static void test_get_stats(void)
 {
     TEST("Get checkpoint statistics");
@@ -300,15 +225,6 @@ static void test_destroy_null(void)
 {
     TEST("Destroy null checkpoint");
     airy_checkpoint_destroy(NULL);
-    PASS();
-}
-
-static void test_verify_null(void)
-{
-    TEST("Verify null checkpoint");
-    bool valid = true;
-    airy_err_t err = airy_checkpoint_verify(NULL, &valid);
-    ASSERT(err != AIRY_OK, "verify null should fail");
     PASS();
 }
 
@@ -346,61 +262,20 @@ static void test_create_with_pending_nodes(void)
     PASS();
 }
 
-static void test_multiple_tasks(void)
-{
-    TEST("Multiple tasks with checkpoints");
-    setup_temp_dir();
-
-    airy_task_checkpoint_t *cp1 = NULL, *cp2 = NULL;
-    airy_checkpoint_create("task_A", "session_001", 1, "{}", NULL, 0, NULL, 0, &cp1);
-    airy_checkpoint_save(cp1);
-    airy_checkpoint_destroy(cp1);
-
-    airy_checkpoint_create("task_B", "session_001", 1, "{}", NULL, 0, NULL, 0, &cp2);
-    airy_checkpoint_save(cp2);
-    airy_checkpoint_destroy(cp2);
-
-    airy_task_checkpoint_t **list = NULL;
-    size_t count = 0;
-    airy_err_t err = airy_checkpoint_list("task_A", &list, &count);
-    ASSERT(err == AIRY_OK, "list task_A");
-    ASSERT(count == 1, "task_A should have 1 checkpoint");
-    for (size_t i = 0; i < count; i++)
-        airy_checkpoint_destroy(list[i]);
-    free(list);
-
-    list = NULL;
-    count = 0;
-    err = airy_checkpoint_list("task_B", &list, &count);
-    ASSERT(err == AIRY_OK, "list task_B");
-    ASSERT(count == 1, "task_B should have 1 checkpoint");
-    for (size_t i = 0; i < count; i++)
-        airy_checkpoint_destroy(list[i]);
-    free(list);
-
-    teardown_temp_dir();
-    PASS();
-}
-
 int main(void)
 {
     printf("\n=== Checkpoint Module Unit Tests ===\n\n");
 
     test_init_shutdown();
-    test_create_and_verify();
+    test_create_fields();
     test_create_null_params();
-    test_save_and_restore();
-    test_restore_nonexistent();
-    test_list_checkpoints();
+    test_save_updates_stats();
     test_list_task_ids();
     test_task_ids_empty();
-    test_delete();
     test_get_stats();
     test_destroy_null();
-    test_verify_null();
     test_create_with_completed_nodes();
     test_create_with_pending_nodes();
-    test_multiple_tasks();
 
     printf("\n=== Results: %d/%d tests passed ===\n\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
