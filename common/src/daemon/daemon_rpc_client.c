@@ -223,7 +223,7 @@ static int rpc_send_raw(int fd, const void *buf, int len)
 /** @brief 解析 "host:port" 并 TCP connect，返回 SOCKET（int）或 -1。 */
 static int rpc_connect(const char *socket_path)
 {
-    airy_sock_t fd = airy_sock_conn_endpoint(socket_path, 0);
+    airy_sock_t fd = airy_sock_conn_ep(socket_path, 0);
 
     if (fd == AIRY_INVALID_SOCKET) {
         SVC_LOG_ERROR("rpc_connect: connect(%s) failed: %d", socket_path ? socket_path : "",
