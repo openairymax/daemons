@@ -19,6 +19,7 @@
 #include <stdarg.h>
 
 #include "platform.h"
+#include "daemon_platform_ext.h"
 #include "builtin/builtin_maths_internal.h"
 
 #ifndef _WIN32
@@ -37,21 +38,10 @@
 /* 连接 maths_d socket；成功返回 fd，失败返回负错误码（res 已置）。 */
 static int maths_connect(const char *sock_path, tool_result_t *res)
 {
-    int fd = (int)socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0)
-        return btool_fail(res, AIRY_ERR_EXEC_FAIL, "maths_d: socket() failed");
-
-    struct sockaddr_un addr;
-    AIRY_MEMSET(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    if (strlen(sock_path) >= sizeof(addr.sun_path)) {
-        close(fd);
-        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "maths_d socket path too long");
-    }
-    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", sock_path);
-
-    if (connect(fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        close(fd);
+    int fd = (int)airy_sock_conn_unix(sock_path, 0);
+    if (fd < 0) {
+        if (errno == ENAMETOOLONG)
+            return btool_fail(res, AIRY_ERR_INVALID_PARAM, "maths_d socket path too long");
         return btool_fail(res, AIRY_ERR_STATE_ERROR,
                           "maths_d not reachable at %s (is maths_d running?)", sock_path);
     }

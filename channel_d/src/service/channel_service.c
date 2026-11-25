@@ -80,35 +80,14 @@ void backend_entry_free(channel_entry_t *entry)
 
 static int create_socket_channel(channel_entry_t *entry, const char *endpoint)
 {
-    struct sockaddr_un addr;
-    __builtin_memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    /* P1-1：超长 endpoint 不静默截断（unlink 与 bind 会指向不同路径）。 */
-    if (strlen(endpoint) >= sizeof(addr.sun_path)) {
-        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "channel endpoint too long");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-    AIRY_STRNCPY_TERM(addr.sun_path, endpoint, sizeof(addr.sun_path));
-    (addr.sun_path)[sizeof(addr.sun_path) - 1] = '\0';
-
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    /* 清理陈旧节点 → bind → listen 收敛在 commons/platform。 */
+    int fd = (int)airy_sock_bind_unix(endpoint, 128, 0);
     if (fd < 0) {
-        AIRY_ERROR(AIRY_ERR_IO, "socket creation failed");
-        return AIRY_ERR_IO;
-    }
-
-    unlink(endpoint);
-
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        close(fd);
-        AIRY_ERROR(AIRY_ERR_IO, "bind failed on endpoint");
-        return AIRY_ERR_IO;
-    }
-
-    if (listen(fd, 128) < 0) {
-        close(fd);
-        unlink(endpoint);
-        AIRY_ERROR(AIRY_ERR_IO, "listen failed on endpoint");
+        if (errno == ENAMETOOLONG) {
+            AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "channel endpoint too long");
+            return AIRY_ERR_INVALID_PARAM;
+        }
+        AIRY_ERROR(AIRY_ERR_IO, "bind/listen failed on endpoint");
         return AIRY_ERR_IO;
     }
 

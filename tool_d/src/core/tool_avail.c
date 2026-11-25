@@ -9,13 +9,15 @@
  *   1. 出网一律在锁外完成（仿 llm_d ep_health）：锁内取目标快照 →
  *      锁外 connect 探测 → 锁内按名回填，绝不持锁做 I/O。
  *   2. 依赖目标只存 socket 文件名：airy_runtime_dir_socket() 返回线程
- *      局部缓冲，指针跨线程不可留存；探测时按名即时取路径并立即拷入
- *      栈上 sockaddr_un。
+ *      局部缓冲，指针跨线程不可留存；探测时按名即时取路径并交给
+ *      commons/platform 的 AF_UNIX 连接原语。
  */
 
 #include "airy_memory.h"
 #include "daemon_platform_ext.h"
 #include "error.h"
+
+#include <errno.h>
 #include "platform_paths.h"
 #include "svc_logger.h"
 #include "core/tool_avail.h"
@@ -77,19 +79,11 @@ static int sock_probe(const char *name)
     if (!path || !path[0])
         return -1;
 
-    struct sockaddr_un addr;
-    AIRY_MEMSET(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    if (strlen(path) >= sizeof(addr.sun_path))
-        return 0;
-    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
-
-    int fd = (int)socket(AF_UNIX, SOCK_STREAM, 0);
+    int fd = (int)airy_sock_conn_unix(path, 0);
     if (fd < 0)
-        return -1;
-    int rc = connect(fd, (const struct sockaddr *)&addr, sizeof(addr));
+        return errno == ENAMETOOLONG ? 0 : -1;
     close(fd);
-    return rc == 0 ? 1 : 0;
+    return 1;
 #endif
 }
 

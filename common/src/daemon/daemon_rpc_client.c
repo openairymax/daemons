@@ -40,6 +40,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "platform_misc.h"
+#include "daemon_platform_ext.h"
 
 #include <cjson/cJSON.h>
 
@@ -160,37 +161,18 @@ static void rpc_close_fd(int fd)
  */
 static int rpc_connect(const char *socket_path)
 {
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    /* 地址填充与超长判定收敛在 commons/platform；此处只保留日志与哨兵语义。 */
+    int fd = (int)airy_sock_conn_unix(socket_path, 0);
     if (fd < 0) {
-        SVC_LOG_ERROR("rpc_connect: socket() failed: %s", strerror(errno));
-        return -1;
-    }
-
-    struct sockaddr_un addr;
-    __builtin_memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    /* P1-1：sun_path 定长 108 字节，超长路径必须显式失败。此前用
-     * strncpy(n-1) 静默截断，connect 会落到另一个 socket 或连到一半
-     * 的地址上，错误码仍是「connect 失败」，现场极难定位。 */
-    if (strlen(socket_path) >= sizeof(addr.sun_path)) {
-        SVC_LOG_ERROR("rpc_connect: socket path too long (%zu >= %zu): %s",
-                      strlen(socket_path), sizeof(addr.sun_path), socket_path);
-        close(fd);
-        return -1;
-    }
-    /* Use __builtin_strncpy to avoid the compile-time error from BAN-211/235
-     * banning strncpy (same policy as daemons/common/src/platform_compat.c) */
-    __builtin_strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
-
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        int saved_errno = errno;
-        close(fd);
-        /* Return a plain negative sentinel, NOT a negated AIRY_ERR_* code:
-         * error codes are already negative (e.g. AIRY_ERR_NOT_FOUND = -6),
-         * so negating them yields a positive value that callers misread as
-         * a valid fd and send() on it (misleading "send failed" reports). */
-        SVC_LOG_ERROR("rpc_connect: connect(%s) failed: %s", socket_path,
-                      strerror(saved_errno));
+        if (errno == ENAMETOOLONG) {
+            SVC_LOG_ERROR("rpc_connect: socket path too long: %s", socket_path);
+        } else {
+            /* Return a plain negative sentinel, NOT a negated AIRY_ERR_* code:
+             * error codes are already negative (e.g. AIRY_ERR_NOT_FOUND = -6),
+             * so negating them yields a positive value that callers misread as
+             * a valid fd and send() on it (misleading "send failed" reports). */
+            SVC_LOG_ERROR("rpc_connect: connect(%s) failed: %s", socket_path, strerror(errno));
+        }
         return -1;
     }
     return fd;

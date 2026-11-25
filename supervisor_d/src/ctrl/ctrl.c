@@ -17,6 +17,7 @@
  */
 
 #include "supervisor_d_internal.h"
+#include "daemon_platform_ext.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,23 +42,9 @@ int sup_ctrl_listen(const sup_ctx_t *ctx)
 #ifdef _WIN32
     return sup_tcp_bind(ctx->ctrl_ep);
 #else
-    struct sockaddr_un sa;
-    if (strlen(ctx->ctrl_ep) >= sizeof(sa.sun_path))
-        return -1;
-    unlink(ctx->ctrl_ep); /* 幂等补拉：清 stale socket */
-    memset(&sa, 0, sizeof(sa));
-    sa.sun_family = AF_UNIX;
-    snprintf(sa.sun_path, sizeof(sa.sun_path), "%s", ctx->ctrl_ep);
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0)
-        return -1;
-    if (bind(fd, (const struct sockaddr *)&sa, sizeof(sa)) != 0 ||
-        chmod(ctx->ctrl_ep, 0600) != 0 || listen(fd, 4) != 0) {
-        close(fd);
-        unlink(ctx->ctrl_ep);
-        return -1;
-    }
-    return fd;
+    /* 端点仪式收敛到 commons/platform：清理陈旧节点 → bind → chmod 0600 → listen。 */
+    int fd = (int)airy_sock_bind_unix(ctx->ctrl_ep, 4, 0600);
+    return fd < 0 ? -1 : fd;
 #endif
 }
 
@@ -252,19 +239,9 @@ static int client_run(const sup_ctx_t *ctx, const char *req)
     if (fd < 0)
         return -1;
 #else
-    struct sockaddr_un sa;
-    if (strlen(ctx->ctrl_ep) >= sizeof(sa.sun_path))
-        return -1;
-    memset(&sa, 0, sizeof(sa));
-    sa.sun_family = AF_UNIX;
-    snprintf(sa.sun_path, sizeof(sa.sun_path), "%s", ctx->ctrl_ep);
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    int fd = (int)airy_sock_conn_unix(ctx->ctrl_ep, 0);
     if (fd < 0)
         return -1;
-    if (connect(fd, (const struct sockaddr *)&sa, sizeof(sa)) != 0) {
-        close(fd);
-        return -1;
-    }
 #endif
     size_t len = strlen(req);
     size_t off = 0;
