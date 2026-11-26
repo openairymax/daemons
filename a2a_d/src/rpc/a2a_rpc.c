@@ -120,7 +120,7 @@ static void handle_unregister_agent(cJSON *params, int id, airy_sock_t client_fd
 
     char *result_json = NULL;
     int ret = a2a_service_unregister_agent(g_service, agent_id->valuestring, &result_json);
-    reply_result(client_fd, id, ret, result_json, JSONRPC_METHOD_NOT_FOUND,
+    reply_result(client_fd, id, ret, result_json, JSONRPC_NOT_FOUND,
                  "Agent not found", NULL);
 }
 
@@ -174,7 +174,7 @@ static void handle_update_task(cJSON *params, int id, airy_sock_t client_fd)
     char *result_json = NULL;
     int ret = a2a_service_update_task(g_service, task_id->valuestring, state->valueint, output_str,
                                       prog, &result_json);
-    reply_result(client_fd, id, ret, result_json, JSONRPC_METHOD_NOT_FOUND,
+    reply_result(client_fd, id, ret, result_json, JSONRPC_NOT_FOUND,
                  "Task not found", NULL);
 }
 
@@ -189,7 +189,7 @@ static void handle_cancel_task(cJSON *params, int id, airy_sock_t client_fd)
 
     char *result_json = NULL;
     int ret = a2a_service_cancel_task(g_service, task_id->valuestring, reason_str, &result_json);
-    reply_result(client_fd, id, ret, result_json, JSONRPC_METHOD_NOT_FOUND,
+    reply_result(client_fd, id, ret, result_json, JSONRPC_NOT_FOUND,
                  "Task not found", NULL);
 }
 
@@ -200,7 +200,7 @@ static void handle_get_task(cJSON *params, int id, airy_sock_t client_fd)
 
     char *result_json = NULL;
     int ret = a2a_service_get_task(g_service, task_id->valuestring, &result_json);
-    reply_result(client_fd, id, ret, result_json, JSONRPC_METHOD_NOT_FOUND,
+    reply_result(client_fd, id, ret, result_json, JSONRPC_NOT_FOUND,
                  "Task not found", NULL);
 }
 

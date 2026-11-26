@@ -182,7 +182,7 @@ static void handle_uninst_agent(cJSON *params, int id, airy_sock_t client_fd)
     int ret = market_service_uninstall_agent(g_service, aid);
 
     if (ret == AIRY_ERR_NOT_FOUND) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Agent not found", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_NOT_FOUND, "Agent not found", id);
         return;
     }
     if (ret != AIRY_SUCCESS) {
@@ -271,7 +271,7 @@ static void handle_uninst_skill(cJSON *params, int id, airy_sock_t client_fd)
     int ret = market_service_uninstall_skill(g_service, sid);
 
     if (ret == AIRY_ERR_NOT_FOUND) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Skill not found", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_NOT_FOUND, "Skill not found", id);
         return;
     }
     if (ret != AIRY_SUCCESS) {
@@ -297,7 +297,7 @@ static void handle_check_update(cJSON *params, int id, airy_sock_t client_fd)
     int ret = market_service_check_update(g_service, target, &has_update, &latest);
 
     if (ret == AIRY_ERR_NOT_FOUND) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Id not found", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_NOT_FOUND, "Id not found", id);
         return;
     }
     if (ret != AIRY_SUCCESS) {

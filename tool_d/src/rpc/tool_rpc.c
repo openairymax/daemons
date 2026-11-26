@@ -170,7 +170,7 @@ static void handle_get(cJSON *params, int id, airy_sock_t client_fd)
 
     tool_metadata_t *meta = tool_service_get(g_service, tid);
     if (!meta) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Tool not found", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_NOT_FOUND, "Tool not found", id);
         return;
     }
 

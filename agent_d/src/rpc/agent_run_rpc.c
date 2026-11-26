@@ -507,7 +507,7 @@ static void handle_cancel(cJSON *params, int id, airy_sock_t client_fd)
     int rc = agent_run_cancel_by_session(sid->valuestring, who);
     if (rc != AIRY_SUCCESS) {
         SVC_LOG_DEBUG("agent.cancel miss (session=%s, 请求已完成或不存在)", sid->valuestring);
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND,
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_NOT_FOUND,
                            "No active request with given session_id", id);
         return;
     }

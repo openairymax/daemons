@@ -80,7 +80,7 @@ static void srpc_execute(cJSON *params, int id, void *user_data)
     char *output = NULL;
     airy_err_t err = airy_sys_skill_execute(skill_id, input, &output);
     if (err == AIRY_ENOENT) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Skill not found", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_NOT_FOUND, "Skill not found", id);
         return;
     }
     if (err != AIRY_SUCCESS) {
@@ -102,7 +102,7 @@ static void srpc_uninstall(cJSON *params, int id, void *user_data)
 
     airy_err_t err = airy_sys_skill_uninstall(skill_id);
     if (err == AIRY_ENOENT) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Skill not found", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_NOT_FOUND, "Skill not found", id);
         return;
     }
     if (err != AIRY_SUCCESS) {
