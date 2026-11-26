@@ -129,6 +129,36 @@ static int daemon_init_driver(const char *daemon_name, const char *service_type,
     return AIRY_SUCCESS;
 }
 
+/* 绑定成功后记录监听点的路径身份；此后被其它实例 unlink/rebind 时，退出
+ * 清理能凭 inode 不一致判断出「路径已不属于我」（手册 D）。 */
+static void daemon_capture_sock(const daemon_endpoint_t *ep, daemon_sock_id_t *sock_id)
+{
+#if AIRY_PLATFORM_POSIX
+    if (!ep->use_tcp && ep->sock_unix && ep->sock_unix[0])
+        sock_id->valid = airy_sock_path_ident(ep->sock_unix, &sock_id->dev, &sock_id->ino) == 0;
+#else
+    (void)ep;
+    (void)sock_id;
+#endif
+}
+
+/* 只删自己 bind 的那个 inode：旧实例退出晚于新实例 rebind 时，路径已指向
+ * 新 sock，此时 unlink 会把新实例的监听点删掉（手册 D）。 */
+static void daemon_unlink_own_sock(const char *path, const daemon_sock_id_t *sock_id)
+{
+#if AIRY_PLATFORM_POSIX
+    if (!path || !path[0] || !sock_id || !sock_id->valid)
+        return;
+    if (airy_sock_path_owned(path, sock_id->dev, sock_id->ino))
+        (void)unlink(path);
+    else
+        SVC_LOG_WARN("Skip unlinking %s: path no longer owns our socket inode", path);
+#else
+    (void)path;
+    (void)sock_id;
+#endif
+}
+
 static void daemon_cleanup(daemon_bootstrap_sd_t *bsd,
                            daemon_event_driver_t *event_driver, airy_sock_t server_fd,
                            const char *unix_socket_path, const daemon_sock_id_t *sock_id,
@@ -142,16 +172,7 @@ static void daemon_cleanup(daemon_bootstrap_sd_t *bsd,
         daemon_event_driver_destroy(event_driver);
     if (server_fd >= 0)
         airy_sock_close(server_fd);
-#if AIRY_PLATFORM_POSIX
-    /* 只删自己绑定的那个 inode。旧实例退出晚于新实例 rebind 时，路径已
-     * 指向新 sock，此时 unlink 会把新实例的监听点删掉（手册 D）。 */
-    if (unix_socket_path && unix_socket_path[0] && sock_id && sock_id->valid &&
-        airy_sock_path_owned(unix_socket_path, sock_id->dev, sock_id->ino))
-        (void)unlink(unix_socket_path);
-    else if (unix_socket_path && unix_socket_path[0] && sock_id && sock_id->valid)
-        SVC_LOG_WARN("Skip unlinking %s: path no longer owns our socket inode",
-                     unix_socket_path);
-#endif
+    daemon_unlink_own_sock(unix_socket_path, sock_id);
     if (destroy_service)
         destroy_service();
     if (running_lock)
@@ -231,12 +252,7 @@ int daemon_boot(int argc, char **argv, const daemon_boot_t *boot)
         goto fail_svc;
     }
     daemon_sock_id_t sock_id = {0, 0, 0};
-#if AIRY_PLATFORM_POSIX
-    /* 绑定成功即记录路径身份；此后被其它实例 unlink/rebind 时，退出清理
-     * 能凭 inode 不一致判断出「路径已不属于我」。 */
-    if (!ep.use_tcp && ep.sock_unix && ep.sock_unix[0])
-        sock_id.valid = airy_sock_path_ident(ep.sock_unix, &sock_id.dev, &sock_id.ino) == 0;
-#endif
+    daemon_capture_sock(&ep, &sock_id);
     /* 监听地址日志统一机制位（0.1.19 §222 u78-1：原 llm_d/mem_d
      * svc_endpoint 内逐户副本消解，全部生成户一处发射） */
     if (ep.use_tcp)
