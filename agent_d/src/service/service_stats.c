@@ -54,14 +54,20 @@ int agent_service_list(agent_service_t *svc, char ***out_agent_ids, size_t *out_
     return AIRY_SUCCESS;
 }
 
+/* 0.1.21 D5：返回在册运行中的 agent 数，与 agent.list 逐条一致。
+ * 旧实现返回槽位高水位（只增不减），terminate 后仍报旧值。 */
 size_t agent_service_count(agent_service_t *svc)
 {
     if (!svc || !svc->initialized)
         return 0;
     agent_lock_svc(svc);
-    size_t c = svc->agent_count;
+    size_t running = 0;
+    for (size_t i = 0; i < svc->agent_count; i++) {
+        if (svc->agents[i].status == AGENT_STATUS_RUNNING)
+            running++;
+    }
     airy_mtx_unlock(&svc->lock);
-    return c;
+    return running;
 }
 
 /* 持锁收集空闲槽位下标（快路径）；成功返回 0，OOM 返回错误码。 */
