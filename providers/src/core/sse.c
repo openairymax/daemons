@@ -299,6 +299,18 @@ static size_t sse_write_callback(void *contents, size_t size, size_t nmemb, void
     return realsize;
 }
 
+/* 0.1.21 手册 F：本机推理端点（llama.cpp 等）首 token 的等待来自 CPU/GPU
+ * 计算而非网络，30s 读空闲会把健康的长提示生成误判为停摆（-417）：日志
+ * 表现为上游已连接、无任何字节下发就失败。回环端点单独放宽预算。 */
+static int sse_local_endpoint(const char *url)
+{
+    if (!url || strncmp(url, "http://", 7) != 0)
+        return 0;
+    const char *h = url + 7;
+    return strncmp(h, "127.", 4) == 0 || strncmp(h, "localhost", 9) == 0 ||
+           strncmp(h, "[::1]", 5) == 0;
+}
+
 /* 单次流式尝试的上下文：写回调绑定到分帧状态机。 */
 typedef struct {
     const char *url;
@@ -329,9 +341,11 @@ static provider_attempt_t sse_try(void *ud, int retry, double left_sec, CURLcode
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, sse_write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, ctx->sse);
     /* 首试给足全额预算；重试用整轮剩余墙钟，避免单次尝试越过总预算。
-     * 读空闲闸门与总预算分立：上游持续吐字时不触发 idle 超时。 */
+     * 读空闲闸门与总预算分立：上游持续吐字时不触发 idle 超时。本地推理
+     * 端点首 token 前可能长时间零字节，按回环判定放宽读空闲。 */
     double budget = retry == 0 ? ctx->timeout_sec : left_sec;
-    provider_http_setup(curl, budget, PROVIDER_READ_IDLE_SEC);
+    provider_http_setup(curl, budget, sse_local_endpoint(ctx->url) ? PROVIDER_LOCAL_READ_IDLE_SEC
+                                                                   : PROVIDER_READ_IDLE_SEC);
 
     CURLcode res = curl_easy_perform(curl);
     /* 失败路径也要取码：上游先回状态码再断流时，收尾要按状态码打印错误体
