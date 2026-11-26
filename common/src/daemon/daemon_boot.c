@@ -144,7 +144,7 @@ static void daemon_capture_sock(const daemon_endpoint_t *ep, daemon_sock_id_t *s
 
 /* 只删自己 bind 的那个 inode：旧实例退出晚于新实例 rebind 时，路径已指向
  * 新 sock，此时 unlink 会把新实例的监听点删掉（手册 D）。 */
-static void daemon_unlink_own_sock(const char *path, const daemon_sock_id_t *sock_id)
+static void daemon_unlink_mine(const char *path, const daemon_sock_id_t *sock_id)
 {
 #if AIRY_PLATFORM_POSIX
     if (!path || !path[0] || !sock_id || !sock_id->valid)
@@ -172,7 +172,7 @@ static void daemon_cleanup(daemon_bootstrap_sd_t *bsd,
         daemon_event_driver_destroy(event_driver);
     if (server_fd >= 0)
         airy_sock_close(server_fd);
-    daemon_unlink_own_sock(unix_socket_path, sock_id);
+    daemon_unlink_mine(unix_socket_path, sock_id);
     if (destroy_service)
         destroy_service();
     if (running_lock)
