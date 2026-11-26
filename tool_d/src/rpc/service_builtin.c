@@ -185,6 +185,9 @@ int register_builtin_tools(tool_service_t *svc)
         {"cwd", "{\"type\":\"string\"}", 0},
         /* C-24：默认严格（set -e + pipefail），传 false 回退旧语义。 */
         {"shell_strict", "{\"type\":\"boolean\"}", 0},
+        /* 手册 B：脱离 OS 沙箱走白名单特权通道（commons 契约层同名参数）。
+         * schema 只作模型侧提示，授权仍由 gate/ACL 与白名单判定。 */
+        {"privileged", "{\"type\":\"boolean\"}", 0},
     };
     static tool_param_t fs_list_params[] = {
         {"path", "{\"type\":\"string\"}", 0},
