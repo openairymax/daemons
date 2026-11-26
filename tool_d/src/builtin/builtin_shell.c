@@ -16,6 +16,7 @@
 #include "builtin/builtin_compat_internal.h"
 #include "builtin/builtin_envcheck_internal.h"
 #include "builtin/builtin_exec_internal.h"
+#include "builtin/builtin_priv_internal.h"
 
 void builtin_append_trunc_mark(char *buf, size_t cap, size_t len, const char *mark)
 {
@@ -347,6 +348,108 @@ static int strict_opt(cJSON *root)
     return 1;
 }
 
+/* 0.1.21 手册 B：privileged 缺省关闭，只有显式 true 才走特权通道。 */
+static int priv_opt(cJSON *root)
+{
+    cJSON *v = cJSON_GetObjectItem(root, "privileged");
+    if (cJSON_IsBool(v))
+        return cJSON_IsTrue(v) ? 1 : 0;
+    if (cJSON_IsNumber(v))
+        return v->valueint != 0;
+    if (cJSON_IsString(v) && v->valuestring)
+        return strcmp(v->valuestring, "1") == 0 || strcmp(v->valuestring, "true") == 0;
+    return 0;
+}
+
+#define SHELL_PRIV_CMD_MAX 1024
+#define SHELL_PRIV_TOK_MAX (PRIV_MAX_ARGS + 2)
+
+/* 特权通道只接受「单条简单命令」的 token 字符集：ASCII 字母数字与
+ * . / @ : + - = % _。引号、管道、重定向、串联、通配、$ 展开全部拒绝——
+ * 该通道不经 shell，接受后无法保真执行，静默截断会改变命令语义。 */
+static int shell_priv_tok_ok(const char *s)
+{
+    size_t n = 0;
+    for (const char *p = s; *p; ++p) {
+        unsigned char c = (unsigned char)*p;
+        if (++n > PRIV_ARG_MAX_LEN)
+            return 0;
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+            continue;
+        if (strchr("._/@:+-=%", c))
+            continue;
+        return 0;
+    }
+    return n > 0;
+}
+
+/* 把 privileged=true 的 command 转成 priv_exec 的 program/args 参数，复用
+ * 同一套白名单、参数族校验与审计，不在 shell 侧另开一条无审计的特权路径。
+ * 允许可选的 `sudo -n` 前缀（模型常用写法）；其余 sudo 旗标拒绝。 */
+static int shell_run_privileged(const char *cmd, uint32_t timeout_ms, tool_result_t *res)
+{
+    char buf[SHELL_PRIV_CMD_MAX];
+    size_t len = strlen(cmd);
+    if (len == 0 || len >= sizeof(buf))
+        return btool_fail(res, AIRY_ERR_EXEC_ARGS, "Privileged command empty or too long");
+
+    AIRY_MEMCPY(buf, cmd, len + 1);
+    char *tok[SHELL_PRIV_TOK_MAX];
+    int n = 0;
+    char *p = buf;
+    while (*p) {
+        while (*p == ' ' || *p == '\t')
+            ++p;
+        if (!*p)
+            break;
+        if (n >= SHELL_PRIV_TOK_MAX)
+            return btool_fail(res, AIRY_ERR_EXEC_ARGS, "Too many tokens (max %d)",
+                              SHELL_PRIV_TOK_MAX);
+        tok[n++] = p;
+        while (*p && *p != ' ' && *p != '\t')
+            ++p;
+        if (*p)
+            *p++ = '\0';
+    }
+    if (n == 0)
+        return btool_fail(res, AIRY_ERR_EXEC_ARGS, "Privileged command is empty");
+
+    int i = 0;
+    if (strcmp(tok[0], "sudo") == 0) {
+        i = 1;
+        while (i < n && strcmp(tok[i], "-n") == 0)
+            ++i;
+        if (i < n && tok[i][0] == '-')
+            return btool_fail(res, AIRY_ERR_EXEC_ARGS, "Unsupported sudo option: %s", tok[i]);
+    }
+    if (i >= n)
+        return btool_fail(res, AIRY_ERR_EXEC_ARGS, "Missing program after sudo");
+    for (int k = i; k < n; ++k) {
+        if (!shell_priv_tok_ok(tok[k]))
+            return btool_fail(res, AIRY_ERR_EXEC_ARGS,
+                              "Privileged channel accepts one simple command only: %s", tok[k]);
+    }
+
+    cJSON *o = cJSON_CreateObject();
+    if (!o)
+        return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY, "Out of memory");
+    cJSON_AddStringToObject(o, "program", tok[i]);
+    cJSON *arr = cJSON_AddArrayToObject(o, "args");
+    if (!arr) {
+        cJSON_Delete(o);
+        return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY, "Out of memory");
+    }
+    for (int k = i + 1; k < n; ++k)
+        cJSON_AddItemToArray(arr, cJSON_CreateString(tok[k]));
+    char *json = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    if (!json)
+        return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY, "Out of memory");
+    int rc = priv_exec_tool(json, timeout_ms, res);
+    AIRY_FREE(json);
+    return rc;
+}
+
 int shell_run_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
@@ -362,6 +465,16 @@ int shell_run_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
     /* C-24 默认严格；per-tool shell_strict=0 回退旧语义（主要供确实要用
      * 「最后一条命令决定退出码」的脚本场景）。 */
     int strict = strict_opt(root);
+    /* 手册 B：privileged=true 走审计过的特权通道（不套沙箱）。cwd 在该通道
+     * 没有语义（execv 不经 shell，包管理器不读工作目录），显式拒绝避免
+     * 「传了 cwd 却静默忽略」。 */
+    if (priv_opt(root)) {
+        if (cwd && cwd[0])
+            return btool_fail(res, AIRY_ERR_EXEC_ARGS,
+                              "Privileged channel does not support cwd");
+        return shell_run_privileged(cmd->valuestring,
+                                    timeout_ms ? timeout_ms : BUILTIN_SHELL_TIMEOUT_MS, res);
+    }
     /* P2 OS-level sandbox: shell_run is enabled by default per environment
      * config (Landlock/seccomp/rlimit on Linux; Windows/macOS resolve to
      * OS_SANDBOX_MODE_OFF, keeping the identical call path). */
