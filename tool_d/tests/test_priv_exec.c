@@ -168,11 +168,15 @@ static void test_exec_refusals(void)
     clear_result(&res);
 
     if (geteuid() != 0) {
+        /* 提权不可达：把 sudo 指向不存在的路径，确定性地覆盖拒绝分支，
+         * 且绝不真的派生特权进程（CI 上 sudo -n 可用，直接调用会执行）。 */
+        setenv(PRIV_ENV_SUDO, "/nonexistent/airy-test-sudo", 1);
         assert(priv_exec_tool("{\"program\":\"dnf\",\"args\":[\"install\",\"tree\"]}", 0, &res) ==
                AIRY_ERR_EXEC_PERMISSION);
         assert(res.err_code == AIRY_ERR_EXEC_PERMISSION);
         clear_result(&res);
-        printf("PASS exec-refusal (non-root)\n");
+        unsetenv(PRIV_ENV_SUDO);
+        printf("PASS exec-refusal (non-root, escalation unavailable)\n");
     } else {
         printf("SKIP exec-refusal non-root branch (running as root; not executing install)\n");
     }

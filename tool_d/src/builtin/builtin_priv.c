@@ -269,13 +269,22 @@ static void priv_spawn(void *ctx)
     _exit(127);
 }
 
+/* sudo 路径：默认 PRIV_SUDO_PATH；AIRY_PRIV_SUDO 可覆盖（容器内 sudo 布局
+ * 差异，以及测试注入不存在的路径以确定性覆盖「提权不可用即拒绝」而不真的
+ * 派生特权进程），空值回落默认。 */
+static const char *priv_sudo_path(void)
+{
+    const char *p = getenv(PRIV_ENV_SUDO);
+    return (p && p[0]) ? p : PRIV_SUDO_PATH;
+}
+
 /* 非 root 守护（用户态安装的常态）经 sudo -n 提权：sudoers 未授权时立即
  * 失败而不触发密码提示，工具调用不会挂住。程序白名单与参数校验已在上游
  * 完成，此处只做特权位切换。 */
 static void priv_spawn_sudo(void *ctx)
 {
     char *const *argv = (char *const *)ctx;
-    execv(PRIV_SUDO_PATH, argv);
+    execv(argv[0], argv);
     _exit(127);
 }
 
@@ -283,7 +292,7 @@ static int priv_exec_escalated(const priv_plan_t *plan, uint32_t tmo, tool_resul
 {
     char *argv[PRIV_MAX_ARGS + 4];
     int n = 0;
-    argv[n++] = (char *)"sudo";
+    argv[n++] = (char *)priv_sudo_path();
     argv[n++] = (char *)"-n";
     argv[n++] = (char *)plan->program->path;
     for (int i = 1; i <= plan->argc; ++i)
@@ -321,11 +330,12 @@ int priv_exec_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
 
     uint32_t tmo = timeout_ms ? timeout_ms : BUILTIN_SHELL_TIMEOUT_MS;
     if (geteuid() != 0) {
-        if (access(PRIV_SUDO_PATH, X_OK) != 0) {
+        const char *sudo = priv_sudo_path();
+        if (access(sudo, X_OK) != 0) {
             priv_audit(&plan, -1, 0);
             priv_plan_free(&plan);
             return btool_fail(res, AIRY_ERR_EXEC_PERMISSION,
-                              "Privileged escalation unavailable: %s", PRIV_SUDO_PATH);
+                              "Privileged escalation unavailable: %s", sudo);
         }
         int erc = priv_exec_escalated(&plan, tmo, res);
         priv_plan_free(&plan);
