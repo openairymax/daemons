@@ -179,11 +179,14 @@ static int t_decl_defaults(void)
     sup_ctx_t ctx;
     memset(&ctx, 0, sizeof(ctx));
     TEST_ASSERT(sup_decl_defaults(&ctx) == 0, "defaults failed");
-    TEST_ASSERT(ctx.count == 13, "count != 13");
+    TEST_ASSERT(ctx.count == 14, "count != 14");
     TEST_ASSERT(strcmp(ctx.procs[0].name, "gateway_d") == 0 &&
                 ctx.procs[0].role == SUP_ROLE_CORE, "procs[0] core");
     TEST_ASSERT(strcmp(ctx.procs[12].name, "notify_d") == 0 &&
                 ctx.procs[12].role == SUP_ROLE_AUX, "procs[12] aux");
+    /* 0.1.21 D3：aux 表补入 maths_d，随 supervisor 调谐拉起 */
+    TEST_ASSERT(strcmp(ctx.procs[13].name, "maths_d") == 0 &&
+                ctx.procs[13].role == SUP_ROLE_AUX, "procs[13] maths aux");
     TEST_ASSERT(sup_proc_find(&ctx, "cupolas_d") == 9, "cupolas index");
     TEST_ASSERT(sup_proc_find(&ctx, "ghost_d") == -1, "ghost found");
     TEST_ASSERT(sup_proc_find(&ctx, "") == -1, "empty found");
@@ -539,7 +542,7 @@ static int t_decl_fallback(void)
     sup_ctx_t ctx;
     memset(&ctx, 0, sizeof(ctx));
     TEST_ASSERT(sup_decl_load(&ctx) == 0, "load failed");
-    TEST_ASSERT(ctx.count == 13, "no-launch must fall back to 13");
+    TEST_ASSERT(ctx.count == 14, "no-launch must fall back to 14");
     TEST_ASSERT(ctx.tick_ms == SUP_DEFAULT_TICK_MS, "tick default");
     TEST_ASSERT(ctx.backoff_base_ms == SUP_DEFAULT_BACKOFF_BASE_MS,
                 "base default");
@@ -555,7 +558,7 @@ static int t_decl_fallback(void)
     setenv("AIRYRT_SUP_MAX_ATTEMPTS", "-5", 1);
     memset(&ctx, 0, sizeof(ctx));
     TEST_ASSERT(sup_decl_load(&ctx) == 0, "load nofile failed");
-    TEST_ASSERT(ctx.count == 13, "missing file must fall back");
+    TEST_ASSERT(ctx.count == 14, "missing file must fall back");
     TEST_ASSERT(ctx.tick_ms == SUP_DEFAULT_TICK_MS, "bad tick falls back");
     TEST_ASSERT(ctx.max_attempts == SUP_DEFAULT_MAX_ATTEMPTS,
                 "bad attempts falls back");
