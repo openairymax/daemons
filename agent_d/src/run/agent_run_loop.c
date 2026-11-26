@@ -456,11 +456,23 @@ static void run_preamble(cJSON *msgs)
         "【自制工具】同类处理若已重复出现，优先调用 tool_create 把脚本沉淀"
         "为具名工具（脚本必须以 #! 开头，参数以 JSON 形式作为 $1 传入），"
         "它在下一轮即可按名调用，避免反复手写等价 shell 命令。";
+    /* 0.1.21 手册 C：本机环境契约。285H 演示是离线/内网环境，模型若默认
+     * 联网下载或假设桌面路径，会在第一步就失败。条款只给通用判定方法，
+     * 不写死任何用户名或机器路径。 */
+    static const char env_contract[] =
+        "【本机环境】涉及软件安装或系统配置时：优先使用用户已提供的本机"
+        "安装包（先看用户给出的绝对路径；未给出时再查 ~/rpmbuild/RPMS 等"
+        "本机目录），不要默认联网下载；需要 root 的动作走 shell_run 的 "
+        "privileged=true 或 priv_exec（程序限 dnf/rpm/systemctl），不要裸用"
+        " sudo；完成后用 rpm -q 或 systemctl status 验证再报告。桌面目录以"
+        " `xdg-user-dir DESKTOP` 的输出为准，不要假设 ~/Desktop 存在。";
     cJSON *sys = cJSON_CreateObject();
     if (!sys)
         return;
-    char content[1024];
-    snprintf(content, sizeof(content), "%s%s%s", base, toolmake,
+    /* 0.1.21：四条契约合计已超过 1 KiB（中文按 UTF-8 三字节计），原
+     * 1024 缓冲会静默截断尾部条款，等于条款随机失效。 */
+    char content[4096];
+    snprintf(content, sizeof(content), "%s%s%s%s", base, toolmake, env_contract,
              run_has_turns(msgs) ? boundary : "");
     cJSON_AddStringToObject(sys, "role", "system");
     cJSON_AddStringToObject(sys, "content", content);
