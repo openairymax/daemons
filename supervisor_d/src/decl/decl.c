@@ -342,8 +342,9 @@ int sup_decl_defaults(sup_ctx_t *ctx)
 {
     ctx->count = 0;
     static const char *core[] = {"gateway_d", "llm_d", "think_d", "agent_d", "tool_d"};
-    static const char *aux[] = {"monit_d",  "sched_d", "channel_d",
-                                "market_d", "cupolas_d", "mem_d", "a2a_d", "notify_d"};
+    static const char *aux[] = {"monit_d",  "sched_d", "channel_d", "market_d",
+                                "cupolas_d", "mem_d",  "a2a_d",     "notify_d",
+                                "maths_d"};
     for (size_t i = 0; i < sizeof(core) / sizeof(core[0]); i++)
         add_proc(ctx, core[i], SUP_ROLE_CORE);
     for (size_t i = 0; i < sizeof(aux) / sizeof(aux[0]); i++)
