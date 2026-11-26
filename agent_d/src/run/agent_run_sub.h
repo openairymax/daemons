@@ -3,7 +3,7 @@
 
 /**
  * @file agent_run_sub.h
- * @brief 子任务委派机制件（N-8）：把 subagent.spawn 接到 agent.run 工具循环。
+ * @brief 子任务委派机制件（N-8）：把 subagent_spawn 接到 agent.run 工具循环。
  *
  * 一个委派是一次「子 run」：独立上下文（不重放父历史）、独立工具循环、
  * 共享父会话槽位（取消可下探）与父事件通道（帧带 sub_id/depth 还原树）。

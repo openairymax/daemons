@@ -22,9 +22,9 @@
 extern "C" {
 #endif
 
-/* 工具名：模型可见的委派入口。点号命名与 tool_d 的内置工具族保持同一
- * 形态，客户端按前缀即可把委派与普通工具区分开。 */
-#define AGENT_SUB_TOOL "subagent.spawn"
+/* 工具名：模型可见的委派入口。Provider 的 function.name 只接受
+ * ^[a-zA-Z0-9_-]+$（点号会使整套 tools 被 400 拒收），故用下划线。 */
+#define AGENT_SUB_TOOL "subagent_spawn"
 
 /* 配额缺省与硬上界。缺省值即常见部署的合理值：两层委派、四个并行子任务
  * 足以覆盖「主任务拆两三个独立子问题」的绝大多数场景，再深就退化为串行
@@ -55,7 +55,7 @@ void sub_limits_set(int max_depth, int max_conc);
 /** @brief 解析生效配额：配置 > 环境变量 > 缺省，逐项夹紧。 */
 agent_sub_limits_t sub_limits(void);
 
-int sub_is_tool(const char *name); /* 委派工具判据：点号全等，本判据只此一处 */
+int sub_is_tool(const char *name); /* 委派工具判据：全等，本判据只此一处 */
 
 /** @brief 当前线程调用链已处于第几层委派（顶层 run 为 0）。 */
 int sub_depth(void);
