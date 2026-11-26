@@ -21,6 +21,7 @@
 #include "notify_d_internal.h"
 #include "hook/hook_internal.h"
 #include "daemon_main.h"
+#include "daemon_platform_ext.h"
 /* 事件线程经线程抽象双腿解析：无调度器实现时走 platform_process.h
  * 别名，airy_core 传播 AIRY_USE_SCHEDULER_THREAD_IMPL 时声明由
  * corekern task.h 提供（线程纳入调度器任务表记账）。两腿原型一致，
@@ -32,6 +33,7 @@
 #endif
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -45,6 +47,10 @@ atomic_int g_shutdown = 0;
 
 /* 本进程 bind 成功标记：stop 的 unlink 仅在其后执行（svc.c 私有） */
 static int g_listened = 0;
+/* 0.1.21 手册 D：记录自己绑定的节点身份，退出时 inode 不符则不删。 */
+static int g_sock_ident = 0;
+static uint64_t g_sock_dev = 0;
+static uint64_t g_sock_ino = 0;
 
 /* airy_thread_create 入口统一为 airy_thread_func_t（void *(*)(void *)），
  * Windows 侧由 platform 层 airy_thread_start_routine 适配 __stdcall；
@@ -134,6 +140,10 @@ int notify_d_start(notify_d_service_t *svc)
 #endif
 
     g_listened = 1;
+#ifndef _WIN32
+    g_sock_ident =
+        airy_sock_path_ident(svc->socket_path, &g_sock_dev, &g_sock_ino) == 0;
+#endif
     svc->running = 1;
     svc->event_running = 1;
     svc->force_stop = 0;
@@ -192,8 +202,12 @@ int notify_d_stop(notify_d_service_t *svc, int force)
 
 #ifndef _WIN32
     if (force && g_listened) {
-        unlink(svc->socket_path);
+        if (!g_sock_ident || airy_sock_path_owned(svc->socket_path, g_sock_dev, g_sock_ino))
+            unlink(svc->socket_path);
+        else
+            SVC_LOG_WARN("notify_d: skip unlink %s (inode changed)", svc->socket_path);
         g_listened = 0;
+        g_sock_ident = 0;
     }
 #endif
 

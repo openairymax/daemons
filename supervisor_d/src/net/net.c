@@ -125,8 +125,15 @@ int sup_uds_bind(const char *path, int backlog, int mode)
     if (fd < 0)
         return -1;
     unlink(path);
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
-        (mode > 0 && chmod(path, (mode_t)mode) != 0) ||
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        /* bind 失败时节点不属于本进程：可能是并发接管者刚绑定成功，
+         * 此时 unlink 会删掉对方的监听点（手册 D 同源问题）。 */
+        int saved = errno;
+        close(fd);
+        errno = saved;
+        return -1;
+    }
+    if ((mode > 0 && chmod(path, (mode_t)mode) != 0) ||
         listen(fd, backlog > 0 ? backlog : 1) != 0) {
         int saved = errno;
         close(fd);

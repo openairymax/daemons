@@ -24,12 +24,24 @@
 #include "airy_rt.h"
 #include "daemon_crash.h"
 #include "daemon_main.h"
+#include "daemon_platform_ext.h"
 #include "compat.h"
 
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* 监听 socket 的路径身份（0.1.21 手册 D）：绑定成功后记录 st_dev/st_ino，
+ * 退出清理时只有当前路径仍指向同一个 inode 才 unlink。否则「旧实例延迟
+ * 退出 → 新实例已重绑」时，旧实例会把新实例的 sock 删掉，gateway 此后
+ * 每 5 秒 unreachable。 */
+typedef struct {
+    int valid;
+    uint64_t dev;
+    uint64_t ino;
+} daemon_sock_id_t;
 
 static int daemon_parse_args(int argc, char **argv, const char **config_path, int *use_tcp,
                              void (*print_usage_fn)(const char *))
@@ -119,8 +131,8 @@ static int daemon_init_driver(const char *daemon_name, const char *service_type,
 
 static void daemon_cleanup(daemon_bootstrap_sd_t *bsd,
                            daemon_event_driver_t *event_driver, airy_sock_t server_fd,
-                           const char *unix_socket_path, void (*destroy_service)(void),
-                           airy_mtx_t *running_lock)
+                           const char *unix_socket_path, const daemon_sock_id_t *sock_id,
+                           void (*destroy_service)(void), airy_mtx_t *running_lock)
 {
     SVC_LOG_WARN("Service stopping...");
 
@@ -131,10 +143,14 @@ static void daemon_cleanup(daemon_bootstrap_sd_t *bsd,
     if (server_fd >= 0)
         airy_sock_close(server_fd);
 #if AIRY_PLATFORM_POSIX
-    /* Unlink the listening socket file after closing the fd. Ignore
-     * ENOENT: TCP mode or an already-removed file is normal. */
-    if (unix_socket_path && unix_socket_path[0])
+    /* 只删自己绑定的那个 inode。旧实例退出晚于新实例 rebind 时，路径已
+     * 指向新 sock，此时 unlink 会把新实例的监听点删掉（手册 D）。 */
+    if (unix_socket_path && unix_socket_path[0] && sock_id && sock_id->valid &&
+        airy_sock_path_owned(unix_socket_path, sock_id->dev, sock_id->ino))
         (void)unlink(unix_socket_path);
+    else if (unix_socket_path && unix_socket_path[0] && sock_id && sock_id->valid)
+        SVC_LOG_WARN("Skip unlinking %s: path no longer owns our socket inode",
+                     unix_socket_path);
 #endif
     if (destroy_service)
         destroy_service();
@@ -214,6 +230,13 @@ int daemon_boot(int argc, char **argv, const daemon_boot_t *boot)
         SVC_LOG_ERROR("Failed to create server socket");
         goto fail_svc;
     }
+    daemon_sock_id_t sock_id = {0, 0, 0};
+#if AIRY_PLATFORM_POSIX
+    /* 绑定成功即记录路径身份；此后被其它实例 unlink/rebind 时，退出清理
+     * 能凭 inode 不一致判断出「路径已不属于我」。 */
+    if (!ep.use_tcp && ep.sock_unix && ep.sock_unix[0])
+        sock_id.valid = airy_sock_path_ident(ep.sock_unix, &sock_id.dev, &sock_id.ino) == 0;
+#endif
     /* 监听地址日志统一机制位（0.1.19 §222 u78-1：原 llm_d/mem_d
      * svc_endpoint 内逐户副本消解，全部生成户一处发射） */
     if (ep.use_tcp)
@@ -271,8 +294,8 @@ int daemon_boot(int argc, char **argv, const daemon_boot_t *boot)
     daemon_event_driver_run(*boot->event_driver);
 
     boot->svc_teardown();
-    daemon_cleanup(*boot->bsd, *boot->event_driver, server_fd, ep.sock_unix,
-                            boot->svc_destroy, boot->running_lock);
+    daemon_cleanup(*boot->bsd, *boot->event_driver, server_fd, ep.sock_unix, &sock_id,
+                   boot->svc_destroy, boot->running_lock);
     for (size_t i = boot->ops_count; i > 0; i--)
         boot->ops[i - 1].cleanup();
     if (boot->sec_cleanup)

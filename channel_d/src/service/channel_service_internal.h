@@ -20,11 +20,16 @@
 
 #include "airy_abi.h"
 
+#include <stdint.h>
+
 AIRY_ABI_BEGIN
 
 typedef struct {
     channel_info_t info;
     int socket_fd;
+    uint64_t ep_dev;  /* 0.1.21 手册 D：endpoint 绑定时的节点身份 */
+    uint64_t ep_ino;
+    int ep_ident;     /* 身份记录成功标记；0 时按旧行为删除 */
     void *shm_ptr;
     size_t shm_size;
     char shm_name[128];
