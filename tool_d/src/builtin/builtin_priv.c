@@ -128,9 +128,9 @@ static int priv_arg_ok(const char *s)
 /* 本地安装包路径（0.1.21 手册 B）：离线场景必须能装本机 .rpm，但只放行
  * 「绝对路径 + .rpm 后缀 + 真实常规文件」这一种形状。路径穿越、相对路径、
  * 目录与符号链接均拒绝；rpm/dnf 均用 execv 直传，不解析 shell。 */
-static int priv_pkg_path_ok(const priv_policy_t *rule, const char *s)
+static int priv_pkg_path_ok(const priv_prog_t *prog, const char *s)
 {
-    if (!rule || rule->family != PRIV_FAMILY_PKG)
+    if (!prog || prog->family != PRIV_FAMILY_PKG)
         return 0;
     size_t n = s ? strlen(s) : 0;
     if (n < 5 || n > PRIV_ARG_MAX_LEN || s[0] != '/')
@@ -150,8 +150,11 @@ static int priv_pkg_path_ok(const priv_policy_t *rule, const char *s)
 }
 
 /* 首项必须是动词；其余非选项实参按字符集放行，选项必须在表内。 */
-static int priv_args_ok(const priv_policy_t *rule, const cJSON *args)
+static int priv_args_ok(const priv_prog_t *prog, const cJSON *args)
 {
+    const priv_policy_t *rule = prog ? priv_rule(prog->name) : NULL;
+    if (!rule)
+        return -1;
     int seen_verb = 0;
     int n = cJSON_GetArraySize(args);
     for (int i = 0; i < n; ++i) {
@@ -159,7 +162,7 @@ static int priv_args_ok(const priv_policy_t *rule, const cJSON *args)
         if (!cJSON_IsString(it))
             return -1;
         const char *a = it->valuestring;
-        if (!priv_arg_ok(a) && !priv_pkg_path_ok(rule, a))
+        if (!priv_arg_ok(a) && !priv_pkg_path_ok(prog, a))
             return -1;
         if (!seen_verb && priv_str_in(a, rule->verbs)) {
             seen_verb = 1;
@@ -205,7 +208,7 @@ int priv_plan_build(const char *params_json, priv_plan_t *plan, tool_result_t *r
     int argc = cJSON_GetArraySize(args);
     if (argc > PRIV_MAX_ARGS)
         return btool_fail(res, AIRY_ERR_EXEC_ARGS, "Too many arguments (max %d)", PRIV_MAX_ARGS);
-    if (priv_args_ok(rule, args) != 0)
+    if (priv_args_ok(prog, args) != 0)
         return btool_fail(res, AIRY_ERR_EXEC_ARGS, "Argument rejected by %s policy", name);
 
     plan->program = prog;
