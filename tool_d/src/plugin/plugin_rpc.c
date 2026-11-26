@@ -205,7 +205,7 @@ static void prpc_handle_metadata(cJSON *params, int id, void *user_data)
     plugin_metadata_t metadata;
     AIRY_MEMSET(&metadata, 0, sizeof(metadata));
     if (plugin_service_get_metadata(name->valuestring, &metadata) != 0) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Plugin not found", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_NOT_FOUND, "Plugin not found", id);
         return;
     }
     cJSON *result = cJSON_CreateObject();
@@ -252,7 +252,7 @@ static void prpc_handle_stats(cJSON *params, int id, void *user_data)
     plugin_stats_t stats;
     AIRY_MEMSET(&stats, 0, sizeof(stats));
     if (plugin_service_get_stats(name->valuestring, &stats) != 0) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Plugin not found", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_NOT_FOUND, "Plugin not found", id);
         return;
     }
     cJSON *result = cJSON_CreateObject();

@@ -102,7 +102,7 @@ void handle_get(cJSON *params, int id, airy_sock_t client_fd)
     mem_record_t rec = {0};
     int ret = mem_service_get(g_service, record_id->valuestring, &rec);
     if (ret != AIRY_SUCCESS) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Record not found", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_NOT_FOUND, "Record not found", id);
         return;
     }
 
@@ -125,7 +125,7 @@ void handle_delete(cJSON *params, int id, airy_sock_t client_fd)
 
     int ret = mem_service_delete(g_service, record_id->valuestring);
     if (ret != AIRY_SUCCESS) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Record not found", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_NOT_FOUND, "Record not found", id);
         return;
     }
 
@@ -347,7 +347,7 @@ static void evolve_record(const char *rid, int id, airy_sock_t fd)
     int wret;
 
     if (mem_service_get(g_service, rid, &rec) != AIRY_SUCCESS) {
-        JSONRPC_SEND_ERROR(fd, JSONRPC_METHOD_NOT_FOUND, "Record not found", id);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_NOT_FOUND, "Record not found", id);
         return;
     }
 

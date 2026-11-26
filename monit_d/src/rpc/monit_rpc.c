@@ -298,7 +298,7 @@ static void handle_alert_resolve(cJSON *params, int id, airy_sock_t client_fd)
 
     int ret = monitor_service_resolve_alert(g_service, alert_id);
     if (ret == AIRY_ERR_NOT_FOUND) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Alert not found", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_NOT_FOUND, "Alert not found", id);
         return;
     }
     if (ret != AIRY_SUCCESS) {

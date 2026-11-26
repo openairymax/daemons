@@ -183,7 +183,7 @@ static void handle_terminate(cJSON *params, int id, airy_sock_t client_fd)
 
     int ret = agent_service_terminate(g_service, agent_id->valuestring);
     if (ret != AIRY_SUCCESS) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Agent not found", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_NOT_FOUND, "Agent not found", id);
         return;
     }
 
@@ -244,7 +244,7 @@ static void invoke_reply(airy_sock_t client_fd, int id, int ret, char *out_outpu
     invoke_reason(out_output, reason, sizeof(reason));
     AIRY_FREE(out_output);
     if (ret == AIRY_ERR_NOT_FOUND) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Agent not found", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_NOT_FOUND, "Agent not found", id);
     } else if (ret == AIRY_ERR_CANCELED) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Agent invoke canceled", id);
     } else if (reason[0]) {
@@ -333,7 +333,7 @@ static void handle_cancel(cJSON *params, int id, airy_sock_t client_fd)
 
     int ret = agent_service_invoke_cancel(g_service, request_id->valuestring);
     if (ret != AIRY_SUCCESS) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "No active invoke for request_id",
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_NOT_FOUND, "No active invoke for request_id",
                            id);
         return;
     }

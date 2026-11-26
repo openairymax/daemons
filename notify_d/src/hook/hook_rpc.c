@@ -152,7 +152,7 @@ static void handle_stats(cJSON *params, int rid, char **out)
     }
     hook_stats_t stats;
     if (hook_registry_get_stats(name, &stats) != 0) {
-        *out = jsonrpc_build_error(JSONRPC_METHOD_NOT_FOUND, "Hook not found", rid);
+        *out = jsonrpc_build_error(JSONRPC_NOT_FOUND, "Hook not found", rid);
         return;
     }
     cJSON *result = cJSON_CreateObject();
@@ -276,7 +276,7 @@ static void handle_unregister(cJSON *params, int rid, char **out)
 
     int ret = hook_registry_unregister(name);
     if (ret != 0) {
-        *out = jsonrpc_build_error(JSONRPC_METHOD_NOT_FOUND, "Hook not found", rid);
+        *out = jsonrpc_build_error(JSONRPC_NOT_FOUND, "Hook not found", rid);
         return;
     }
 
