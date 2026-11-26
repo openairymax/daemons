@@ -19,18 +19,21 @@
 
 #include <string.h>
 
-/* 可选作用域（N-6）：非字符串 / 空串 / 超长（>64 字节）一律按缺省处理，
- * 回落旧键派生，不向调用方报错（线协议向后兼容）。 */
+/* 作用域（N-6）是缓存键的一部分：省略或非法会让同文同模型的写入永远
+ * 命中不到，且调用方只看到 hit=0 无从判断。0.1.21 D5 起改为显式参数
+ * 错误（1~64 字节字符串），不再静默回落旧键。 */
 #define CACHE_NS_MAX 64
 
-static const char *cache_ns_arg(cJSON *params)
+static int cache_ns_arg(cJSON *params, const char **out)
 {
+    *out = NULL;
     cJSON *ns = cJSON_GetObjectItem(params, "cache_ns");
     if (!cJSON_IsString(ns) || !ns->valuestring || !ns->valuestring[0])
-        return NULL;
+        return -1;
     if (strlen(ns->valuestring) > CACHE_NS_MAX)
-        return NULL;
-    return ns->valuestring;
+        return -1;
+    *out = ns->valuestring;
+    return 0;
 }
 
 /* ── mem.cache_put ───────────────────────────────────────────────────── */
@@ -60,13 +63,19 @@ void handle_cache_put(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
+    const char *cache_ns = NULL;
+    if (cache_ns_arg(params, &cache_ns) != 0) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                           "cache_put 需 cache_ns 字符串（1~64 字节）", id);
+        return;
+    }
+
     char *cache_id = NULL, *exact_key = NULL;
     uint64_t ttl_ms = ttl && cJSON_IsNumber(ttl) && ttl->valuedouble >= 0
                           ? (uint64_t)ttl->valuedouble
                           : 0;
     int ret = mem_cache_putns(g_cache, text->valuestring, response->valuestring,
-                              model_id->valuestring, cache_ns_arg(params), ttl_ms, &cache_id,
-                              &exact_key);
+                              model_id->valuestring, cache_ns, ttl_ms, &cache_id, &exact_key);
     if (ret != AIRY_SUCCESS || !cache_id) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "cache_put 失败", id);
         AIRY_FREE(cache_id);
@@ -94,12 +103,19 @@ void handle_cache_get(cJSON *params, int id, airy_sock_t client_fd)
     JSONRPC_REQUIRE(g_cache && text && cJSON_IsString(text) && model_id && cJSON_IsString(model_id),
                     client_fd, "cache_get 需 text/model_id", id);
 
+    const char *cache_ns = NULL;
+    if (cache_ns_arg(params, &cache_ns) != 0) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                           "cache_get 需 cache_ns 字符串（1~64 字节）", id);
+        return;
+    }
+
     int hit = 0;
     double score = 0.0;
     char *cache_id = NULL, *response = NULL;
     double thr = threshold && cJSON_IsNumber(threshold) ? threshold->valuedouble : 0.0;
-    int ret = mem_cache_getns(g_cache, text->valuestring, model_id->valuestring,
-                              cache_ns_arg(params), thr, &hit, &score, &cache_id, &response);
+    int ret = mem_cache_getns(g_cache, text->valuestring, model_id->valuestring, cache_ns, thr,
+                              &hit, &score, &cache_id, &response);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "cache_get 失败", id);
         AIRY_FREE(cache_id);
