@@ -70,6 +70,20 @@ int agent_read_line_timeout_ex(int fd, char *buf, size_t buf_size, int timeout_s
     return 1;
 }
 
+/* 0.1.21 D1：exec 前关闭 3 号以上的全部描述符。守护的 RPC 连接/监听 fd
+ * 已置 FD_CLOEXEC，这里再兜底扫一遍，确保任何来源的 fd 都不会泄漏给 agent
+ * 子进程——否则守护关闭本端后对端永远等不到 EOF，以 EOF 判完成的客户端
+ * （gateway gw_svc_call）会在 agent.spawn/invoke 上挂到子进程退出。
+ * 0/1/2 此时已分别 dup2 为子进程的 stdin/stdout/stderr。 */
+static void agent_child_close_inherited_fds(void)
+{
+    long max_fd = sysconf(_SC_OPEN_MAX);
+    if (max_fd < 0 || max_fd > 65536)
+        max_fd = 65536;
+    for (int fd = 3; fd < (int)max_fd; fd++)
+        (void)close(fd);
+}
+
 /* fork the Agent runner child process and set up bidirectional stdin/stdout
  * pipes. Startup is chosen by spec.language:
  *   - "python" (default): python3 -m airymax_agents.runner --spec <spec>
@@ -126,6 +140,9 @@ int agent_spawn_child(const char *spec, const char *agent_id, long *out_pid, int
             dup2(log_fd, STDERR_FILENO);
             close(log_fd);
         }
+
+        /* 0.1.21 D1：此后不再需要任何来自守护的描述符。 */
+        agent_child_close_inherited_fds();
 
         if (strcmp(lang, "rust") == 0) {
 
