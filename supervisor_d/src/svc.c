@@ -16,7 +16,25 @@
 #include <signal.h> /* sig_atomic_t（标准头，Windows 亦提供） */
 
 #ifndef _WIN32
+#include <sys/stat.h>
 #include <unistd.h>
+
+/* V13.5 零项目库链接：节点身份记录/复核在本户自持，不引入 commons。 */
+static int sup_sock_ident(const char *path, uint64_t *dev, uint64_t *ino)
+{
+    struct stat st;
+    if (!path || !path[0] || !dev || !ino || stat(path, &st) != 0)
+        return 0;
+    *dev = (uint64_t)st.st_dev;
+    *ino = (uint64_t)st.st_ino;
+    return 1;
+}
+
+static int sup_sock_owned(const char *path, uint64_t dev, uint64_t ino)
+{
+    uint64_t d = 0, i = 0;
+    return sup_sock_ident(path, &d, &i) && d == dev && i == ino;
+}
 #endif
 
 static volatile sig_atomic_t g_stop = 0;
@@ -62,6 +80,7 @@ int sup_svc_prepare(sup_ctx_t *ctx, int *lfd_out)
         return -1;
     }
 #ifndef _WIN32
+    ctx->ctrl_ident = sup_sock_ident(ctx->ctrl_ep, &ctx->ctrl_dev, &ctx->ctrl_ino);
     /* A-5：输出泵先起再放行派生；失败则 spawn 走旧预开 .out 路径 */
     if (sup_pump_start(ctx) != 0)
         sup_log("WARN", "output pump unavailable, preopen .out fallback");
@@ -101,7 +120,13 @@ void sup_svc_clear(sup_ctx_t *ctx, int lfd)
 #endif
     sup_ctrl_close(lfd);
 #ifndef _WIN32
-    unlink(ctx->ctrl_ep);
+    /* 0.1.21 手册 D：只删除自己绑定的节点；新实例已 rebind 时路径指向
+     * 新 inode，此时 unlink 会把新实例的控制口删掉。 */
+    if (!ctx->ctrl_ident || sup_sock_owned(ctx->ctrl_ep, ctx->ctrl_dev, ctx->ctrl_ino))
+        unlink(ctx->ctrl_ep);
+    else
+        sup_log("WARN", "skip unlink %s (inode changed)", ctx->ctrl_ep);
+    ctx->ctrl_ident = 0;
 #endif
     sup_pidfile_clear(ctx);
 }

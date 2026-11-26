@@ -16,6 +16,7 @@
 
 #include "airy_mman.h"
 #include "daemon_errors.h"
+#include "daemon_platform_ext.h"
 #include "airy_memory.h"
 #include "channel_service_internal.h"
 #include "io.h"
@@ -59,7 +60,11 @@ void backend_entry_free(channel_entry_t *entry)
     if (entry->socket_fd >= 0) {
         close(entry->socket_fd);
         if (entry->info.type == CHANNEL_TYPE_SOCKET && entry->info.endpoint[0]) {
-            unlink(entry->info.endpoint);
+            /* 0.1.21 手册 D：只删自己绑定的节点，避免误删接管者的 endpoint。 */
+            if (!entry->ep_ident ||
+                airy_sock_path_owned(entry->info.endpoint, entry->ep_dev, entry->ep_ino))
+                unlink(entry->info.endpoint);
+            entry->ep_ident = 0;
         }
         entry->socket_fd = -1;
     }
@@ -97,6 +102,8 @@ static int create_socket_channel(channel_entry_t *entry, const char *endpoint)
     }
 
     entry->socket_fd = fd;
+    entry->ep_ident =
+        airy_sock_path_ident(endpoint, &entry->ep_dev, &entry->ep_ino) == 0;
     return 0;
 }
 

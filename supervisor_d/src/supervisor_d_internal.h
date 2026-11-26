@@ -32,6 +32,7 @@
 #define AIRY_SUPERVISOR_D_INTERNAL_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h> /* FILE（A-5 输出泵槽位持有落盘句柄） */
 
 #ifdef _WIN32
@@ -130,6 +131,9 @@ typedef struct sup_ctx {
     char runtime_dir[SUP_PATH_MAX];
     char log_dir[SUP_PATH_MAX];
     char ctrl_ep[SUP_PATH_MAX]; /* POSIX: supervisor.sock 路径；WIN: 127.0.0.1:<AIRY_PORT_SUPERVISOR_D> */
+    uint64_t ctrl_dev;          /* 0.1.21 手册 D：ctrl_ep 绑定时的节点身份 */
+    uint64_t ctrl_ino;
+    int ctrl_ident;             /* 身份记录成功标记；0 时按旧行为删除 */
     long tick_ms;
     long backoff_base_ms;
     long backoff_max_ms;

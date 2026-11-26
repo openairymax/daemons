@@ -16,6 +16,7 @@
  */
 
 #include "airy_memory.h"
+#include "daemon_platform_ext.h"
 #include "jsonrpc_helpers.h"
 #include "notify_d_internal.h"
 #include "hook_internal.h"
@@ -25,6 +26,7 @@
 #include "safety_guard.h"
 #include "svc_logger.h"
 
+#include <stdint.h>
 #include <string.h>
 #include <time.h>
 
@@ -42,6 +44,10 @@ airy_mtx_t g_hook_sessions_lock;
 static int g_hook_prepared = 0;
 static airy_sock_t g_hook_listen_fd = AIRY_INVALID_SOCKET;
 static int g_hook_listened = 0;
+/* 0.1.21 手册 D：自己绑定的节点身份，退出时 inode 不符则不删。 */
+static int g_hook_sock_ident = 0;
+static uint64_t g_hook_sock_dev = 0;
+static uint64_t g_hook_sock_ino = 0;
 
 hook_session_entry_t *hook_session_find(const char *session_id)
 {
@@ -160,6 +166,10 @@ int hook_svc_listen_up(void)
 #endif
 
     g_hook_listened = 1;
+#ifndef _WIN32
+    g_hook_sock_ident =
+        airy_sock_path_ident(HOOK_D_SOCKET_UNIX, &g_hook_sock_dev, &g_hook_sock_ino) == 0;
+#endif
     SVC_LOG_INFO("hook face: listening");
     return AIRY_SUCCESS;
 }
@@ -171,10 +181,16 @@ void hook_svc_listen_down(void)
         g_hook_listen_fd = AIRY_INVALID_SOCKET;
     }
 #ifndef _WIN32
-    if (g_hook_listened)
-        unlink(HOOK_D_SOCKET_UNIX);
+    if (g_hook_listened) {
+        if (!g_hook_sock_ident || airy_sock_path_owned(HOOK_D_SOCKET_UNIX, g_hook_sock_dev,
+                                                       g_hook_sock_ino))
+            unlink(HOOK_D_SOCKET_UNIX);
+        else
+            SVC_LOG_WARN("hook face: skip unlink (inode changed)");
+    }
 #endif
     g_hook_listened = 0;
+    g_hook_sock_ident = 0;
 }
 
 airy_sock_t hook_svc_listen_fd(void)
