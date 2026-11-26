@@ -19,6 +19,11 @@ extern "C" {
  * （AIRY_HTTP_CONNECT_TIMEOUT / AIRY_HTTP_READ_IDLE），便于现场调参。 */
 #define PROVIDER_CONNECT_TIMEOUT_SEC 3.0
 #define PROVIDER_READ_IDLE_SEC 30.0
+/* 本地推理端点（回环地址）的读空闲。首次 token 之前的 prompt 求值在
+ * CPU/GPU 上可达数分钟，30s 判据会把健康请求误判为 STALL（-417）；放宽到
+ * 总预算量级后仍由 CURLOPT_TIMEOUT 兜底，provider_http_setup 会把它钳制为
+ * 「严格小于总预算」。 */
+#define PROVIDER_LOCAL_READ_IDLE_SEC 180.0
 
 typedef struct {
     char *data;
