@@ -80,7 +80,8 @@ static void test_terminate(void)
     ret = agent_service_terminate(svc, agent_id);
     assert(ret == AIRY_SUCCESS);
 
-    assert(agent_service_count(svc) == 1);
+    /* 0.1.21 D5：count 与 list 同为「在册 RUNNING」，terminate 后归零 */
+    assert(agent_service_count(svc) == 0);
 
     char *out_output = NULL;
     ret = agent_service_invoke(svc, agent_id, "ping", 4, NULL, NULL, NULL, NULL, 0, NULL, &out_output);
@@ -190,8 +191,8 @@ static void test_spawn_after_terminate(void)
 
     /* The implementation does not compact the array (terminate only sets
      * status=3), so max_agents=3 allows spawning again after termination:
-     * spawn 2 (count=2), terminate 1 (count=2), spawn 1 (count=3) must
-     * succeed */
+     * spawn 2 (running=2), terminate 1 (running=1), spawn 1 (running=2) must
+     * succeed。0.1.21 D5 起 count 只统计 RUNNING。 */
     agent_service_t *svc = agent_service_create(3);
     assert(svc != NULL);
 
@@ -201,13 +202,13 @@ static void test_spawn_after_terminate(void)
     assert(agent_service_count(svc) == 2);
 
     assert(agent_service_terminate(svc, r1) == AIRY_SUCCESS);
-    assert(agent_service_count(svc) == 2);
+    assert(agent_service_count(svc) == 1);
 
     char *r3 = NULL;
     int ret = agent_service_spawn(svc, "{\"n\":3}", &r3);
     assert(ret == AIRY_SUCCESS);
     assert(r3 != NULL);
-    assert(agent_service_count(svc) == 3);
+    assert(agent_service_count(svc) == 2);
 
     char *out_output = NULL;
     int irc = agent_service_invoke(svc, r2, "hi", 2, NULL, NULL, NULL, NULL, 0, NULL, &out_output);

@@ -70,6 +70,7 @@ static void test_cache_put_admission(void)
 
     /* 含敏感标记（私有路径 + 凭据）⇒ 条目数为 0 */
     cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "cache_ns", "test");
     cJSON_AddStringToObject(params, "text", "read ~/.ssh/id_rsa with api_key=abc");
     cJSON_AddStringToObject(params, "response", "{\"answer\":\"x\"}");
     cJSON_AddStringToObject(params, "model_id", "m1");
@@ -82,6 +83,7 @@ static void test_cache_put_admission(void)
 
     /* 普通文本但未显式声明 cacheable ⇒ 仍不入缓存（fail-closed） */
     params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "cache_ns", "test");
     cJSON_AddStringToObject(params, "text", "alpha query");
     cJSON_AddStringToObject(params, "response", "alpha resp");
     cJSON_AddStringToObject(params, "model_id", "m1");
@@ -93,6 +95,7 @@ static void test_cache_put_admission(void)
 
     /* 显式声明 cacheable 的普通文本 ⇒ 正常入缓存 */
     params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "cache_ns", "test");
     cJSON_AddStringToObject(params, "text", "alpha query");
     cJSON_AddStringToObject(params, "response", "alpha resp");
     cJSON_AddStringToObject(params, "model_id", "m1");
