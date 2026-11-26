@@ -11,7 +11,7 @@
  *
  *  - 程序白名单：只认编译期表内的绝对路径，模型不可传任意命令；
  *  - 参数校验：按程序族逐项判定，拒绝 shell 元字符、路径穿越与越权参数；
- *  - 失败关闭：白名单未命中、参数越权、通道关闭、非 root 一律拒绝；
+ *  - 失败关闭：白名单未命中、参数越权、通道关闭、提权不可用一律拒绝；
  *  - 审计事件：每次尝试（含拒绝）落 daemon_audit_log_event，带判定结果。
  *
  * 通道开关 AIRY_PRIVILEGED_EXEC=off 回到全禁（默认开启，仍需 ACL 与审批）。
@@ -33,8 +33,10 @@ extern "C" {
 #define PRIV_TOOL_NAME "priv_exec"
 #define PRIV_ENV_SWITCH "AIRY_PRIVILEGED_EXEC"
 /* 用户态安装下守护以普通用户运行，特权位经 sudo -n 切换（sudoers 未授权
- * 时立即失败，不触发密码提示）。 */
+ * 时立即失败，不触发密码提示）。AIRY_PRIV_SUDO 可覆盖 sudo 路径：容器内
+ * 布局差异，以及测试注入不存在路径以确定性覆盖「提权不可用即拒绝」。 */
 #define PRIV_SUDO_PATH "/usr/bin/sudo"
+#define PRIV_ENV_SUDO "AIRY_PRIV_SUDO"
 
 /* 单次调用的参数规模上界：包名与路径远小于此，超界即判越权。 */
 #define PRIV_MAX_ARGS 32
