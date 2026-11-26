@@ -117,8 +117,20 @@ static void test_tool_name(void)
 {
     CHECK(sub_is_tool(AGENT_SUB_TOOL) == 1, "exact name matched");
     CHECK(sub_is_tool("subagent") == 0, "prefix not matched");
-    CHECK(sub_is_tool("subagent.spawn.x") == 0, "suffix not matched");
+    CHECK(sub_is_tool("subagent_spawn.x") == 0, "suffix not matched");
+    CHECK(sub_is_tool("subagent.spawn") == 0, "dotted legacy name rejected");
     CHECK(sub_is_tool(NULL) == 0, "NULL rejected");
+
+    /* Provider 的 function.name 只接受 ^[a-zA-Z0-9_-]+$：越界字符会让整套
+     * tools 被 400 拒收，agent.run 直接失败（285H 实机复现点号被拒）。 */
+    int pattern_ok = AGENT_SUB_TOOL[0] != '\0';
+    for (const char *p = AGENT_SUB_TOOL; *p; ++p) {
+        char c = *p;
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+              c == '_' || c == '-'))
+            pattern_ok = 0;
+    }
+    CHECK(pattern_ok, "name matches provider function-name pattern");
 }
 
 static void test_contract(void)
