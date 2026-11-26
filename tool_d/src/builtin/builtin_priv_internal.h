@@ -32,6 +32,9 @@ extern "C" {
 
 #define PRIV_TOOL_NAME "priv_exec"
 #define PRIV_ENV_SWITCH "AIRY_PRIVILEGED_EXEC"
+/* 用户态安装下守护以普通用户运行，特权位经 sudo -n 切换（sudoers 未授权
+ * 时立即失败，不触发密码提示）。 */
+#define PRIV_SUDO_PATH "/usr/bin/sudo"
 
 /* 单次调用的参数规模上界：包名与路径远小于此，超界即判越权。 */
 #define PRIV_MAX_ARGS 32
