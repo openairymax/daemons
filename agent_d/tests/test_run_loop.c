@@ -40,6 +40,37 @@ static void test_fail_streak(void)
     CHECK(AGENT_RUN_TOOL_FAIL_LIMIT == 3, "bump: K constant is 3");
 }
 
+/* run_tool_params：审计主体随调用下发（V-05）。带 agent_id 时原样入参，
+ * 缺位（NULL/空串）时不下发该键——tool_d 留痕据此记审计主体，不冒名。 */
+static void test_tool_params_agent(void)
+{
+    char *p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", true, "coding_v1");
+    CHECK(p != NULL, "params: build with agent id");
+    cJSON *params = p ? cJSON_Parse(p) : NULL;
+    CHECK(params != NULL, "params: parseable JSON");
+    cJSON *aid = params ? cJSON_GetObjectItem(params, "agent_id") : NULL;
+    CHECK(cJSON_IsString(aid) && strcmp(aid->valuestring, "coding_v1") == 0,
+          "params: agent id verbatim");
+    cJSON *dg = params ? cJSON_GetObjectItem(params, "allow_dangerous") : NULL;
+    CHECK(cJSON_IsBool(dg) && cJSON_IsTrue(dg), "params: allow_dangerous preserved");
+    AIRY_FREE(p);
+    cJSON_Delete(params);
+
+    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, NULL);
+    params = p ? cJSON_Parse(p) : NULL;
+    CHECK(params != NULL && cJSON_GetObjectItem(params, "agent_id") == NULL,
+          "params: missing id sends no key");
+    AIRY_FREE(p);
+    cJSON_Delete(params);
+
+    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, "");
+    params = p ? cJSON_Parse(p) : NULL;
+    CHECK(params != NULL && cJSON_GetObjectItem(params, "agent_id") == NULL,
+          "params: empty id sends no key");
+    AIRY_FREE(p);
+    cJSON_Delete(params);
+}
+
 /* run_emit_delta：真实增量即时上屏（B2 流式契约）。
  * 校验载荷以 dlen 为准（非 strlen）、空增量不产生事件、大载荷不截断。 */
 typedef struct {
@@ -613,6 +644,7 @@ int main(void)
     test_fail_streak();
     test_round_policy();
     test_emit_delta();
+    test_tool_params_agent();
     test_stream_result_free();
     test_orch_contract();
     test_run_state();

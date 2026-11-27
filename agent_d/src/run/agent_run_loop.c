@@ -243,14 +243,18 @@ static airy_cancel_token_t *run_tok(const agent_run_session_t *s)
     return s ? (airy_cancel_token_t *)&s->cancel : NULL;
 }
 
-/* 组装 execute_tool 参数；分配失败返回 NULL。 */
-static char *run_tool_params(const char *name, const char *args_json, bool allow_dangerous)
+/* 组装 execute_tool 参数；分配失败返回 NULL。agent_id 非空才下发：审计
+ * 主体以调用方自报为准，缺位时 tool_d 只能记 "tool_d"（V-05）。 */
+static char *run_tool_params(const char *name, const char *args_json, bool allow_dangerous,
+                             const char *agent_id)
 {
     cJSON *params = cJSON_CreateObject();
     if (!params)
         return NULL;
     cJSON_AddStringToObject(params, "tool_id", name);
     cJSON_AddBoolToObject(params, "allow_dangerous", allow_dangerous);
+    if (agent_id && agent_id[0])
+        cJSON_AddStringToObject(params, "agent_id", agent_id);
     cJSON *pargs = cJSON_Parse(args_json && args_json[0] ? args_json : "{}");
     if (!pargs)
         pargs = cJSON_CreateObject();
@@ -305,11 +309,12 @@ static char *run_tool_text(cJSON *result, int *out_code, int *out_ok)
  * R11：session 的取消令牌随调用下探。取消时客户端立即脱身，不等工具预算
  * 跑满；tool_d 侧按自身执行预算收尾，回执因连接关闭而丢弃，不影响审计。 */
 static int run_execute_tool(const char *name, const char *args_json, char **out_text,
-                            int *out_code, bool allow_dangerous, airy_cancel_token_t *tok)
+                            int *out_code, bool allow_dangerous, airy_cancel_token_t *tok,
+                            const char *agent_id)
 {
     *out_text = NULL;
     *out_code = 0;
-    char *params_str = run_tool_params(name, args_json, allow_dangerous);
+    char *params_str = run_tool_params(name, args_json, allow_dangerous, agent_id);
     if (!params_str)
         return -1;
 
@@ -1172,7 +1177,7 @@ static char *run_resume_emit(const loop_ctx_t *r)
  * 替代工具失败后不再连锁换路（避免把一次失败放大成一次搜索）。策略拒绝类
  * 错误码由调用方过滤，替代工具必须在当前目录内才执行。 */
 typedef int (*run_exec_fn)(const char *name, const char *args, char **out, int *code,
-                           bool allow_dangerous, airy_cancel_token_t *tok);
+                           bool allow_dangerous, airy_cancel_token_t *tok, const char *agent_id);
 
 static int run_alt_try(loop_ctx_t *r, run_alt_t *alt, run_exec_fn exec, char **out, cJSON **fbev)
 {
@@ -1190,7 +1195,7 @@ static int run_alt_try(loop_ctx_t *r, run_alt_t *alt, run_exec_fn exec, char **o
     int code = 0;
     uint64_t t0 = airy_time_ms();
     int rc = exec(alt->tool, alt->args, &res, &code, r->args->allow_dangerous,
-                  run_tok(r->args->session));
+                  run_tok(r->args->session), r->args->agent_id);
     r->out->tool_ms += airy_time_ms() - t0;
     if (rc != 0 && code != 0)
         run_cat_revoke(r, alt->tool, code);
@@ -1332,6 +1337,7 @@ static int run_tc_sub(loop_ctx_t *r, run_tc_t *c)
     q.seq = run_seqp(r);
     q.run_id = r->run_id;
     q.sess_id = r->sess;
+    q.agent_id = r->args->agent_id;
     q.token_cap = tokens_resolve(r->args->token_budget);
     q.allow_dangerous = r->args->allow_dangerous;
 
@@ -1364,7 +1370,7 @@ static int run_tc_exec(loop_ctx_t *r, run_tc_t *c)
     if (sub_is_tool(c->tname))
         return run_tc_sub(r, c);
     c->erc = run_execute_tool(c->tname, c->targs, &c->res, &code, r->args->allow_dangerous,
-                              run_tok(r->args->session));
+                              run_tok(r->args->session), r->args->agent_id);
     r->out->tool_ms += airy_time_ms() - t0;
     if (r->args->session && agent_run_is_cancelled(r->args->session)) {
         r->user_cancel = 1;

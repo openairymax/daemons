@@ -437,6 +437,12 @@ static cJSON *run_msgs_mem(run_ctx_t *c, const cJSON *history)
 static void run_loop(run_ctx_t *c, const cJSON *history)
 {
     cJSON *msgs = run_msgs_mem(c, history);
+    /* 审计主体：代理档案自报 id（如 coding_v1），未署名时回退会话 id——
+     * tool_d 留痕五字段的 agent 位不再缺位（V-05）。 */
+    cJSON *spec_id = cJSON_IsObject(c->agent_spec) ? cJSON_GetObjectItem(c->agent_spec, "id")
+                                                   : NULL;
+    const char *audit_id =
+        (cJSON_IsString(spec_id) && spec_id->valuestring[0]) ? spec_id->valuestring : c->sess;
     agent_run_loop_args_t args = {.prompt = c->prompt,
                                   .history = msgs,
                                   .model = c->mname,
@@ -445,7 +451,8 @@ static void run_loop(run_ctx_t *c, const cJSON *history)
                                   .rounds = c->rounds,
                                   .token_budget = c->task ? (uint64_t)c->task->budget_tokens : 0,
                                   .resume_token = c->resume_token,
-                                  .allow_dangerous = c->task && c->task->allow_dangerous};
+                                  .allow_dangerous = c->task && c->task->allow_dangerous,
+                                  .agent_id = audit_id};
     agent_run_loop_result_t lr = {0};
 
     c->rc = agent_run_tool_loop(&args, &lr);

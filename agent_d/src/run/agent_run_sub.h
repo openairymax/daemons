@@ -41,6 +41,7 @@ typedef struct {
     uint64_t *seq;                    /* 父事件序号计数器（可 NULL） */
     const char *run_id;               /* 父 run 标识（可 NULL） */
     const char *sess_id;              /* 父会话标识（可 NULL） */
+    const char *agent_id;             /* 父 run 审计主体（命名代理 id，可 NULL） */
     uint64_t token_cap;               /* 父 run 生效 token 预算（0 = 未知） */
     int allow_dangerous;              /* 高危工具放行（透传子 run） */
 } agent_sub_req_t;

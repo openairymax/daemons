@@ -41,6 +41,7 @@ typedef struct {
     const char *model;
     const char *run_id;
     const char *sess_id;
+    const char *agent_id; /* 审计主体：沿父 run 的命名代理 id，留痕五字段不缺位 */
     int allow_dangerous;
     int depth;
     uint64_t budget;
@@ -162,6 +163,7 @@ static airy_err_t sub_exec(const char *tool, const char *args, size_t alen, char
     la.rounds = AGENT_RUN_ROUNDS_AUTO;
     la.token_budget = c->budget;
     la.allow_dangerous = (bool)(c->allow_dangerous != 0);
+    la.agent_id = c->agent_id;
     la.seq_ext = c->seq;
 
     rc = agent_run_tool_loop(&la, &res);
@@ -268,6 +270,7 @@ int sub_task_run(const agent_sub_req_t *q, agent_sub_out_t *out)
     c.model = q->model;
     c.run_id = q->run_id;
     c.sess_id = q->sess_id;
+    c.agent_id = q->agent_id;
     c.allow_dangerous = q->allow_dangerous;
     c.depth = sub_depth();
     c.stop = AIRY_RS_STOP_DONE;

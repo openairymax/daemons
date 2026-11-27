@@ -44,6 +44,10 @@ typedef struct {
     uint64_t token_budget;                  /* 请求 token 预算（0 = 取策略/机制缺省） */
     const char *resume_token;               /* 续跑令牌（可 NULL；非空时不重放全量历史） */
     bool allow_dangerous;                   /* 高危工具放行声明（透传 tool_d 审批门） */
+    /* 审计主体（V-05）：命名代理 id 优先，缺省时调用方回退会话 id。tool_d
+     * 的作业留痕与 ACL 主体都取自它——缺位时审计只剩 "tool_d"，五字段
+     * 台账（task/agent/tool/argv/verdict）从此缺一。 */
+    const char *agent_id;
     /* 事件序号外部化（N-8）：嵌套 run（子任务）与父 run 共用一条序号，
      * 调用方传入父计数器即可，NULL 则本 run 自持。 */
     uint64_t *seq_ext;
