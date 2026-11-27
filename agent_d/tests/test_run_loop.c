@@ -10,6 +10,7 @@
 #include "../src/run/agent_run_loop.c"
 
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -122,9 +123,11 @@ static void *probe_srv_run(void *ud)
         if (c < 0)
             break;
         char b[1024];
-        while (read(c, b, sizeof(b)) > 0)
-            ;
-        if (s->resp) {
+        /* 单请求单响应：读到请求即回包。读等待 EOF 会让客户端等响应的同时
+         * 服务端等关闭，5s 预算后客户端先关连接，服务端再写即 SIGPIPE；
+         * 唤醒连接不带请求（读到 0），同样不得回包。 */
+        ssize_t got = read(c, b, sizeof(b));
+        if (s->resp && got > 0) {
             ssize_t w = write(c, s->resp, strlen(s->resp));
             (void)w;
         }
@@ -812,6 +815,9 @@ static void test_round_policy(void)
 
 int main(void)
 {
+    /* mock 与真实守护同为单请求单响应；对端在响应前关闭时写会收到 SIGPIPE，
+     * 默认动作会直接终止进程并把用例记为 SIGPIPE 失败。写失败本身可忽略。 */
+    signal(SIGPIPE, SIG_IGN);
     test_fail_streak();
     test_round_policy();
     test_emit_delta();
