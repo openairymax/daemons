@@ -136,7 +136,7 @@ static interactive_step_t ask_via_interactive(approval_gate_t *gate, const char 
      * 池预算覆盖）。凭据 hint 非空时作为 pending 键（N-9），裁决回帧经
      * 同一凭据对上本次执行；缺位由 interactive 域自生成。 */
     airy_approval_outcome_t outcome = AIRY_APPROVAL_DENIED;
-    char *request_id = interactive_approval_block_ext(gate->interactive,
+    char *request_id = appr_block_ext(gate->interactive,
                                                       meta->name ? meta->name : "?",
                                                       agent ? agent : "unknown", params_json,
                                                       request_id_hint, &outcome);

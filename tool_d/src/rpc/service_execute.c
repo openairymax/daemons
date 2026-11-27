@@ -10,7 +10,7 @@
  */
 
 #include "airy_memory.h"
-#include "core/approval_gate.h"
+#include "core/executor_run.h"
 #include "daemon_security.h"
 #include "error.h"
 #include "job/tool_audit.h"
@@ -374,9 +374,9 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
  * 返回 JSON {"needed":bool,"timeout_ms":n}（OWNER，调用方 AIRY_FREE）；
  * 工具不存在等异常返回 NULL，调用方按不需要审批继续（真实执行仍会经
  * 审批门 fail-closed，干跑失败不会放行任何调用）。 */
-char *tool_service_approval_probe(tool_service_t *svc, const char *tool_id,
-                                  const char *params_json, const char *agent_id,
-                                  int allow_dangerous)
+char *tool_svc_appr_probe(tool_service_t *svc, const char *tool_id,
+                          const char *params_json, const char *agent_id,
+                          int allow_dangerous)
 {
     if (!svc || !tool_id)
         return NULL;
@@ -384,7 +384,7 @@ char *tool_service_approval_probe(tool_service_t *svc, const char *tool_id,
     if (!meta)
         return NULL;
     uint64_t timeout_ms = 0;
-    int rc = tool_executor_gate_probe(svc->executor, meta, params_json, agent_id, allow_dangerous,
+    int rc = tool_exec_gate_probe(svc->executor, meta, params_json, agent_id, allow_dangerous,
                                       &timeout_ms);
     tool_metadata_free(meta);
     if (rc != 0)

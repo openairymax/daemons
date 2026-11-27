@@ -201,12 +201,12 @@ char *interactive_approval_block(interactive_approval_t *mgr, const char *tool,
                                  const char *agent_id, const char *params_json,
                                  airy_approval_outcome_t *out_outcome)
 {
-    return interactive_approval_block_ext(mgr, tool, agent_id, params_json, NULL, out_outcome);
+    return appr_block_ext(mgr, tool, agent_id, params_json, NULL, out_outcome);
 }
 
 /* N-9：预指定凭据版。request_id_hint 非空时作为 pending 键，供调用方先把
  * 凭据亮给界面、再带着同一凭据提交真实执行。 */
-char *interactive_approval_block_ext(interactive_approval_t *mgr, const char *tool,
+char *appr_block_ext(interactive_approval_t *mgr, const char *tool,
                                      const char *agent_id, const char *params_json,
                                      const char *request_id_hint,
                                      airy_approval_outcome_t *out_outcome)

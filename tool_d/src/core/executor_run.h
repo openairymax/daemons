@@ -41,7 +41,7 @@ int tool_executor_run_ex(tool_executor_t *exec, const tool_metadata_t *meta,
 
 /* N-9 审批干跑：只判会不会走到交互等待（不裁决不阻塞）。返回
  * INTERACTIVE 时 *out_timeout_ms 为等待上限毫秒；DENIED 表示会直接拒绝。 */
-approval_gate_verdict_t tool_executor_gate_probe(tool_executor_t *exec, const tool_metadata_t *meta,
+approval_gate_verdict_t tool_exec_gate_probe(tool_executor_t *exec, const tool_metadata_t *meta,
                                                  const char *params_json, const char *agent_id,
                                                  int allow_dangerous, uint64_t *out_timeout_ms);
 

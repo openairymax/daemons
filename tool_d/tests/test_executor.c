@@ -339,7 +339,7 @@ static void *hint_run_fn(void *argp)
     return NULL;
 }
 
-static approval_gate_t *make_gate_interactive(void)
+static approval_gate_t *mk_gate_interactive(void)
 {
     tool_approval_config_t cfg;
     AIRY_MEMSET(&cfg, 0, sizeof(cfg));
@@ -368,12 +368,12 @@ static void test_gate_probe_and_hint_id(void)
     meta.access = TOOL_ACCESS_WRITE;
 
     uint64_t timeout_ms = 12345;
-    assert(tool_executor_gate_probe(exec, &meta, "{\"cmd\":\"true\"}", "tool_d", 0,
+    assert(tool_exec_gate_probe(exec, &meta, "{\"cmd\":\"true\"}", "tool_d", 0,
                                    &timeout_ms) == APPROVAL_GATE_DENIED);
     assert(timeout_ms == 0);
 
     /* 高危 + allow_dangerous：绕过交互，静态允许。 */
-    assert(tool_executor_gate_probe(exec, &meta, "{\"cmd\":\"true\"}", "tool_d", 1,
+    assert(tool_exec_gate_probe(exec, &meta, "{\"cmd\":\"true\"}", "tool_d", 1,
                                    NULL) == APPROVAL_GATE_ALLOWED);
     tool_executor_destroy(exec);
     exec = NULL;
@@ -383,7 +383,7 @@ static void test_gate_probe_and_hint_id(void)
     setenv("AIRY_TOOL_APPROVAL_MODE", "interactive", 1);
     exec = tool_executor_create(NULL);
     assert(exec != NULL);
-    approval_gate_t *gate = make_gate_interactive();
+    approval_gate_t *gate = mk_gate_interactive();
     assert(gate != NULL);
     exec_set_gate(exec, gate);
 
@@ -396,7 +396,7 @@ static void test_gate_probe_and_hint_id(void)
     hmeta.access = TOOL_ACCESS_WRITE;
 
     uint64_t window = 0;
-    assert(tool_executor_gate_probe(exec, &hmeta, "{\"cmd\":\"true\"}", "tool_d", 0,
+    assert(tool_exec_gate_probe(exec, &hmeta, "{\"cmd\":\"true\"}", "tool_d", 0,
                                    &window) == APPROVAL_GATE_INTERACTIVE);
     assert(window > 0);
 

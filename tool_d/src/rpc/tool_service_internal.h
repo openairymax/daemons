@@ -35,6 +35,14 @@ int register_builtin_tools(tool_service_t *svc);
 /* ---- 工具可用性视图（service.c） ---- */
 tool_avail_t *tool_service_avail(tool_service_t *svc);
 
+/* ---- 审批干跑（service_execute.c） ----
+ * 只判本次调用是否会走到交互等待，不裁决、不阻塞；返回 JSON
+ * {"needed":bool,"timeout_ms":n}（OWNER，调用方 AIRY_FREE），异常返回
+ * NULL 由调用方按「无需审批」继续。 */
+char *tool_svc_appr_probe(tool_service_t *svc, const char *tool_id,
+                          const char *params_json, const char *agent_id,
+                          int allow_dangerous);
+
 #ifdef __cplusplus
 }
 #endif

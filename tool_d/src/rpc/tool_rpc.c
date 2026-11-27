@@ -26,6 +26,7 @@
 #include "core/tool_contract.h"
 #include "job/tool_job.h"
 #include "platform_time.h"
+#include "rpc/tool_service_internal.h"
 #include "verify/tool_verify.h"
 
 static void handle_register(cJSON *params, int id, airy_sock_t fd);
@@ -36,7 +37,7 @@ static void handle_health_check(int id, airy_sock_t fd);
 static void handle_stats(int id, airy_sock_t fd);
 static void handle_pending(int id, airy_sock_t fd);
 static void handle_approve(cJSON *params, int id, airy_sock_t fd);
-static void handle_approval_probe(cJSON *params, int id, airy_sock_t fd);
+static void rpc_appr_probe(cJSON *params, int id, airy_sock_t fd);
 static void handle_submit(cJSON *params, int id, airy_sock_t fd);
 static void handle_poll(cJSON *params, int id, airy_sock_t fd);
 static void handle_cancel(cJSON *params, int id, airy_sock_t fd);
@@ -77,7 +78,7 @@ DAEMON_RPC_SHELL0(get_stats, handle_stats)
 DAEMON_RPC_SHELL0(pending, handle_pending)
 DAEMON_RPC_SHELL(approve, handle_approve)
 /* N-9：审批干跑——只判会不会走到交互等待，agent 循环据此先亮凭据。 */
-DAEMON_RPC_SHELL(approval_probe, handle_approval_probe)
+DAEMON_RPC_SHELL(approval_probe, rpc_appr_probe)
 DAEMON_RPC_SHELL(submit, handle_submit)
 DAEMON_RPC_SHELL(poll, handle_poll)
 DAEMON_RPC_SHELL(cancel, handle_cancel)
@@ -533,7 +534,7 @@ static void handle_approve(cJSON *params, int id, airy_sock_t client_fd)
  * approval_request_id 提交真实执行；false（含工具不存在）表示无等待窗口，
  * 真实执行仍会经审批门 fail-closed。params 与真实执行同形，干跑才与
  * 后续审批判定一致。 */
-static void handle_approval_probe(cJSON *params, int id, airy_sock_t client_fd)
+static void rpc_appr_probe(cJSON *params, int id, airy_sock_t client_fd)
 {
     TOOLRPC_REQUIRE_SERVICE(client_fd, id);
     const char *tid = get_string_field(params, "tool_id", NULL);
@@ -548,7 +549,7 @@ static void handle_approval_probe(cJSON *params, int id, airy_sock_t client_fd)
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "JSON serialization failed", id);
         return;
     }
-    char *probe = tool_service_approval_probe(g_service, tid, params_json, agent_id,
+    char *probe = tool_svc_appr_probe(g_service, tid, params_json, agent_id,
                                               allow_dangerous);
     AIRY_FREE((void *)params_json);
     if (!probe) {

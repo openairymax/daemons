@@ -103,10 +103,10 @@ char *interactive_approval_block(interactive_approval_t *mgr, const char *tool,
  *
  * @ownership params_json/request_id_hint: BORROW; return: OWNER
  */
-char *interactive_approval_block_ext(interactive_approval_t *mgr, const char *tool,
-                                     const char *agent_id, const char *params_json,
-                                     const char *request_id_hint,
-                                     airy_approval_outcome_t *out_outcome);
+char *appr_block_ext(interactive_approval_t *mgr, const char *tool,
+                     const char *agent_id, const char *params_json,
+                     const char *request_id_hint,
+                     airy_approval_outcome_t *out_outcome);
 
 /**
  * @brief Resolve a pending request by request_id.
