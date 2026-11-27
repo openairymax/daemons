@@ -669,10 +669,12 @@ static struct {
 } g_fake;
 
 static int fake_exec(const char *name, const char *args, char **out, int *code, bool allow_dangerous,
-                     airy_cancel_token_t *tok)
+                     airy_cancel_token_t *tok, const char *agent_id, const run_appr_ui_t *ui)
 {
     (void)allow_dangerous;
     (void)tok;
+    (void)agent_id;
+    (void)ui;
     g_fake.calls++;
     AIRY_STRNCPY_TERM(g_fake.tool, name, sizeof(g_fake.tool));
     AIRY_STRNCPY_TERM(g_fake.args, args, sizeof(g_fake.args));
