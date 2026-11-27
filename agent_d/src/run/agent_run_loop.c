@@ -247,12 +247,14 @@ static airy_cancel_token_t *run_tok(const agent_run_session_t *s)
     return s ? (airy_cancel_token_t *)&s->cancel : NULL;
 }
 
-/* 组装 execute_tool 参数；分配失败返回 NULL。agent_id 非空才下发：审计
- * 主体以调用方自报为准，缺位时 tool_d 只能记 "tool_d"（V-05）。凭据
- * approval_request_id 非空才下发：交互审批的 pending 键由 agent_d 预先
+/* 组装 execute_tool 参数；分配失败返回 NULL。身份两分账（V-05/N-9）：
+ * agent_id 是授权主体，只有命名代理才下发，缺位时由 tool_d 回落 "tool_d"；
+ * audit_id 是审计主体（命名为准，缺省为会话实例号），只进台账不参与 ACL。
+ * 凭据 approval_request_id 非空才下发：交互审批的 pending 键由 agent_d 预先
  * 亮出，tool_d 以同一凭据开 pending（N-9），裁决回帧据此对上本次执行。 */
 static char *run_tool_params(const char *name, const char *args_json, bool allow_dangerous,
-                             const char *agent_id, const char *approval_request_id)
+                             const char *agent_id, const char *audit_id,
+                             const char *approval_request_id)
 {
     cJSON *params = cJSON_CreateObject();
     if (!params)
@@ -261,6 +263,8 @@ static char *run_tool_params(const char *name, const char *args_json, bool allow
     cJSON_AddBoolToObject(params, "allow_dangerous", allow_dangerous);
     if (agent_id && agent_id[0])
         cJSON_AddStringToObject(params, "agent_id", agent_id);
+    if (audit_id && audit_id[0])
+        cJSON_AddStringToObject(params, "audit_id", audit_id);
     if (approval_request_id && approval_request_id[0])
         cJSON_AddStringToObject(params, "approval_request_id", approval_request_id);
     cJSON *pargs = cJSON_Parse(args_json && args_json[0] ? args_json : "{}");
@@ -411,7 +415,7 @@ static void run_appr_probe(const char *sock, const char *name, const char *args_
  * 零，时序与旧版一致。 */
 static int run_execute_tool(const char *name, const char *args_json, char **out_text,
                             int *out_code, bool allow_dangerous, airy_cancel_token_t *tok,
-                            const char *agent_id, const run_appr_ui_t *ui)
+                            const char *agent_id, const char *audit_id, const run_appr_ui_t *ui)
 {
     *out_text = NULL;
     *out_code = 0;
@@ -423,7 +427,7 @@ static int run_execute_tool(const char *name, const char *args_json, char **out_
     run_appr_probe(sock, name, args_json, allow_dangerous, agent_id, ui, rid, sizeof(rid),
                    &wait_ms);
 
-    char *params_str = run_tool_params(name, args_json, allow_dangerous, agent_id,
+    char *params_str = run_tool_params(name, args_json, allow_dangerous, agent_id, audit_id,
                                        rid[0] ? rid : NULL);
     if (!params_str)
         return -1;
@@ -1295,7 +1299,7 @@ static run_appr_ui_t run_appr_ui(const loop_ctx_t *r)
  * 错误码由调用方过滤，替代工具必须在当前目录内才执行。 */
 typedef int (*run_exec_fn)(const char *name, const char *args, char **out, int *code,
                            bool allow_dangerous, airy_cancel_token_t *tok, const char *agent_id,
-                           const run_appr_ui_t *ui);
+                           const char *audit_id, const run_appr_ui_t *ui);
 
 static int run_alt_try(loop_ctx_t *r, run_alt_t *alt, run_exec_fn exec, char **out, cJSON **fbev)
 {
@@ -1314,7 +1318,7 @@ static int run_alt_try(loop_ctx_t *r, run_alt_t *alt, run_exec_fn exec, char **o
     uint64_t t0 = airy_time_ms();
     run_appr_ui_t ui = run_appr_ui(r);
     int rc = exec(alt->tool, alt->args, &res, &code, r->args->allow_dangerous,
-                  run_tok(r->args->session), r->args->agent_id, &ui);
+                  run_tok(r->args->session), r->args->agent_id, r->args->audit_id, &ui);
     r->out->tool_ms += airy_time_ms() - t0;
     if (rc != 0 && code != 0)
         run_cat_revoke(r, alt->tool, code);
@@ -1457,6 +1461,7 @@ static int run_tc_sub(loop_ctx_t *r, run_tc_t *c)
     q.run_id = r->run_id;
     q.sess_id = r->sess;
     q.agent_id = r->args->agent_id;
+    q.audit_id = r->args->audit_id;
     q.token_cap = tokens_resolve(r->args->token_budget);
     q.allow_dangerous = r->args->allow_dangerous;
 
@@ -1490,7 +1495,8 @@ static int run_tc_exec(loop_ctx_t *r, run_tc_t *c)
         return run_tc_sub(r, c);
     run_appr_ui_t ui = run_appr_ui(r);
     c->erc = run_execute_tool(c->tname, c->targs, &c->res, &code, r->args->allow_dangerous,
-                              run_tok(r->args->session), r->args->agent_id, &ui);
+                              run_tok(r->args->session), r->args->agent_id, r->args->audit_id,
+                              &ui);
     r->out->tool_ms += airy_time_ms() - t0;
     if (r->args->session && agent_run_is_cancelled(r->args->session)) {
         r->user_cancel = 1;

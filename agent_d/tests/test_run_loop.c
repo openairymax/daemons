@@ -47,46 +47,66 @@ static void test_fail_streak(void)
     CHECK(AGENT_RUN_TOOL_FAIL_LIMIT == 3, "bump: K constant is 3");
 }
 
-/* run_tool_params：审计主体随调用下发（V-05）。带 agent_id 时原样入参，
- * 缺位（NULL/空串）时不下发该键——tool_d 留痕据此记审计主体，不冒名。 */
+/* run_tool_params：身份两分账（V-05）。agent_id 是授权主体、audit_id 是
+ * 审计主体，各自非空才下发；只有实例号时不得冒名为授权主体，否则 ACL
+ * 无对应条目会 fail-closed。 */
 static void test_tool_params_agent(void)
 {
-    char *p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", true, "coding_v1", NULL);
+    char *p =
+        run_tool_params("fs_read", "{\"path\":\"/tmp\"}", true, "coding_v1", "sess_1", NULL);
     CHECK(p != NULL, "params: build with agent id");
     cJSON *params = p ? cJSON_Parse(p) : NULL;
     CHECK(params != NULL, "params: parseable JSON");
     cJSON *aid = params ? cJSON_GetObjectItem(params, "agent_id") : NULL;
     CHECK(cJSON_IsString(aid) && strcmp(aid->valuestring, "coding_v1") == 0,
           "params: agent id verbatim");
+    cJSON *uid = params ? cJSON_GetObjectItem(params, "audit_id") : NULL;
+    CHECK(cJSON_IsString(uid) && strcmp(uid->valuestring, "sess_1") == 0,
+          "params: audit id verbatim");
     cJSON *dg = params ? cJSON_GetObjectItem(params, "allow_dangerous") : NULL;
     CHECK(cJSON_IsBool(dg) && cJSON_IsTrue(dg), "params: allow_dangerous preserved");
     AIRY_FREE(p);
     cJSON_Delete(params);
 
-    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, NULL, NULL);
+    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, NULL, NULL, NULL);
     params = p ? cJSON_Parse(p) : NULL;
     CHECK(params != NULL && cJSON_GetObjectItem(params, "agent_id") == NULL,
           "params: missing id sends no key");
+    CHECK(params != NULL && cJSON_GetObjectItem(params, "audit_id") == NULL,
+          "params: missing audit id sends no key");
     AIRY_FREE(p);
     cJSON_Delete(params);
 
-    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, "", "");
+    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, "", "", NULL);
     params = p ? cJSON_Parse(p) : NULL;
     CHECK(params != NULL && cJSON_GetObjectItem(params, "agent_id") == NULL,
           "params: empty id sends no key");
+    CHECK(params != NULL && cJSON_GetObjectItem(params, "audit_id") == NULL,
+          "params: empty audit id sends no key");
+    AIRY_FREE(p);
+    cJSON_Delete(params);
+
+    /* 未署名运行：只有实例号进审计位，授权位缺省交给 tool_d 回落。 */
+    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, NULL, "sess_2", NULL);
+    params = p ? cJSON_Parse(p) : NULL;
+    CHECK(params != NULL && cJSON_GetObjectItem(params, "agent_id") == NULL,
+          "params: instance id never claims principal slot");
+    cJSON *au = params ? cJSON_GetObjectItem(params, "audit_id") : NULL;
+    CHECK(cJSON_IsString(au) && strcmp(au->valuestring, "sess_2") == 0,
+          "params: instance id goes to audit slot");
     AIRY_FREE(p);
     cJSON_Delete(params);
 
     /* N-9：凭据缺位（NULL/空串）不下发 approval_request_id；非空原样下发，
      * tool_d 以它作交互审批 pending 键，裁决回帧据此对上本次执行。 */
-    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, NULL, NULL);
+    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, NULL, NULL, NULL);
     params = p ? cJSON_Parse(p) : NULL;
     CHECK(params != NULL && cJSON_GetObjectItem(params, "approval_request_id") == NULL,
           "params: missing approval id sends no key");
     AIRY_FREE(p);
     cJSON_Delete(params);
 
-    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, NULL, "a7");
+    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, NULL, NULL, "a7");
     params = p ? cJSON_Parse(p) : NULL;
     cJSON *rid = params ? cJSON_GetObjectItem(params, "approval_request_id") : NULL;
     CHECK(cJSON_IsString(rid) && strcmp(rid->valuestring, "a7") == 0,
@@ -672,11 +692,13 @@ static struct {
 } g_fake;
 
 static int fake_exec(const char *name, const char *args, char **out, int *code, bool allow_dangerous,
-                     airy_cancel_token_t *tok, const char *agent_id, const run_appr_ui_t *ui)
+                     airy_cancel_token_t *tok, const char *agent_id, const char *audit_id,
+                     const run_appr_ui_t *ui)
 {
     (void)allow_dangerous;
     (void)tok;
     (void)agent_id;
+    (void)audit_id;
     (void)ui;
     g_fake.calls++;
     AIRY_STRNCPY_TERM(g_fake.tool, name, sizeof(g_fake.tool));

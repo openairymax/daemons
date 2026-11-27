@@ -29,8 +29,9 @@
 
 struct job_entry {
     tooljob_t *jobs;
-    tool_job_info_t info;
+    tool_job_info_t info;  /* info.agent_id 是审计主体：只进台账展示 */
     char *params;
+    char *principal; /* 授权主体：仅本次执行（ACL/审批）使用，不落盘 */
     int cancel;      /* 协作取消：结果作废 */
     int thread_done;
     int allow_dangerous; /* D-9：提交时声明的高危放行，透传给执行层 */
@@ -61,6 +62,7 @@ static void job_release(struct job_entry *e)
     AIRY_FREE(e->info.output);
     AIRY_FREE(e->info.error);
     AIRY_FREE(e->params);
+    AIRY_FREE(e->principal);
     AIRY_FREE(e);
 }
 
@@ -262,6 +264,7 @@ static void job_load(tooljob_t *j)
         }
         e->jobs = j;
         e->info = info;
+        e->principal = job_dup(info.agent_id);
         j->count++;
     }
     airy_io_free_list(files, n);
@@ -327,7 +330,8 @@ static void *job_worker(void *arg)
     AIRY_MEMSET(&req, 0, sizeof(req));
     req.tool_id = e->info.tool_id;
     req.params_json = e->params;
-    req.agent_id = e->info.agent_id[0] ? e->info.agent_id : NULL;
+    req.agent_id = (e->principal && e->principal[0]) ? e->principal : NULL;
+    req.audit_id = e->info.agent_id[0] ? e->info.agent_id : NULL;
     req.timeout_sec = e->info.timeout_sec;
     req.allow_dangerous = e->allow_dangerous;
     rc = j->run(j->ctx, &req, &res);
@@ -398,7 +402,11 @@ int tooljob_submit(tooljob_t *jobs, const tool_execute_request_t *req, int timeo
     if (!e)
         return AIRY_ERR_BUSY;
     snprintf(e->info.tool_id, sizeof(e->info.tool_id), "%s", req->tool_id);
-    if (req->agent_id)
+    /* 两分账：principal 只给执行（ACL/审批），agent_id 位留给审计主体。 */
+    e->principal = job_dup(req->agent_id);
+    if (req->audit_id && req->audit_id[0])
+        snprintf(e->info.agent_id, sizeof(e->info.agent_id), "%s", req->audit_id);
+    else if (req->agent_id)
         snprintf(e->info.agent_id, sizeof(e->info.agent_id), "%s", req->agent_id);
     e->info.state = TOOL_JOB_RUNNING;
     e->info.created_ms = airy_time_wall_ms();

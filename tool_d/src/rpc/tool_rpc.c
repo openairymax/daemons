@@ -282,6 +282,9 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
      * subject; when absent, fall back to the "tool_d" default (existing
      * behavior unchanged). */
     const char *agent_id = get_string_field(params, "agent_id", NULL);
+    /* V-05 两分账：audit_id 是留痕主体（会话/运行实例），只进作业台账；
+     * ACL 与审批仍按 agent_id（命名代理）判定。缺位时审计回落授权主体。 */
+    const char *audit_id = get_string_field(params, "audit_id", NULL);
     /* D-9：高危工具（shell_run/tool_create/包管理类命令）需逐次审批；
      * 调用方可显式 allow_dangerous 声明接受风险（仍写审计留痕）。 */
     int allow_dangerous = get_bool_field(params, "allow_dangerous", false);
@@ -304,6 +307,7 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
                                   .params_json = params_json,
                                   .stream = 0,
                                   .agent_id = agent_id,
+                                  .audit_id = audit_id,
                                   .approval_request_id = approval_request_id,
                                   .allow_dangerous = allow_dangerous};
 
@@ -314,8 +318,11 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
      * 响应回带 job_id，jobs show 可还原命令/退出码/耗时/审批人。 */
     char job_id[TOOL_JOB_ID_MAX] = {0};
     if (g_jobs && res)
-        (void)tooljob_record(g_jobs, tid, agent_id ? agent_id : "tool_d", params_json, res,
-                             started_ms, job_id, sizeof(job_id));
+        (void)tooljob_record(g_jobs, tid,
+                             (audit_id && audit_id[0]) ? audit_id
+                                                       : (agent_id && agent_id[0] ? agent_id
+                                                                                 : "tool_d"),
+                             params_json, res, started_ms, job_id, sizeof(job_id));
     AIRY_FREE((void *)params_json);
 
     /* Error layering: a JSON-RPC error envelope is reserved for protocol /
@@ -373,6 +380,7 @@ static void handle_submit(cJSON *params, int id, airy_sock_t client_fd)
     const char *tid = get_string_field(params, "tool_id", NULL);
     cJSON *jparams = jsonrpc_get_object_param(params, "params");
     const char *agent_id = get_string_field(params, "agent_id", NULL);
+    const char *audit_id = get_string_field(params, "audit_id", NULL);
     int timeout = get_int_field(params, "timeout_sec", 0);
     int allow_dangerous = get_bool_field(params, "allow_dangerous", false);
     char job_id[TOOL_JOB_ID_MAX];
@@ -394,6 +402,7 @@ static void handle_submit(cJSON *params, int id, airy_sock_t client_fd)
                                   .params_json = params_json,
                                   .stream = 0,
                                   .agent_id = agent_id,
+                                  .audit_id = audit_id,
                                   .timeout_sec = timeout,
                                   .allow_dangerous = allow_dangerous};
     ret = tooljob_submit(g_jobs, &req, timeout, job_id, sizeof(job_id));
