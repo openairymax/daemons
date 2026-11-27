@@ -57,8 +57,9 @@ int mem_rec_tenant(const mem_record_entry_t *rec, const char *tenant)
     return mem_meta_is(rec, "tenant", tenant, "default");
 }
 
-int mem_recent_scope(mem_service_t *svc, uint32_t limit, const mem_scope_t *scope,
-                     mem_recent_item_t **out_items, size_t *out_count)
+int mem_recent_page(mem_service_t *svc, uint32_t limit, const mem_scope_t *scope,
+                    int64_t before, mem_recent_item_t **out_items, size_t *out_count,
+                    int64_t *out_next, int *out_has_more)
 {
     const char *kb_id = scope ? scope->kb_id : NULL;
     const char *conv = scope ? scope->conv : NULL;
@@ -68,14 +69,28 @@ int mem_recent_scope(mem_service_t *svc, uint32_t limit, const mem_scope_t *scop
         return AIRY_ERR_INVALID_PARAM;
     *out_items = NULL;
     *out_count = 0;
+    if (out_next)
+        *out_next = 0;
+    if (out_has_more)
+        *out_has_more = 0;
 
     if (limit == 0)
         limit = MEM_RECENT_DEFAULT_LIMIT;
 
     airy_mtx_lock(&svc->lock);
 
+    /* 下标倒序即写入序倒序：写入总落在 record_count 处，删除以 memmove
+     * 连续压实（mem_remove_record_at），故数组下标恒等于写入序。不依赖
+     * created_at（秒级精度，同秒多写时会并列）。
+     * 游标是排他上界：只扫描下标 < cursor 的部分；-1 或越界从最新开始
+     * （游标可能因并发删除而超过当前总数，按最新处理即恢复）。 */
     size_t total = svc->record_count;
-    size_t take = total < limit ? total : limit;
+    size_t cursor = total;
+    if (before >= 0) {
+        uint64_t b = (uint64_t)before;
+        cursor = b < (uint64_t)total ? (size_t)b : total;
+    }
+    size_t take = cursor < limit ? cursor : limit;
     mem_recent_item_t *items =
         take ? (mem_recent_item_t *)AIRY_CALLOC(take, sizeof(mem_recent_item_t)) : NULL;
     if (take && !items) {
@@ -83,16 +98,15 @@ int mem_recent_scope(mem_service_t *svc, uint32_t limit, const mem_scope_t *scop
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    /* 下标倒序即写入序倒序：写入总落在 record_count 处，删除以 memmove
-     * 连续压实（mem_remove_record_at），故数组下标恒等于写入序。不依赖
-     * created_at（秒级精度，同秒多写时会并列）。
-     * 扫描全量而不是只扫最新 limit 条：否则范围外记录会占满窗口，
-     * 使更早的匹配记录被静默丢弃（见 mem_service.h 的约定）。 */
+    /* 扫描全量而不是只扫最新 limit 条：否则范围外记录会占满窗口，
+     * 使更早的匹配记录被静默丢弃（见 mem_service.h 的约定）。
+     * 未命中的下标也计入游标推进：下一页从本次最后检查处继续，
+     * 因此范围过滤不会造成翻页漏段。 */
     size_t n = 0;
-    for (size_t i = 0; i < total; i++) {
-        if (n >= take)
-            break;
-        const mem_record_entry_t *rec = &svc->records[total - 1 - i];
+    size_t i = cursor;
+    while (i > 0 && n < limit) {
+        i--;
+        const mem_record_entry_t *rec = &svc->records[i];
         if (!rec->record_id || !rec->data)
             continue;
         if (kb_id && !mem_rec_in_kb(rec, kb_id))
@@ -114,6 +128,11 @@ int mem_recent_scope(mem_service_t *svc, uint32_t limit, const mem_scope_t *scop
 
     airy_mtx_unlock(&svc->lock);
 
+    if (out_next)
+        *out_next = (int64_t)i;
+    if (out_has_more)
+        *out_has_more = i > 0;
+
     if (n == 0) {
         AIRY_FREE(items);
         return AIRY_SUCCESS;
@@ -123,6 +142,12 @@ int mem_recent_scope(mem_service_t *svc, uint32_t limit, const mem_scope_t *scop
     *out_items = shrunk ? shrunk : items;
     *out_count = n;
     return AIRY_SUCCESS;
+}
+
+int mem_recent_scope(mem_service_t *svc, uint32_t limit, const mem_scope_t *scope,
+                     mem_recent_item_t **out_items, size_t *out_count)
+{
+    return mem_recent_page(svc, limit, scope, -1, out_items, out_count, NULL, NULL);
 }
 
 int mem_recent_scoped(mem_service_t *svc, uint32_t limit, const char *conv,

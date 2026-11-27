@@ -146,6 +146,21 @@ int mem_recent_scoped(mem_service_t *svc, uint32_t limit, const char *conv,
  */
 int mem_recent_scope(mem_service_t *svc, uint32_t limit, const mem_scope_t *scope,
                      mem_recent_item_t **out_items, size_t *out_count);
+
+/**
+ * @brief 最近列表的分页读取（0.1.21 X8-01a：水合分页 cursor）。
+ *
+ * 冷启动一次取 1000 条会让应答超过 RPC 缓冲（M-01/M-02），故水合改为
+ * 每页 ≤50 条。`before` 是上一页返回的 `next`，语义为「排他上界」：
+ * 本次只扫描数组下标 < before 的部分（数组下标即写入序，见 scope.c）；
+ * 传 -1 从最新一条开始。返回的 `*out_next` 可直接作为下一页的 before，
+ * 0 表示已到最早一条；`*out_has_more` 与之一致。游标基于写入序而非
+ * created_at（秒级精度会并列），删除只会让下标前移，下一页最多重复
+ * 不会漏段，重复由调用方按记录身份去重。
+ */
+int mem_recent_page(mem_service_t *svc, uint32_t limit, const mem_scope_t *scope,
+                    int64_t before, mem_recent_item_t **out_items, size_t *out_count,
+                    int64_t *out_next, int *out_has_more);
 void mem_recent_items_free(mem_recent_item_t *items, size_t count);
 
 /**

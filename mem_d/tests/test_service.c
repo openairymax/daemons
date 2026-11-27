@@ -1085,6 +1085,124 @@ static void test_recent_tenant_scope(void)
     printf("    PASSED\n");
 }
 
+/* X8-01a：分页游标可续；X8-02b：范围过滤下翻页不重不漏。
+ * 逐页 limit=1 直到 has_more=false，游标必须严格前进且最终恰好覆盖
+ * sess_a 的全部记录（倒序）。 */
+static void test_recent_page_cursor(void)
+{
+    printf("  test_recent_page_cursor...\n");
+    mem_test_clean_persist();
+    mem_service_t *svc = mem_service_create(16);
+    assert(svc != NULL);
+
+    char *ids[6];
+    for (int k = 0; k < 6; k++) {
+        char text[64];
+        char meta[64];
+        snprintf(text, sizeof(text), "page record %d", k);
+        snprintf(meta, sizeof(meta), "{\"conv\":\"sess_%c\"}", (k % 2) ? 'b' : 'a');
+        ids[k] = write_meta(svc, text, meta);
+    }
+
+    mem_scope_t scope = {0};
+    scope.conv = "sess_a";
+    int64_t before = -1;
+    size_t total = 0;
+    char *seen[4] = {NULL};
+    while (1) {
+        mem_recent_item_t *items = NULL;
+        size_t n = 0;
+        int64_t next = -99;
+        int more = -1;
+        assert(mem_recent_page(svc, 1, &scope, before, &items, &n, &next, &more) == AIRY_SUCCESS);
+        assert(n <= (size_t)1);
+        if (n == 1) {
+            for (size_t j = 0; j < total; j++)
+                assert(strcmp(seen[j], items[0].record_id) != 0);
+            assert(total < (size_t)4);
+            seen[total++] = AIRY_STRDUP(items[0].record_id);
+            mem_recent_items_free(items, n);
+        }
+        assert(more == (next > 0));
+        if (!more)
+            break;
+        assert(before < 0 || next < before);
+        before = next;
+    }
+    assert(total == 3);
+    assert(strcmp(seen[0], ids[4]) == 0);
+    assert(strcmp(seen[1], ids[2]) == 0);
+    assert(strcmp(seen[2], ids[0]) == 0);
+
+    /* 陈旧游标（并发删除后超过总数）按最新一页恢复，不越界。 */
+    mem_recent_item_t *items = NULL;
+    size_t n = 0;
+    int64_t next = -1;
+    int more = -1;
+    scope.conv = NULL;
+    assert(mem_recent_page(svc, 2, &scope, 999, &items, &n, &next, &more) == AIRY_SUCCESS);
+    assert(n == 2);
+    assert(strcmp(items[0].record_id, ids[5]) == 0);
+    assert(strcmp(items[1].record_id, ids[4]) == 0);
+    assert(more == 1);
+    mem_recent_items_free(items, n);
+
+    for (size_t j = 0; j < total; j++)
+        AIRY_FREE(seen[j]);
+    for (int k = 0; k < 6; k++)
+        AIRY_FREE(ids[k]);
+    mem_service_destroy(svc);
+    mem_test_clean_persist();
+    printf("    PASSED\n");
+}
+
+/* X8-01b：页间发生删除时游标仍可续——最多重复（由调用方去重），绝不漏段。 */
+static void test_recent_page_resume_after_delete(void)
+{
+    printf("  test_recent_page_resume_after_delete...\n");
+    mem_test_clean_persist();
+    mem_service_t *svc = mem_service_create(16);
+    assert(svc != NULL);
+
+    char *ids[4];
+    for (int k = 0; k < 4; k++) {
+        char text[64];
+        snprintf(text, sizeof(text), "resume record %d", k);
+        ids[k] = write_text(svc, text);
+    }
+
+    mem_scope_t scope = {0};
+    mem_recent_item_t *items = NULL;
+    size_t n = 0;
+    int64_t next = -1;
+    int more = -1;
+    assert(mem_recent_page(svc, 2, &scope, -1, &items, &n, &next, &more) == AIRY_SUCCESS);
+    assert(n == 2 && more == 1);
+    assert(strcmp(items[0].record_id, ids[3]) == 0);
+    assert(strcmp(items[1].record_id, ids[2]) == 0);
+    mem_recent_items_free(items, n);
+
+    /* 删除已返回的 ids[3] 与更早的 ids[0]：游标 2 扫描 [0,2) 仍覆盖
+     * ids[1] 与 ids[0] 的位置（后者已删），不漏 ids[1]。 */
+    assert(mem_service_delete(svc, ids[3]) == AIRY_SUCCESS);
+    assert(mem_service_delete(svc, ids[0]) == AIRY_SUCCESS);
+    items = NULL;
+    n = 0;
+    next = -1;
+    more = -1;
+    assert(mem_recent_page(svc, 2, &scope, 2, &items, &n, &next, &more) == AIRY_SUCCESS);
+    assert(n == 1);
+    assert(strcmp(items[0].record_id, ids[1]) == 0);
+    assert(more == 0 && next == 0);
+    mem_recent_items_free(items, n);
+
+    for (int k = 0; k < 4; k++)
+        AIRY_FREE(ids[k]);
+    mem_service_destroy(svc);
+    mem_test_clean_persist();
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
 
@@ -1126,6 +1244,8 @@ int main(void)
     test_recent_order_after_reload();
     test_recent_conv_scope();
     test_recent_tenant_scope();
+    test_recent_page_cursor();
+    test_recent_page_resume_after_delete();
     printf("=== All tests PASSED ===\n");
     return 0;
 }

@@ -146,20 +146,26 @@ void handle_count(int id, airy_sock_t client_fd)
 
 /* ── mem.recent ──────────────────────────────────────────────────────── */
 
-/* 供 CLI/TUI 记忆链展示面板使用：每条含完整内容/metadata/created_at。 */
+/* 供 CLI/TUI 记忆链展示面板使用：每条含完整内容/metadata/created_at。
+ * 0.1.21 X8-01a：可选 before 游标分页，应答带 next / has_more，
+ * 让水合按 ≤50 条一页拉取（旧版调用不传 before 时行为不变）。 */
 void handle_recent(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *limit = params ? cJSON_GetObjectItem(params, "limit") : NULL;
     cJSON *conv = params ? cJSON_GetObjectItem(params, "conv") : NULL;
     cJSON *tenant = params ? cJSON_GetObjectItem(params, "tenant") : NULL;
+    cJSON *before = params ? cJSON_GetObjectItem(params, "before") : NULL;
     uint32_t lim = limit && cJSON_IsNumber(limit) ? clamp_u32(limit->valueint, 0, 1000) : 0;
+    int64_t cur = before && cJSON_IsNumber(before) ? (int64_t)before->valuedouble : -1;
     mem_scope_t scope = {0};
     scope.conv = cJSON_IsString(conv) && conv->valuestring[0] ? conv->valuestring : NULL;
     scope.tenant = cJSON_IsString(tenant) && tenant->valuestring[0] ? tenant->valuestring : NULL;
 
     mem_recent_item_t *items = NULL;
     size_t count = 0;
-    int ret = mem_recent_scope(g_service, lim, &scope, &items, &count);
+    int64_t next = 0;
+    int more = 0;
+    int ret = mem_recent_page(g_service, lim, &scope, cur, &items, &count, &next, &more);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Memory recent failed", id);
         return;
@@ -179,6 +185,8 @@ void handle_recent(cJSON *params, int id, airy_sock_t client_fd)
     }
     cJSON_AddItemToObject(result, "records", arr);
     cJSON_AddNumberToObject(result, "total", (double)count);
+    cJSON_AddNumberToObject(result, "next", (double)next);
+    cJSON_AddBoolToObject(result, "has_more", more != 0);
 
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
     mem_recent_items_free(items, count);
