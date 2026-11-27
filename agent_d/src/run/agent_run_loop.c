@@ -319,9 +319,8 @@ typedef struct {
     const char *sess;
 } run_appr_ui_t;
 
-/* run_seqp / run_fit 定义在后文：预检发帧要在帧序与 UTF-8 安全截断
- * 两处契约上与事件流保持一致，前向声明让审批块靠近执行面。 */
-static uint64_t *run_seqp(loop_ctx_t *r);
+/* run_fit 定义在后文：审批块的 UTF-8 安全截断要与事件流同一实现，
+ * 前向声明让审批块靠近执行面。 */
 static void run_fit(char *buf, size_t cap, const char *src);
 
 /* agent_d 侧凭据序列（"a%d"）：tool_d 缺凭据时自生成 "req_" 前缀，
