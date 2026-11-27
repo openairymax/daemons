@@ -10,6 +10,7 @@
  */
 
 #include "airy_memory.h"
+#include "core/approval_gate.h"
 #include "daemon_security.h"
 #include "error.h"
 #include "job/tool_audit.h"
@@ -254,7 +255,7 @@ static void apply_timeout(tool_metadata_t *meta, const tool_execute_request_t *r
  */
 static int do_execute_tool(tool_service_t *svc, tool_metadata_t *meta, const char *params_json,
                            const char *agent_id, int allow_dangerous,
-                           tool_result_t **out_result)
+                           const char *approval_request_id, tool_result_t **out_result)
 {
     if (!svc || !meta || !out_result) {
         return AIRY_ERR_INVALID_PARAM;
@@ -266,7 +267,7 @@ static int do_execute_tool(tool_service_t *svc, tool_metadata_t *meta, const cha
 
     tool_result_t *res = NULL;
     int ret = executor_pool_run_ex(svc->exec_pool, meta, params_json, agent_id, allow_dangerous,
-                                   &res);
+                                   approval_request_id, &res);
 
     if (ret != 0) {
         SVC_LOG_ERROR("Tool execution failed, error: %d", ret);
@@ -343,6 +344,7 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
     airy_timestamp_t ts0, ts1;
     airy_time_monotonic(&ts0);
     int ret = do_execute_tool(svc, meta, req->params_json, req->agent_id, req->allow_dangerous,
+                              req->approval_request_id,
                               &res);
     airy_time_monotonic(&ts1);
     atomic_fetch_add_explicit(&svc->exec_total, 1, memory_order_relaxed);
@@ -366,4 +368,33 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
         meta = NULL;
     }
     return AIRY_OK;
+}
+
+/* N-9 审批干跑：只判「这次调用会不会走到交互等待」，不裁决、不阻塞。
+ * 返回 JSON {"needed":bool,"timeout_ms":n}（OWNER，调用方 AIRY_FREE）；
+ * 工具不存在等异常返回 NULL，调用方按不需要审批继续（真实执行仍会经
+ * 审批门 fail-closed，干跑失败不会放行任何调用）。 */
+char *tool_service_approval_probe(tool_service_t *svc, const char *tool_id,
+                                  const char *params_json, const char *agent_id,
+                                  int allow_dangerous)
+{
+    if (!svc || !tool_id)
+        return NULL;
+    tool_metadata_t *meta = tool_service_get(svc, tool_id);
+    if (!meta)
+        return NULL;
+    uint64_t timeout_ms = 0;
+    int rc = tool_executor_gate_probe(svc->executor, meta, params_json, agent_id, allow_dangerous,
+                                      &timeout_ms);
+    tool_metadata_free(meta);
+    if (rc != 0)
+        return NULL;
+    cJSON *obj = cJSON_CreateObject();
+    if (!obj)
+        return NULL;
+    cJSON_AddBoolToObject(obj, "needed", rc == APPROVAL_GATE_INTERACTIVE);
+    cJSON_AddNumberToObject(obj, "timeout_ms", (double)timeout_ms);
+    char *str = cJSON_PrintUnformatted(obj);
+    cJSON_Delete(obj);
+    return str;
 }

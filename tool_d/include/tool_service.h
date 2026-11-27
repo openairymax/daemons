@@ -67,6 +67,22 @@ char *tool_service_list_ex(tool_service_t *svc, int include_denied);
 int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
                          tool_result_t **out_result);
 
+/**
+ * @brief N-9 审批干跑：只判「这次调用会不会走到交互等待」，不裁决、不阻塞。
+ * @param svc Tool-service instance
+ * @param tool_id Tool id (BORROW)
+ * @param params_json Parameter JSON (BORROW)
+ * @param agent_id Caller agent id (BORROW, may be NULL)
+ * @param allow_dangerous D-9 explicit danger bypass flag
+ * @return JSON string {"needed":bool,"timeout_ms":n} (AIRY_MALLOC, caller
+ *         AIRY_FREEs); NULL when the tool is unknown or probe fails —
+ *         callers must then proceed without an approval window (the real
+ *         execution still passes the fail-closed gate).
+ */
+char *tool_service_approval_probe(tool_service_t *svc, const char *tool_id,
+                                  const char *params_json, const char *agent_id,
+                                  int allow_dangerous);
+
 void tool_result_free(tool_result_t *res);
 
 

@@ -51,6 +51,7 @@ typedef struct pool_job {
     int detached;
     int started; /* worker 已出队取走（等待方据以报告 queued/running） */
     int allow_dangerous; /* D-9：高危放行标记随 job 深拷贝 */
+    char *approval_request_id; /* N-9：预指定审批凭据随 job 深拷贝 */
     uint64_t enqueue_ms; /* 入队时刻（排队/等座可见化的时长基准） */
 } pool_job_t;
 
@@ -77,7 +78,8 @@ static char *dup_str(const char *s)
 }
 
 static pool_job_t *job_new(const tool_metadata_t *meta, const char *params_json,
-                           const char *agent_id, int allow_dangerous)
+                           const char *agent_id, int allow_dangerous,
+                           const char *approval_request_id)
 {
     pool_job_t *job = (pool_job_t *)AIRY_CALLOC(1, sizeof(pool_job_t));
     if (!job)
@@ -88,6 +90,7 @@ static pool_job_t *job_new(const tool_metadata_t *meta, const char *params_json,
     }
     job->params_json = dup_str(params_json);
     job->agent_id = dup_str(agent_id);
+    job->approval_request_id = dup_str(approval_request_id);
     job->allow_dangerous = allow_dangerous;
     return job;
 }
@@ -99,6 +102,7 @@ static void job_free(pool_job_t *job)
     tool_metadata_clear(&job->meta);
     AIRY_FREE(job->params_json);
     AIRY_FREE(job->agent_id);
+    AIRY_FREE(job->approval_request_id);
     if (job->detached)
         tool_result_free(job->result); /* detach：真实结果丢弃 */
     AIRY_FREE(job);
@@ -171,7 +175,7 @@ static void *pool_worker(void *arg)
 
         tool_result_t *res = NULL;
         int ret = tool_executor_run_ex(p->exec, &job->meta, job->params_json, job->agent_id,
-                                       job->allow_dangerous, &res);
+                                       job->allow_dangerous, job->approval_request_id, &res);
 
         airy_mtx_lock(&p->lock);
         job->ret = ret;
@@ -298,7 +302,7 @@ void executor_pool_free(executor_pool_t *p)
 int executor_pool_run(executor_pool_t *p, const tool_metadata_t *meta, const char *params_json,
                       const char *agent_id, tool_result_t **out_result)
 {
-    return executor_pool_run_ex(p, meta, params_json, agent_id, 0, out_result);
+    return executor_pool_run_ex(p, meta, params_json, agent_id, 0, NULL, out_result);
 }
 
 /* 等待心跳（社区反馈③）：每 5s 报告等待去向（排队/在跑）、已等时长与
@@ -343,14 +347,14 @@ static int pool_wait_locked(executor_pool_t *p, pool_job_t *job, const tool_meta
 
 int executor_pool_run_ex(executor_pool_t *p, const tool_metadata_t *meta,
                          const char *params_json, const char *agent_id, int allow_dangerous,
-                         tool_result_t **out_result)
+                         const char *approval_request_id, tool_result_t **out_result)
 {
     if (!p || !meta || !out_result)
         return AIRY_ERR_INVALID_PARAM;
     *out_result = NULL;
 
     uint64_t budget = wait_budget_ms(p, meta);
-    pool_job_t *job = job_new(meta, params_json, agent_id, allow_dangerous);
+    pool_job_t *job = job_new(meta, params_json, agent_id, allow_dangerous, approval_request_id);
     if (!job)
         return AIRY_ERR_OUT_OF_MEMORY;
 

@@ -36,6 +36,7 @@ static void handle_health_check(int id, airy_sock_t fd);
 static void handle_stats(int id, airy_sock_t fd);
 static void handle_pending(int id, airy_sock_t fd);
 static void handle_approve(cJSON *params, int id, airy_sock_t fd);
+static void handle_approval_probe(cJSON *params, int id, airy_sock_t fd);
 static void handle_submit(cJSON *params, int id, airy_sock_t fd);
 static void handle_poll(cJSON *params, int id, airy_sock_t fd);
 static void handle_cancel(cJSON *params, int id, airy_sock_t fd);
@@ -75,6 +76,8 @@ DAEMON_RPC_SHELL0(health_check, handle_health_check)
 DAEMON_RPC_SHELL0(get_stats, handle_stats)
 DAEMON_RPC_SHELL0(pending, handle_pending)
 DAEMON_RPC_SHELL(approve, handle_approve)
+/* N-9：审批干跑——只判会不会走到交互等待，agent 循环据此先亮凭据。 */
+DAEMON_RPC_SHELL(approval_probe, handle_approval_probe)
 DAEMON_RPC_SHELL(submit, handle_submit)
 DAEMON_RPC_SHELL(poll, handle_poll)
 DAEMON_RPC_SHELL(cancel, handle_cancel)
@@ -281,6 +284,9 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
     /* D-9：高危工具（shell_run/tool_create/包管理类命令）需逐次审批；
      * 调用方可显式 allow_dangerous 声明接受风险（仍写审计留痕）。 */
     int allow_dangerous = get_bool_field(params, "allow_dangerous", false);
+    /* N-9：调用方预指定的审批凭据（先 probe 亮凭据，再带同一凭据提交）。
+     * 缺位时审批等待由 tool_d 自生成 pending 键，行为不变。 */
+    const char *approval_request_id = get_string_field(params, "approval_request_id", NULL);
 
     JSONRPC_REQUIRE(tid && jparams, client_fd,
                     "Invalid execute params: tool_id and params required", id);
@@ -297,6 +303,7 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
                                   .params_json = params_json,
                                   .stream = 0,
                                   .agent_id = agent_id,
+                                  .approval_request_id = approval_request_id,
                                   .allow_dangerous = allow_dangerous};
 
     tool_result_t *res = NULL;
@@ -519,6 +526,49 @@ static void handle_approve(cJSON *params, int id, airy_sock_t client_fd)
     } else {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Failed to resolve approval", id);
     }
+}
+
+/* N-9：审批干跑。返回 {"needed":bool,"timeout_ms":n}——needed=true 表示
+ * 这次调用会走到交互等待且交互已启用，调用方应先把凭据亮给界面、再带
+ * approval_request_id 提交真实执行；false（含工具不存在）表示无等待窗口，
+ * 真实执行仍会经审批门 fail-closed。params 与真实执行同形，干跑才与
+ * 后续审批判定一致。 */
+static void handle_approval_probe(cJSON *params, int id, airy_sock_t client_fd)
+{
+    TOOLRPC_REQUIRE_SERVICE(client_fd, id);
+    const char *tid = get_string_field(params, "tool_id", NULL);
+    cJSON *jparams = params ? cJSON_GetObjectItemCaseSensitive(params, "params") : NULL;
+    const char *agent_id = get_string_field(params, "agent_id", NULL);
+    int allow_dangerous = get_bool_field(params, "allow_dangerous", false);
+    JSONRPC_REQUIRE(tid && jparams && cJSON_IsObject(jparams), client_fd,
+                    "Invalid probe params: tool_id and params required", id);
+
+    char *params_json = cJSON_PrintUnformatted(jparams);
+    if (!params_json) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "JSON serialization failed", id);
+        return;
+    }
+    char *probe = tool_service_approval_probe(g_service, tid, params_json, agent_id,
+                                              allow_dangerous);
+    AIRY_FREE((void *)params_json);
+    if (!probe) {
+        cJSON *result = cJSON_CreateObject();
+        if (!result) {
+            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+            return;
+        }
+        cJSON_AddBoolToObject(result, "needed", false);
+        cJSON_AddNumberToObject(result, "timeout_ms", 0);
+        JSONRPC_SEND_SUCCESS(client_fd, result, id);
+        return;
+    }
+    cJSON *result = cJSON_Parse(probe);
+    AIRY_FREE(probe);
+    if (!result) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Probe serialization failed", id);
+        return;
+    }
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
 /* C-17：完成判据复核。只读取证，逐项回传 {expect, actual, pass}；不注册

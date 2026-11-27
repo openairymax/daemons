@@ -130,10 +130,13 @@ bool interactive_approval_is_enabled(const interactive_approval_t *mgr)
     return (mgr != NULL) && mgr->enabled;
 }
 
-/* 持有 mgr->lock 时构造并入链请求；失败返回 NULL。 */
+/* 持有 mgr->lock 时构造并入链请求；失败返回 NULL。request_id_hint 非空时
+ * 直接采用（调用方预先亮出的凭据，裁决回帧经它对上本次执行，N-9）；
+ * 冲突去重由调用方保证——先 probe 后提交的串行链上不会重号。 */
 static interactive_pending_req_t *approval_new_locked(interactive_approval_t *mgr,
                                                           const char *tool, const char *agent_id,
-                                                          const char *params_json)
+                                                          const char *params_json,
+                                                          const char *request_id_hint)
 {
     interactive_pending_req_t *req =
         (interactive_pending_req_t *)AIRY_CALLOC(1, sizeof(interactive_pending_req_t));
@@ -144,9 +147,13 @@ static interactive_pending_req_t *approval_new_locked(interactive_approval_t *mg
 
     char reqbuf[72];
     uint64_t now = airy_time_wall_ms();
-    snprintf(reqbuf, sizeof(reqbuf), "req_%llu_%llu", (unsigned long long)now,
-             (unsigned long long)mgr->seq);
-    req->request_id = AIRY_STRDUP(reqbuf);
+    if (request_id_hint && request_id_hint[0]) {
+        req->request_id = AIRY_STRDUP(request_id_hint);
+    } else {
+        snprintf(reqbuf, sizeof(reqbuf), "req_%llu_%llu", (unsigned long long)now,
+                 (unsigned long long)mgr->seq);
+        req->request_id = AIRY_STRDUP(reqbuf);
+    }
     req->tool = AIRY_STRDUP(tool);
     req->agent_id = AIRY_STRDUP(agent_id ? agent_id : "unknown");
     req->params = AIRY_STRDUP(params_json ? params_json : "");
@@ -194,6 +201,16 @@ char *interactive_approval_block(interactive_approval_t *mgr, const char *tool,
                                  const char *agent_id, const char *params_json,
                                  airy_approval_outcome_t *out_outcome)
 {
+    return interactive_approval_block_ext(mgr, tool, agent_id, params_json, NULL, out_outcome);
+}
+
+/* N-9：预指定凭据版。request_id_hint 非空时作为 pending 键，供调用方先把
+ * 凭据亮给界面、再带着同一凭据提交真实执行。 */
+char *interactive_approval_block_ext(interactive_approval_t *mgr, const char *tool,
+                                     const char *agent_id, const char *params_json,
+                                     const char *request_id_hint,
+                                     airy_approval_outcome_t *out_outcome)
+{
     if (!mgr || !tool || !out_outcome) {
         return NULL;
     }
@@ -202,7 +219,8 @@ char *interactive_approval_block(interactive_approval_t *mgr, const char *tool,
     }
 
     sync_mutex_lock_ex(mgr->lock, NULL);
-    interactive_pending_req_t *req = approval_new_locked(mgr, tool, agent_id, params_json);
+    interactive_pending_req_t *req =
+        approval_new_locked(mgr, tool, agent_id, params_json, request_id_hint);
     if (!req) {
         sync_mutex_unlock_ex(mgr->lock);
         return NULL;

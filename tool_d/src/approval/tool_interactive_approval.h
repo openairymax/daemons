@@ -92,6 +92,23 @@ char *interactive_approval_block(interactive_approval_t *mgr, const char *tool,
                                  airy_approval_outcome_t *out_outcome);
 
 /**
+ * @brief N-9: Same as interactive_approval_block, but with a caller-chosen
+ *        pending key.
+ *
+ * request_id_hint non-empty is used verbatim as the pending request id, so
+ * the caller can surface the credential to the UI before submitting the
+ * real execution, and the decision frame matches by the same id. Uniqueness
+ * is the caller's duty (probe-then-execute chains never reuse an id).
+ * NULL/empty falls back to the self-generated id.
+ *
+ * @ownership params_json/request_id_hint: BORROW; return: OWNER
+ */
+char *interactive_approval_block_ext(interactive_approval_t *mgr, const char *tool,
+                                     const char *agent_id, const char *params_json,
+                                     const char *request_id_hint,
+                                     airy_approval_outcome_t *out_outcome);
+
+/**
  * @brief Resolve a pending request by request_id.
  * @param mgr Manager
  * @param request_id Request ID

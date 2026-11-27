@@ -123,7 +123,8 @@ typedef enum {
  *   - deny/超时 -> 拒绝（原因为 "User denied tool execution"） */
 static interactive_step_t ask_via_interactive(approval_gate_t *gate, const char *agent_id,
                                               const tool_metadata_t *meta,
-                                              const char *params_json, char **out_reason)
+                                              const char *params_json,
+                                              const char *request_id_hint, char **out_reason)
 {
     if (!gate_int_enabled(gate))
         return INTERACTIVE_CONTINUE;
@@ -132,12 +133,13 @@ static interactive_step_t ask_via_interactive(approval_gate_t *gate, const char 
         agent = tool_approval_get_agent_id(gate->ctx);
     }
     /* 交互等待只阻塞当前池 worker，其他会话与工具不受影响（等待上限由
-     * 池预算覆盖）。 */
+     * 池预算覆盖）。凭据 hint 非空时作为 pending 键（N-9），裁决回帧经
+     * 同一凭据对上本次执行；缺位由 interactive 域自生成。 */
     airy_approval_outcome_t outcome = AIRY_APPROVAL_DENIED;
-    char *request_id = interactive_approval_block(gate->interactive,
-                                                  meta->name ? meta->name : "?",
-                                                  agent ? agent : "unknown", params_json,
-                                                  &outcome);
+    char *request_id = interactive_approval_block_ext(gate->interactive,
+                                                      meta->name ? meta->name : "?",
+                                                      agent ? agent : "unknown", params_json,
+                                                      request_id_hint, &outcome);
     if (request_id) {
         AIRY_FREE(request_id);
     }
@@ -202,10 +204,12 @@ static approval_gate_verdict_t gate_acl_ok(const tool_metadata_t *meta,
 /* 交互审批统一入口：返回 1=已放行 0=继续（未决） -1=已拒绝，
  * 放行分支的审批来源标记与审计日志只在此处落地一次。 */
 static int ask_interactive(approval_gate_t *gate, const char *agent_id,
-                           const tool_metadata_t *meta, const char *params_json, char *approval,
-                           size_t cap, const tool_approval_detail_t *detail, char **out_reason)
+                           const tool_metadata_t *meta, const char *params_json,
+                           const char *request_id_hint, char *approval, size_t cap,
+                           const tool_approval_detail_t *detail, char **out_reason)
 {
-    switch (ask_via_interactive(gate, agent_id, meta, params_json, out_reason)) {
+    switch (ask_via_interactive(gate, agent_id, meta, params_json, request_id_hint,
+                                out_reason)) {
     case INTERACTIVE_ALLOWED:
         approval_set(approval, cap, "interactive");
         log_approved(meta, detail);
@@ -220,12 +224,14 @@ static int ask_interactive(approval_gate_t *gate, const char *agent_id,
 /* D-9 高危逐次审批：未显式放行且非 warn 档时必须交互确认，否则 fail-closed。 */
 static approval_gate_verdict_t gate_risk_high(approval_gate_t *gate, const char *agent_id,
                                               const tool_metadata_t *meta,
-                                              const char *params_json, char *approval, size_t cap,
-                                              const char *risk_reason,
+                                              const char *params_json,
+                                              const char *request_id_hint, char *approval,
+                                              size_t cap, const char *risk_reason,
                                               const tool_approval_detail_t *detail,
                                               char **out_reason)
 {
-    int r = ask_interactive(gate, agent_id, meta, params_json, approval, cap, detail, out_reason);
+    int r = ask_interactive(gate, agent_id, meta, params_json, request_id_hint, approval, cap,
+                            detail, out_reason);
     if (r > 0)
         return APPROVAL_GATE_ALLOWED;
     if (r < 0)
@@ -247,11 +253,12 @@ static approval_gate_verdict_t gate_risk_high(approval_gate_t *gate, const char 
 /* 静态审批拒绝：交互审批开启时给用户一次放行机会，否则按拒绝理由收尾。 */
 static approval_gate_verdict_t gate_acl_deny(approval_gate_t *gate, const char *agent_id,
                                              const tool_metadata_t *meta, const char *params_json,
-                                             char *approval, size_t cap,
-                                             const tool_approval_detail_t *detail,
+                                             const char *request_id_hint, char *approval,
+                                             size_t cap, const tool_approval_detail_t *detail,
                                              char **out_reason)
 {
-    int r = ask_interactive(gate, agent_id, meta, params_json, approval, cap, detail, out_reason);
+    int r = ask_interactive(gate, agent_id, meta, params_json, request_id_hint, approval, cap,
+                            detail, out_reason);
     if (r > 0)
         return APPROVAL_GATE_ALLOWED;
     if (r < 0)
@@ -269,6 +276,15 @@ approval_gate_verdict_t gate_ask_ex(approval_gate_t *gate, const char *agent_id,
                                     int allow_dangerous, char *approval, size_t cap,
                                     char **out_reason)
 {
+    return gate_ask_ex_id(gate, agent_id, meta, params_json, allow_dangerous, NULL, approval, cap,
+                          out_reason);
+}
+
+approval_gate_verdict_t gate_ask_ex_id(approval_gate_t *gate, const char *agent_id,
+                                       const tool_metadata_t *meta, const char *params_json,
+                                       int allow_dangerous, const char *approval_request_id,
+                                       char *approval, size_t cap, char **out_reason)
+{
     char risk_reason[64];
 
     if (out_reason)
@@ -283,8 +299,8 @@ approval_gate_verdict_t gate_ask_ex(approval_gate_t *gate, const char *agent_id,
     int rc = tool_approval_check_for_agent(gate->ctx, agent_id, meta, params_json, &detail);
 
     if (risk == TOOL_AUDIT_RISK_HIGH && !allow_dangerous && !risk_warn_mode())
-        return gate_risk_high(gate, agent_id, meta, params_json, approval, cap, risk_reason,
-                              &detail, out_reason);
+        return gate_risk_high(gate, agent_id, meta, params_json, approval_request_id, approval,
+                              cap, risk_reason, &detail, out_reason);
     if (risk == TOOL_AUDIT_RISK_HIGH)
         SVC_LOG_WARN("High-risk tool '%s' allowed without per-call approval (%s): %s",
                      meta->id ? meta->id : "?",
@@ -292,7 +308,42 @@ approval_gate_verdict_t gate_ask_ex(approval_gate_t *gate, const char *agent_id,
                      risk_reason[0] ? risk_reason : "policy");
     if (rc == 0)
         return gate_acl_ok(meta, &detail, approval, cap, risk, allow_dangerous);
-    return gate_acl_deny(gate, agent_id, meta, params_json, approval, cap, &detail, out_reason);
+    return gate_acl_deny(gate, agent_id, meta, params_json, approval_request_id, approval, cap,
+                         &detail, out_reason);
+}
+
+approval_gate_verdict_t gate_probe(const approval_gate_t *gate, const char *agent_id,
+                                   const tool_metadata_t *meta, const char *params_json,
+                                   int allow_dangerous, uint64_t *out_timeout_ms)
+{
+    char risk_reason[64];
+
+    if (out_timeout_ms)
+        *out_timeout_ms = 0;
+    if (!gate || !gate->ctx || !meta)
+        return APPROVAL_GATE_DENIED;
+
+    /* 干跑顺序与 gate_ask_ex_id 一致：高危先行，静态其次；两条进交互的
+     * 路径都只在交互启用时才算「有等待窗口」，否则与直接拒绝同形。 */
+    tool_audit_risk_t risk = tool_audit_risk(meta->id, params_json, risk_reason,
+                                             sizeof(risk_reason));
+    if (risk == TOOL_AUDIT_RISK_HIGH && !allow_dangerous && !risk_warn_mode()) {
+        if (!gate_int_enabled(gate))
+            return APPROVAL_GATE_DENIED;
+        if (out_timeout_ms)
+            *out_timeout_ms = approval_timeout_ms();
+        return APPROVAL_GATE_INTERACTIVE;
+    }
+
+    tool_approval_detail_t detail;
+    int rc = tool_approval_check_for_agent(gate->ctx, agent_id, meta, params_json, &detail);
+    if (rc == 0)
+        return APPROVAL_GATE_ALLOWED;
+    if (!gate_int_enabled(gate))
+        return APPROVAL_GATE_DENIED;
+    if (out_timeout_ms)
+        *out_timeout_ms = approval_timeout_ms();
+    return APPROVAL_GATE_INTERACTIVE;
 }
 
 uint64_t gate_int_budget_ms(const approval_gate_t *gate)

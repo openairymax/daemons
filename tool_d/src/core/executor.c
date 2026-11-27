@@ -366,7 +366,7 @@ static int tool_builtin_exec(tool_executor_t *exec, const tool_metadata_t *meta,
 int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const char *params_json,
                       const char *agent_id, tool_result_t **out_result)
 {
-    return tool_executor_run_ex(exec, meta, params_json, agent_id, 0, out_result);
+    return tool_executor_run_ex(exec, meta, params_json, agent_id, 0, NULL, out_result);
 }
 
 /* agent_id 空串视作未声明调用方（走工具默认主体）。 */
@@ -383,12 +383,22 @@ static int exec_has_executable(const tool_metadata_t *meta)
 /* 审批闸门：fail-closed，未允许即返回授权错误（deny_reason 由闸门填充）。 */
 static airy_err_t exec_gate_check(tool_executor_t *exec, const tool_metadata_t *meta,
                                   const char *params_json, const char *caller_agent,
-                                  int allow_dangerous, tool_result_t *result, char **deny_reason)
+                                  int allow_dangerous, const char *approval_request_id,
+                                  tool_result_t *result, char **deny_reason)
 {
     approval_gate_verdict_t verdict =
-        gate_ask_ex(exec->gate, caller_agent, meta, params_json, allow_dangerous,
-                    result->approval, sizeof(result->approval), deny_reason);
+        gate_ask_ex_id(exec->gate, caller_agent, meta, params_json, allow_dangerous,
+                       approval_request_id, result->approval, sizeof(result->approval),
+                       deny_reason);
     return verdict == APPROVAL_GATE_ALLOWED ? AIRY_OK : AIRY_ERR_PERMISSION_DENIED;
+}
+
+int tool_executor_gate_probe(tool_executor_t *exec, const tool_metadata_t *meta,
+                             const char *params_json, const char *agent_id, int allow_dangerous,
+                             uint64_t *out_timeout_ms)
+{
+    return gate_probe(exec ? exec->gate : NULL, exec_caller(agent_id), meta, params_json,
+                      allow_dangerous, out_timeout_ms);
 }
 
 /* argv: executable + 可选 params（单参数传入，无 shell 注入面）。 */
@@ -443,7 +453,7 @@ static airy_err_t exec_sandbox_run(tool_executor_t *exec, const tool_metadata_t 
 
 int tool_executor_run_ex(tool_executor_t *exec, const tool_metadata_t *meta,
                          const char *params_json, const char *agent_id, int allow_dangerous,
-                         tool_result_t **out_result)
+                         const char *approval_request_id, tool_result_t **out_result)
 {
     if (!exec || !meta || !out_result) {
         SVC_LOG_ERROR("tool_executor_run: NULL parameter (exec/meta/out_result)");
@@ -505,7 +515,8 @@ int tool_executor_run_ex(tool_executor_t *exec, const tool_metadata_t *meta,
 
     {
         char *deny_reason = NULL;
-        if (exec_gate_check(exec, meta, params_json, caller_agent, allow_dangerous, result,
+        if (exec_gate_check(exec, meta, params_json, caller_agent, allow_dangerous,
+                            approval_request_id, result,
                             &deny_reason) != AIRY_OK) {
             *out_result = result;
             return tool_fail(result,

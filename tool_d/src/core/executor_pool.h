@@ -80,10 +80,12 @@ int executor_pool_run(executor_pool_t *pool, const tool_metadata_t *meta,
                       const char *params_json, const char *agent_id,
                       tool_result_t **out_result);
 
-/* D-9：透传 allow_dangerous 到审批门；旧签名等价于 allow_dangerous=0。 */
+/* D-9：透传 allow_dangerous 到审批门；旧签名等价于 allow_dangerous=0。
+ * N-9：approval_request_id 非空时交互等待以它作 pending 键（调用方预先
+ * 亮出的凭据），缺位由 tool_d 自生成；旧签名等价于 NULL。 */
 int executor_pool_run_ex(executor_pool_t *pool, const tool_metadata_t *meta,
                          const char *params_json, const char *agent_id, int allow_dangerous,
-                         tool_result_t **out_result);
+                         const char *approval_request_id, tool_result_t **out_result);
 
 #ifdef __cplusplus
 }

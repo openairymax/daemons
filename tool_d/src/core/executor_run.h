@@ -9,6 +9,7 @@
 #ifndef TOOL_EXECUTOR_RUN_H
 #define TOOL_EXECUTOR_RUN_H
 
+#include "approval_gate.h"
 #include "tool_service_types.h"
 
 #ifdef __cplusplus
@@ -31,10 +32,18 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
 
 /* D-9 审计通道：allow_dangerous 透传到审批门，高危工具未审批时拒绝；
  * 结果携带 approval/sandbox 供作业记录留痕。旧签名等价于
- * allow_dangerous=0（默认强制审批语义）。 */
+ * allow_dangerous=0（默认强制审批语义）。
+ * N-9：approval_request_id 非空时交互等待以它作 pending 键（调用方预先
+ * 亮出的凭据），缺位由 tool_d 自生成。 */
 int tool_executor_run_ex(tool_executor_t *exec, const tool_metadata_t *meta,
                          const char *params_json, const char *agent_id, int allow_dangerous,
-                         tool_result_t **out_result);
+                         const char *approval_request_id, tool_result_t **out_result);
+
+/* N-9 审批干跑：只判会不会走到交互等待（不裁决不阻塞）。返回
+ * INTERACTIVE 时 *out_timeout_ms 为等待上限毫秒；DENIED 表示会直接拒绝。 */
+approval_gate_verdict_t tool_executor_gate_probe(tool_executor_t *exec, const tool_metadata_t *meta,
+                                                 const char *params_json, const char *agent_id,
+                                                 int allow_dangerous, uint64_t *out_timeout_ms);
 
 typedef void (*tool_execute_callback_t)(tool_result_t *result, void *user_data);
 int tool_executor_run_async(tool_executor_t *exec, const tool_metadata_t *meta,

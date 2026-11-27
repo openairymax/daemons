@@ -30,6 +30,9 @@ typedef struct approval_gate approval_gate_t;
 typedef enum {
     APPROVAL_GATE_DENIED = 0,
     APPROVAL_GATE_ALLOWED = 1,
+    /* N-9 干跑结果：需交互审批且交互已启用——本次未裁决，等待窗口为
+     * *out_timeout_ms；调用方可先亮凭据再带 approval_request_id 提交。 */
+    APPROVAL_GATE_INTERACTIVE = 2,
 } approval_gate_verdict_t;
 
 /* 生命周期（实现在 approval/gate.c；gate 拥有全部内部件） */
@@ -51,6 +54,22 @@ approval_gate_verdict_t gate_ask_ex(approval_gate_t *gate, const char *agent_id,
                                     const tool_metadata_t *meta, const char *params_json,
                                     int allow_dangerous, char *approval, size_t cap,
                                     char **out_reason);
+
+/* N-9：调用方预指定审批凭据版。approval_request_id 非空时交互等待以它作
+ * pending 键，裁决回帧经同一凭据对上本次执行；缺位时由 tool_d 自生成。
+ * 旧签名等价于 approval_request_id=NULL。 */
+approval_gate_verdict_t gate_ask_ex_id(approval_gate_t *gate, const char *agent_id,
+                                       const tool_metadata_t *meta, const char *params_json,
+                                       int allow_dangerous, const char *approval_request_id,
+                                       char *approval, size_t cap, char **out_reason);
+
+/* N-9 审批干跑：只判「这次调用会不会走到交互等待」，不裁决、不阻塞。
+ * 返回 INTERACTIVE 时 *out_timeout_ms（可 NULL）为等待上限（毫秒），
+ * 调用方据此先发凭据、再带 approval_request_id 提交真实执行；
+ * ALLOWED/DENIED 沿静态审批语义，DENIED 表示会直接拒绝（无等待窗口）。 */
+approval_gate_verdict_t gate_probe(const approval_gate_t *gate, const char *agent_id,
+                                   const tool_metadata_t *meta, const char *params_json,
+                                   int allow_dangerous, uint64_t *out_timeout_ms);
 
 /* 交互审批查询与透传（池预算与 RPC tool.approve 路径） */
 uint64_t gate_int_budget_ms(const approval_gate_t *gate);

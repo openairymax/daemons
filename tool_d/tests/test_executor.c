@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static long long now_ms(void)
 {
@@ -312,6 +313,118 @@ static void test_executor_failure_class(void)
     printf("    PASSED\n");
 }
 
+/* N-9：审批干跑与预指定凭据。probe 必须与真实审批同序同形：交互未启用
+ * 时高危调用给 DENIED（无等待窗口，与直接拒绝同形），高危 + allow 给
+ * ALLOWED，静态允许的低危调用给 ALLOWED；交互启用后给 INTERACTIVE 且
+ * 窗口为 approval_timeout_ms。gate_ask_ex_id 接受调用方预指定的凭据，
+ * exec_int_resolve 以同一凭据完成裁决——先亮凭据再提交的串行链闭环。 */
+
+typedef struct {
+    tool_executor_t *exec;
+    tool_metadata_t meta;
+    int ret;
+    char approval[32];
+} hint_run_arg_t;
+
+static void *hint_run_fn(void *argp)
+{
+    hint_run_arg_t *arg = (hint_run_arg_t *)argp;
+    tool_result_t *result = NULL;
+    arg->ret = tool_executor_run_ex(arg->exec, &arg->meta, "{\"cmd\":\"true\"}", "tool_d", 0,
+                                    "probe_case_1", &result);
+    if (result) {
+        AIRY_STRNCPY_TERM(arg->approval, result->approval, sizeof(arg->approval));
+        tool_result_free(result);
+    }
+    return NULL;
+}
+
+static approval_gate_t *make_gate_interactive(void)
+{
+    tool_approval_config_t cfg;
+    AIRY_MEMSET(&cfg, 0, sizeof(cfg));
+    cfg.agent_id = "tool_d";
+    cfg.enable_safety_guard_chain = false;
+    cfg.enable_audit_logging = false;
+    return gate_create(&cfg);
+}
+
+static void test_gate_probe_and_hint_id(void)
+{
+    printf("  test_gate_probe_and_hint_id...\n");
+
+    /* 交互未启用：高危 probe → DENIED（无等待窗口，与直接拒绝同形）。 */
+    unsetenv("AIRY_TOOL_APPROVAL_MODE");
+    tool_executor_t *exec = tool_executor_create(NULL);
+    assert(exec != NULL);
+    setup_approval(exec, "shell_run");
+
+    tool_metadata_t meta;
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
+    meta.id = "shell_run"; /* 高危表按 tool_id 精确匹配 */
+    meta.name = "shell_run";
+    meta.executable = "/bin/true";
+    meta.timeout_sec = 5;
+    meta.access = TOOL_ACCESS_WRITE;
+
+    uint64_t timeout_ms = 12345;
+    assert(tool_executor_gate_probe(exec, &meta, "{\"cmd\":\"true\"}", "tool_d", 0,
+                                   &timeout_ms) == APPROVAL_GATE_DENIED);
+    assert(timeout_ms == 0);
+
+    /* 高危 + allow_dangerous：绕过交互，静态允许。 */
+    assert(tool_executor_gate_probe(exec, &meta, "{\"cmd\":\"true\"}", "tool_d", 1,
+                                   NULL) == APPROVAL_GATE_ALLOWED);
+    tool_executor_destroy(exec);
+    exec = NULL;
+
+    /* 交互启用：probe 给 INTERACTIVE 且有窗口；真实执行带预指定凭据阻塞
+     * 等待，另一线程按同一凭据放行——先亮凭据再提交的串行链闭环。 */
+    setenv("AIRY_TOOL_APPROVAL_MODE", "interactive", 1);
+    exec = tool_executor_create(NULL);
+    assert(exec != NULL);
+    approval_gate_t *gate = make_gate_interactive();
+    assert(gate != NULL);
+    exec_set_gate(exec, gate);
+
+    tool_metadata_t hmeta;
+    AIRY_MEMSET(&hmeta, 0, sizeof(hmeta));
+    hmeta.id = "shell_run"; /* 高危表按 tool_id 精确匹配 */
+    hmeta.name = "shell_run";
+    hmeta.executable = "/bin/true";
+    hmeta.timeout_sec = 5;
+    hmeta.access = TOOL_ACCESS_WRITE;
+
+    uint64_t window = 0;
+    assert(tool_executor_gate_probe(exec, &hmeta, "{\"cmd\":\"true\"}", "tool_d", 0,
+                                   &window) == APPROVAL_GATE_INTERACTIVE);
+    assert(window > 0);
+
+    hint_run_arg_t arg;
+    AIRY_MEMSET(&arg, 0, sizeof(arg));
+    arg.exec = exec;
+    arg.meta = hmeta;
+    pthread_t th;
+    assert(pthread_create(&th, NULL, hint_run_fn, &arg) == 0);
+
+    /* 等 pending 入链再按同一凭据裁决（resolve 未命中短暂退避重试）。 */
+    int resolved = AIRY_ERR_NOT_FOUND;
+    for (int i = 0; i < 100 && resolved != 0; i++) {
+        resolved = exec_int_resolve(exec, "probe_case_1", "allow");
+        if (resolved != 0)
+            usleep(10000);
+    }
+    assert(resolved == 0);
+
+    pthread_join(th, NULL);
+    assert(arg.ret == 0);
+
+    tool_executor_destroy(exec);
+    unsetenv("AIRY_TOOL_APPROVAL_MODE");
+
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=========================================\n");
@@ -326,6 +439,7 @@ int main(void)
 
     test_executor_read_concurrent();
     test_executor_write_concurrent();
+    test_gate_probe_and_hint_id();
 
     printf("\nAll tool executor tests PASSED\n");
     return 0;
