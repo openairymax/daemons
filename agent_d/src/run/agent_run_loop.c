@@ -328,11 +328,16 @@ typedef struct {
 static void run_fit(char *buf, size_t cap, const char *src);
 
 /* agent_d 侧凭据序列（"a%d"）：tool_d 缺凭据时自生成 "req_" 前缀，
- * 两个命名空间不会撞号。多 run 并发下用原子加保证凭据唯一。 */
+ * 两个命名空间不会撞号。多 run 并发下用原子加保证凭据唯一。
+ *
+ * 原子走平台层而非 GCC 内建：MSVC 无 `__atomic_*`，此前 windows-build
+ * 以 LNK2001（agent_run_loop.obj 未解析 __atomic_add_fetch）判红。计数
+ * 取 32 位正区间即可——一条凭据只在一次审批等待窗口内有效，回绕前早已
+ * 交出，不复用旧号。 */
 static uint64_t run_appr_seq(void)
 {
-    static uint64_t s;
-    return __atomic_add_fetch(&s, 1, __ATOMIC_RELAXED);
+    static airy_atomic_int_t s;
+    return (uint64_t)(uint32_t)(airy_atomic_fetch_add(&s, 1) + 1);
 }
 
 /* N-9 预检：向 tool_d 申请审批干跑（同一审批序：高危先行、静态其次），
