@@ -115,7 +115,7 @@ static void test_inflight_cancel(void)
     int code = 0;
     uint64_t t0 = airy_time_ms();
     int rc = run_execute_tool("fs_read", "{\"path\":\"/tmp\"}", &out, &code, false, &tok,
-                              "coding_v1", NULL);
+                              "coding_v1", NULL, NULL);
     uint64_t ms = airy_time_ms() - t0;
 
     /* 执行入口以 -1 记失败、把归因放进回执：取消与超时都以失败返回，
