@@ -36,6 +36,10 @@
 
 #define AGENT_RUN_SOCK_BUF AIRY_PATH_MAX
 
+/* N-9：审批预检的 RPC 上限。干跑是纯静态判定不阻塞，正常一次往返即回；
+ * 上限只兜底守护卡死，远小于工具预算。 */
+#define AGENT_RUN_PROBE_TIMEOUT_MS 5000u
+
 /* 增量上屏的栈缓冲上限：常见逐字/逐片增量远小于此值，超限走堆。 */
 #define RUN_DELTA_STACK 1024
 
@@ -244,9 +248,11 @@ static airy_cancel_token_t *run_tok(const agent_run_session_t *s)
 }
 
 /* 组装 execute_tool 参数；分配失败返回 NULL。agent_id 非空才下发：审计
- * 主体以调用方自报为准，缺位时 tool_d 只能记 "tool_d"（V-05）。 */
+ * 主体以调用方自报为准，缺位时 tool_d 只能记 "tool_d"（V-05）。凭据
+ * approval_request_id 非空才下发：交互审批的 pending 键由 agent_d 预先
+ * 亮出，tool_d 以同一凭据开 pending（N-9），裁决回帧据此对上本次执行。 */
 static char *run_tool_params(const char *name, const char *args_json, bool allow_dangerous,
-                             const char *agent_id)
+                             const char *agent_id, const char *approval_request_id)
 {
     cJSON *params = cJSON_CreateObject();
     if (!params)
@@ -255,6 +261,8 @@ static char *run_tool_params(const char *name, const char *args_json, bool allow
     cJSON_AddBoolToObject(params, "allow_dangerous", allow_dangerous);
     if (agent_id && agent_id[0])
         cJSON_AddStringToObject(params, "agent_id", agent_id);
+    if (approval_request_id && approval_request_id[0])
+        cJSON_AddStringToObject(params, "approval_request_id", approval_request_id);
     cJSON *pargs = cJSON_Parse(args_json && args_json[0] ? args_json : "{}");
     if (!pargs)
         pargs = cJSON_CreateObject();
@@ -301,28 +309,130 @@ static char *run_tool_text(cJSON *result, int *out_code, int *out_ok)
     return AIRY_STRDUP(buf);
 }
 
+/* N-9 审批事件面：sink/seq/run_id/sess 四元组窄封装，执行器据此发
+ * control_request 帧。NULL 等价「不预检、不发帧」：纯执行路径与单测
+ * 不经过 UI，行为与旧版一致。 */
+typedef struct {
+    const agent_run_event_sink_t *sink;
+    uint64_t *seq;
+    const char *run_id;
+    const char *sess;
+} run_appr_ui_t;
+
+/* run_seqp / run_fit 定义在后文：预检发帧要在帧序与 UTF-8 安全截断
+ * 两处契约上与事件流保持一致，前向声明让审批块靠近执行面。 */
+static uint64_t *run_seqp(loop_ctx_t *r);
+static void run_fit(char *buf, size_t cap, const char *src);
+
+/* agent_d 侧凭据序列（"a%d"）：tool_d 缺凭据时自生成 "req_" 前缀，
+ * 两个命名空间不会撞号。多 run 并发下用原子加保证凭据唯一。 */
+static uint64_t run_appr_seq(void)
+{
+    static uint64_t s;
+    return __atomic_add_fetch(&s, 1, __ATOMIC_RELAXED);
+}
+
+/* N-9 预检：向 tool_d 申请审批干跑（同一审批序：高危先行、静态其次），
+ * 需要交互审批时 agent_d 预生成凭据、向事件流发 control_request（载荷
+ * 平铺 request_id/tool/input/timeout_ms，TUI ctl.rs 契约），并返回等待
+ * 窗口供 execute 超时对齐。probe 失败按「无需审批」继续——真实执行仍
+ * fail-closed，探测故障不会放大成放行。 */
+static void run_appr_probe(const char *sock, const char *name, const char *args_json,
+                           bool allow_dangerous, const char *agent_id, const run_appr_ui_t *ui,
+                           char *rid, size_t rid_cap, uint64_t *out_wait_ms)
+{
+    *out_wait_ms = 0;
+    rid[0] = '\0';
+    if (!ui || !ui->sink || !ui->sink->emit)
+        return;
+
+    cJSON *params = cJSON_CreateObject();
+    if (!params)
+        return;
+    cJSON_AddStringToObject(params, "tool_id", name);
+    cJSON_AddBoolToObject(params, "allow_dangerous", allow_dangerous);
+    if (agent_id && agent_id[0])
+        cJSON_AddStringToObject(params, "agent_id", agent_id);
+    cJSON *pargs = cJSON_Parse(args_json && args_json[0] ? args_json : "{}");
+    if (!pargs)
+        pargs = cJSON_CreateObject();
+    cJSON_AddItemToObject(params, "params", pargs);
+    char *params_str = cJSON_PrintUnformatted(params);
+    cJSON_Delete(params);
+    if (!params_str)
+        return;
+
+    /* 干跑是纯静态检查，预算内必回；独立小上限避免拖住工具预算。 */
+    char *resp = NULL;
+    int rc = daemon_rpc_call(sock, "approval_probe", params_str, &resp,
+                             AGENT_RUN_PROBE_TIMEOUT_MS);
+    AIRY_FREE(params_str);
+    cJSON *root = (rc == AIRY_SUCCESS) && resp ? cJSON_Parse(resp) : NULL;
+    AIRY_FREE(resp);
+    if (!root)
+        return;
+    cJSON *result = cJSON_GetObjectItem(root, "result");
+    if (!cJSON_IsObject(result))
+        result = root;
+    cJSON *needed = cJSON_GetObjectItem(result, "needed");
+    cJSON *tmo = cJSON_GetObjectItem(result, "timeout_ms");
+    if (!cJSON_IsTrue(needed)) {
+        cJSON_Delete(root);
+        return;
+    }
+    uint64_t wait_ms = cJSON_IsNumber(tmo) && tmo->valueint > 0 ? (uint64_t)tmo->valueint : 0;
+    cJSON_Delete(root);
+
+    snprintf(rid, rid_cap, "a%llu", (unsigned long long)run_appr_seq());
+    *out_wait_ms = wait_ms;
+
+    char fit[160];
+    run_fit(fit, sizeof(fit), args_json ? args_json : "");
+    cJSON *ev = cJSON_CreateObject();
+    if (ev) {
+        cJSON_AddStringToObject(ev, AIRY_RS_K_REQUEST_ID, rid);
+        cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL, name);
+        cJSON_AddStringToObject(ev, AIRY_RS_K_INPUT, fit);
+        cJSON_AddNumberToObject(ev, AIRY_RS_K_TIMEOUT_MS, (double)wait_ms);
+        agent_run_emit_event(ui->sink, ui->seq, ui->run_id, ui->sess,
+                             AIRY_RS_TYPE_CONTROL_REQUEST, ev);
+    }
+}
+
 /* 单个工具执行：tool_d.execute_tool（结果文本化，失败转 Error: 前缀）。
  * out_code 只回填工具服务自报的错误码（成功/未报则为 0）：C-16 用它识别
  * EPERM/EACCES（策略拒绝）与 ENOTSUP（无处理器），据此撤销目录条目；
  * 传输层失败不填码，避免把「服务不可达」误判成策略拒绝。
  *
  * R11：session 的取消令牌随调用下探。取消时客户端立即脱身，不等工具预算
- * 跑满；tool_d 侧按自身执行预算收尾，回执因连接关闭而丢弃，不影响审计。 */
+ * 跑满；tool_d 侧按自身执行预算收尾，回执因连接关闭而丢弃，不影响审计。
+ *
+ * N-9：ui 非空时先做审批预检——需要交互审批则先亮凭据（control_request
+ * 帧）再带同一凭据执行，RPC 超时扩入等待窗口；否则凭据缺位，等待窗口为
+ * 零，时序与旧版一致。 */
 static int run_execute_tool(const char *name, const char *args_json, char **out_text,
                             int *out_code, bool allow_dangerous, airy_cancel_token_t *tok,
-                            const char *agent_id)
+                            const char *agent_id, const run_appr_ui_t *ui)
 {
     *out_text = NULL;
     *out_code = 0;
-    char *params_str = run_tool_params(name, args_json, allow_dangerous, agent_id);
-    if (!params_str)
-        return -1;
 
     char sock[AGENT_RUN_SOCK_BUF];
     snprintf(sock, sizeof(sock), "%s", airy_runtime_dir_socket("tool.sock"));
+    char rid[32];
+    uint64_t wait_ms = 0;
+    run_appr_probe(sock, name, args_json, allow_dangerous, agent_id, ui, rid, sizeof(rid),
+                   &wait_ms);
+
+    char *params_str = run_tool_params(name, args_json, allow_dangerous, agent_id,
+                                       rid[0] ? rid : NULL);
+    if (!params_str)
+        return -1;
+
     char *resp = NULL;
     int rc = daemon_rpc_call_cancelable(sock, "execute_tool", params_str, &resp,
-                                        AGENT_RUN_TOOL_TIMEOUT_MS, tok, NULL, NULL);
+                                        (uint32_t)(AGENT_RUN_TOOL_TIMEOUT_MS + wait_ms), tok,
+                                        NULL, NULL);
     AIRY_FREE(params_str);
     if (rc != AIRY_SUCCESS || !resp) {
         AIRY_FREE(resp);
@@ -1172,12 +1282,21 @@ static char *run_resume_emit(const loop_ctx_t *r)
     }
 }
 
+/* N-9：执行路径的审批事件面装填。run_alt_try 与 run_tc_exec 共用同一
+ * 装配，帧序号沿用父链（子 run 借 seq_ext），凭据即出现在同一事件流。 */
+static run_appr_ui_t run_appr_ui(const loop_ctx_t *r)
+{
+    run_appr_ui_t ui = {r->args->sink, run_seqp(r), r->run_id, r->sess};
+    return ui;
+}
+
 /* C-25：主工具失败后的等价换路。换路是同一次调用的处置而非独立重试预算：
  * 执行时长并入同一次 tool_ms，连败/熔断仍按一次失败记账；每步至多换一次，
  * 替代工具失败后不再连锁换路（避免把一次失败放大成一次搜索）。策略拒绝类
  * 错误码由调用方过滤，替代工具必须在当前目录内才执行。 */
 typedef int (*run_exec_fn)(const char *name, const char *args, char **out, int *code,
-                           bool allow_dangerous, airy_cancel_token_t *tok, const char *agent_id);
+                           bool allow_dangerous, airy_cancel_token_t *tok, const char *agent_id,
+                           const run_appr_ui_t *ui);
 
 static int run_alt_try(loop_ctx_t *r, run_alt_t *alt, run_exec_fn exec, char **out, cJSON **fbev)
 {
@@ -1194,8 +1313,9 @@ static int run_alt_try(loop_ctx_t *r, run_alt_t *alt, run_exec_fn exec, char **o
     char *res = NULL;
     int code = 0;
     uint64_t t0 = airy_time_ms();
+    run_appr_ui_t ui = run_appr_ui(r);
     int rc = exec(alt->tool, alt->args, &res, &code, r->args->allow_dangerous,
-                  run_tok(r->args->session), r->args->agent_id);
+                  run_tok(r->args->session), r->args->agent_id, &ui);
     r->out->tool_ms += airy_time_ms() - t0;
     if (rc != 0 && code != 0)
         run_cat_revoke(r, alt->tool, code);
@@ -1369,8 +1489,9 @@ static int run_tc_exec(loop_ctx_t *r, run_tc_t *c)
 
     if (sub_is_tool(c->tname))
         return run_tc_sub(r, c);
+    run_appr_ui_t ui = run_appr_ui(r);
     c->erc = run_execute_tool(c->tname, c->targs, &c->res, &code, r->args->allow_dangerous,
-                              run_tok(r->args->session), r->args->agent_id);
+                              run_tok(r->args->session), r->args->agent_id, &ui);
     r->out->tool_ms += airy_time_ms() - t0;
     if (r->args->session && agent_run_is_cancelled(r->args->session)) {
         r->user_cancel = 1;

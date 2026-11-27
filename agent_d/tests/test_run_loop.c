@@ -9,7 +9,13 @@
 
 #include "../src/run/agent_run_loop.c"
 
+#include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 /* engine.c 引用的 daemon 全局服务句柄：产品侧由 main.c 定义，测试环境
  * 无 daemon 生命周期，NULL 即未就绪语义（与 main.c 初始值一致）。 */
@@ -44,7 +50,7 @@ static void test_fail_streak(void)
  * 缺位（NULL/空串）时不下发该键——tool_d 留痕据此记审计主体，不冒名。 */
 static void test_tool_params_agent(void)
 {
-    char *p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", true, "coding_v1");
+    char *p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", true, "coding_v1", NULL);
     CHECK(p != NULL, "params: build with agent id");
     cJSON *params = p ? cJSON_Parse(p) : NULL;
     CHECK(params != NULL, "params: parseable JSON");
@@ -56,19 +62,182 @@ static void test_tool_params_agent(void)
     AIRY_FREE(p);
     cJSON_Delete(params);
 
-    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, NULL);
+    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, NULL, NULL);
     params = p ? cJSON_Parse(p) : NULL;
     CHECK(params != NULL && cJSON_GetObjectItem(params, "agent_id") == NULL,
           "params: missing id sends no key");
     AIRY_FREE(p);
     cJSON_Delete(params);
 
-    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, "");
+    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, "", "");
     params = p ? cJSON_Parse(p) : NULL;
     CHECK(params != NULL && cJSON_GetObjectItem(params, "agent_id") == NULL,
           "params: empty id sends no key");
     AIRY_FREE(p);
     cJSON_Delete(params);
+
+    /* N-9：凭据缺位（NULL/空串）不下发 approval_request_id；非空原样下发，
+     * tool_d 以它作交互审批 pending 键，裁决回帧据此对上本次执行。 */
+    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, NULL, NULL);
+    params = p ? cJSON_Parse(p) : NULL;
+    CHECK(params != NULL && cJSON_GetObjectItem(params, "approval_request_id") == NULL,
+          "params: missing approval id sends no key");
+    AIRY_FREE(p);
+    cJSON_Delete(params);
+
+    p = run_tool_params("fs_read", "{\"path\":\"/tmp\"}", false, NULL, "a7");
+    params = p ? cJSON_Parse(p) : NULL;
+    cJSON *rid = params ? cJSON_GetObjectItem(params, "approval_request_id") : NULL;
+    CHECK(cJSON_IsString(rid) && strcmp(rid->valuestring, "a7") == 0,
+          "params: approval id verbatim");
+    AIRY_FREE(p);
+    cJSON_Delete(params);
+}
+
+/* N-9：审批预检的 mock tool_d。逐连接回 canned 响应（单请求单响应即关，
+ * 与守护的真实形态一致），stop 置位并收到唤醒连接后退出。 */
+typedef struct {
+    const char *path;
+    const char *resp;
+    volatile int stop;
+} probe_srv_t;
+
+static void *probe_srv_run(void *ud)
+{
+    probe_srv_t *s = (probe_srv_t *)ud;
+    int lfd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (lfd < 0)
+        return NULL;
+    struct sockaddr_un a;
+    AIRY_MEMSET(&a, 0, sizeof(a));
+    a.sun_family = AF_UNIX;
+    snprintf(a.sun_path, sizeof(a.sun_path), "%s", s->path);
+    unlink(s->path);
+    if (bind(lfd, (struct sockaddr *)&a, sizeof(a)) != 0 || listen(lfd, 4) != 0) {
+        close(lfd);
+        return NULL;
+    }
+    while (!s->stop) {
+        int c = accept(lfd, NULL, NULL);
+        if (c < 0)
+            break;
+        char b[1024];
+        while (read(c, b, sizeof(b)) > 0)
+            ;
+        if (s->resp) {
+            ssize_t w = write(c, s->resp, strlen(s->resp));
+            (void)w;
+        }
+        close(c);
+    }
+    close(lfd);
+    unlink(s->path);
+    return NULL;
+}
+
+/* control_request 帧捕获：只取 data 段的平铺四键（TUI ctl.rs 契约）。 */
+typedef struct {
+    int calls;
+    char type[48];
+    char rid[64];
+    char tool[64];
+    char input[256];
+    long long tmo;
+} appr_cap_t;
+
+static void appr_emit(const char *type, cJSON *env, void *ud)
+{
+    appr_cap_t *c = (appr_cap_t *)ud;
+    c->calls++;
+    AIRY_STRNCPY_TERM(c->type, type ? type : "", sizeof(c->type));
+    cJSON *data = env ? cJSON_GetObjectItem(env, AIRY_RS_K_DATA) : NULL;
+    cJSON *rid = data ? cJSON_GetObjectItem(data, AIRY_RS_K_REQUEST_ID) : NULL;
+    cJSON *tool = data ? cJSON_GetObjectItem(data, AIRY_RS_K_TOOL) : NULL;
+    cJSON *input = data ? cJSON_GetObjectItem(data, AIRY_RS_K_INPUT) : NULL;
+    cJSON *tmo = data ? cJSON_GetObjectItem(data, AIRY_RS_K_TIMEOUT_MS) : NULL;
+    if (cJSON_IsString(rid))
+        AIRY_STRNCPY_TERM(c->rid, rid->valuestring, sizeof(c->rid));
+    if (cJSON_IsString(tool))
+        AIRY_STRNCPY_TERM(c->tool, tool->valuestring, sizeof(c->tool));
+    if (cJSON_IsString(input))
+        AIRY_STRNCPY_TERM(c->input, input->valuestring, sizeof(c->input));
+    if (cJSON_IsNumber(tmo))
+        c->tmo = tmo->valuedouble;
+}
+
+/* N-9 预检契约：需要交互审批时凭据生成、帧载荷平铺四键、等待窗口透传；
+ * 探测不可达与无 UI 时回退「无需审批」（fail-open 继续，真实执行仍
+ * fail-closed）。 */
+static void test_appr_probe(void)
+{
+    char tmpl[] = "/tmp/airy-probe-XXXXXX";
+    char *home = mkdtemp(tmpl);
+    CHECK(home != NULL, "probe: temp home created");
+    if (!home)
+        return;
+    char sockpath[256];
+    snprintf(sockpath, sizeof(sockpath), "%s/probe.sock", home);
+
+    probe_srv_t srv = {sockpath,
+                       "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"needed\":true,"
+                       "\"timeout_ms\":45000}}",
+                       0};
+    pthread_t st;
+    CHECK(pthread_create(&st, NULL, probe_srv_run, &srv) == 0, "probe: server thread");
+    for (int i = 0; i < 200 && access(sockpath, F_OK) != 0; i++)
+        usleep(5000);
+
+    appr_cap_t cap;
+    AIRY_MEMSET(&cap, 0, sizeof(cap));
+    agent_run_event_sink_t sink = {appr_emit, &cap};
+    uint64_t seq = 0;
+    run_appr_ui_t ui = {&sink, &seq, "run-9", "sess-9"};
+
+    char rid[32];
+    uint64_t wait_ms = 0;
+    run_appr_probe(sockpath, "shell_run", "{\"cmd\":\"ls\"}", false, "coding_v1", &ui, rid,
+                   sizeof(rid), &wait_ms);
+    CHECK(rid[0] == 'a' && strlen(rid) >= 2, "probe: agent-side rid minted");
+    CHECK(wait_ms == 45000, "probe: wait window forwarded");
+    CHECK(cap.calls == 1 && strcmp(cap.type, AIRY_RS_TYPE_CONTROL_REQUEST) == 0,
+          "probe: one control_request frame");
+    CHECK(cap.rid[0] != '\0' && strcmp(cap.rid, rid) == 0, "probe: frame carries same rid");
+    CHECK(strcmp(cap.tool, "shell_run") == 0, "probe: frame names the tool");
+    CHECK(strcmp(cap.input, "{\"cmd\":\"ls\"}") == 0, "probe: frame carries escaped input");
+    CHECK(cap.tmo == 45000, "probe: frame carries the window");
+
+    /* 同一 ui 再次预检：凭据不重号（帧与 execute 一一对应的前提）。 */
+    char rid2[32];
+    uint64_t wait2 = 0;
+    run_appr_probe(sockpath, "shell_run", "{}", false, NULL, &ui, rid2, sizeof(rid2), &wait2);
+    CHECK(rid2[0] == 'a' && strcmp(rid2, rid) != 0, "probe: rids never repeat");
+
+    /* 探测不可达：按「无需审批」继续，真实执行仍 fail-closed。 */
+    char rid3[32];
+    uint64_t wait3 = 1;
+    run_appr_probe("/nonexistent/airy-probe.sock", "shell_run", "{}", false, NULL, &ui, rid3,
+                   sizeof(rid3), &wait3);
+    CHECK(rid3[0] == '\0' && wait3 == 0, "probe: unreachable falls back to no-approval");
+
+    /* 无 UI：不探测、不发帧（纯执行路径与旧版时序一致）。 */
+    char rid4[32];
+    uint64_t wait4 = 1;
+    run_appr_probe(sockpath, "shell_run", "{}", false, NULL, NULL, rid4, sizeof(rid4), &wait4);
+    CHECK(rid4[0] == '\0' && wait4 == 0, "probe: NULL ui skips probing entirely");
+
+    srv.stop = 1;
+    int wfd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (wfd >= 0) {
+        struct sockaddr_un a;
+        AIRY_MEMSET(&a, 0, sizeof(a));
+        a.sun_family = AF_UNIX;
+        snprintf(a.sun_path, sizeof(a.sun_path), "%s", sockpath);
+        if (connect(wfd, (struct sockaddr *)&a, sizeof(a)) == 0) {
+            shutdown(wfd, SHUT_RDWR);
+        }
+        close(wfd);
+    }
+    pthread_join(st, NULL);
 }
 
 /* run_emit_delta：真实增量即时上屏（B2 流式契约）。
@@ -645,6 +814,7 @@ int main(void)
     test_round_policy();
     test_emit_delta();
     test_tool_params_agent();
+    test_appr_probe();
     test_stream_result_free();
     test_orch_contract();
     test_run_state();
