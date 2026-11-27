@@ -346,6 +346,9 @@ static bool mem_record_decode(mem_service_t *svc, const cJSON *root)
     ((char *)rec->data)[data_len] = '\0';
     rec->len = data_len;
     mem_record_meta(rec, root);
+    /* 载入顺序即写入顺序：序号按文件次序单调分配，分页游标跨重启仍按
+     * 「越新越大」工作（旧游标超过当前序号时由 mem_recent_page 夹取）。 */
+    rec->seq = svc->write_seq++;
 
     if (hindex_put(&svc->record_index, rec->record_id, idx) != AIRY_SUCCESS) {
         mem_record_release(rec);

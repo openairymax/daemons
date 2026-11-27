@@ -29,6 +29,9 @@ typedef struct {
     char *metadata;
     float score;
     uint64_t created_at;
+    /* 单调写入序号（删除不复用、不重排）：分页游标的唯一依据。
+     * 不能用数组下标，删除压实会让下标前移而与已交付页重叠。 */
+    uint64_t seq;
     mem_tfidf_vec_t vec;
     float *emb;
     size_t emb_dim;
@@ -38,6 +41,7 @@ struct mem_service {
     mem_record_entry_t *records;
     size_t record_count;
     size_t max_records;
+    uint64_t write_seq; /* 下一个待分配的写入序号（只增不减） */
     hindex_t record_index;
     mem_df_table_t df_table;
     float tfidf_weight;

@@ -1156,7 +1156,8 @@ static void test_recent_page_cursor(void)
     printf("    PASSED\n");
 }
 
-/* X8-01b：页间发生删除时游标仍可续——最多重复（由调用方去重），绝不漏段。 */
+/* X8-01b：页间发生删除时游标仍可续——游标基于写入序号，删除不使其
+ * 漂移，故续页既不重复也不漏段。 */
 static void test_recent_page_resume_after_delete(void)
 {
     printf("  test_recent_page_resume_after_delete...\n");

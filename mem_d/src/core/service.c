@@ -273,6 +273,7 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req, char *
     rec->len = req->len;
     rec->metadata = req->metadata ? AIRY_STRDUP(req->metadata) : NULL;
     rec->created_at = (uint64_t)time(NULL);
+    rec->seq = svc->write_seq++;
 
     mem_record_build_vector(svc, rec);
 
@@ -332,10 +333,11 @@ int mem_service_get(mem_service_t *svc, const char *record_id, mem_record_t *out
 /**
  * @brief 压实删除指定下标记录（调用方须持有 svc->lock）。
  *
- * 释放向量/字段后，把 idx 之后的记录整体前移一位，保持「数组下标 = 写入序」
- * 不变量；随后重建被移动区间的 record_index 下标。此前的交换删除（尾部记录
- * 搬入当前位置）会打乱该不变量，使 mem_service_recent 的倒序下标与实际写入
- * 序不符（0.1.21 C-28）。
+ * 释放向量/字段后，把 idx 之后的记录整体前移一位，保持数组按写入序
+ * （rec->seq）升序排列；随后重建被移动区间的 record_index 下标。此前的
+ * 交换删除（尾部记录搬入当前位置）会打乱该次序，使 mem_service_recent 的
+ * 倒序结果与实际写入序不符（0.1.21 C-28）。分页游标用 rec->seq 而非数组
+ * 下标，故压实不会让已交付页重复。
  */
 void mem_remove_record_at(mem_service_t *svc, size_t idx)
 {

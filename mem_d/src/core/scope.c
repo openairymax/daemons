@@ -79,18 +79,19 @@ int mem_recent_page(mem_service_t *svc, uint32_t limit, const mem_scope_t *scope
 
     airy_mtx_lock(&svc->lock);
 
-    /* 下标倒序即写入序倒序：写入总落在 record_count 处，删除以 memmove
-     * 连续压实（mem_remove_record_at），故数组下标恒等于写入序。不依赖
-     * created_at（秒级精度，同秒多写时会并列）。
-     * 游标是排他上界：只扫描下标 < cursor 的部分；-1 或越界从最新开始
-     * （游标可能因并发删除而超过当前总数，按最新处理即恢复）。 */
+    /* 倒序遍历即写入序倒序：写入追加在尾部，删除以 memmove 压实只保持
+     * 相对次序，故数组按 rec->seq 严格升序。游标是「写入序号」的排他
+     * 上界：只扫描 seq < cursor 的记录；-1 或越界从最新开始（并发删除
+     * 后旧游标可能超过最大序号，按最新一页恢复）。用序号而非数组下标，
+     * 是为了让页间删除不会把已交付记录重新挤回窗口（X8-01b）。 */
     size_t total = svc->record_count;
-    size_t cursor = total;
+    uint64_t newest = svc->write_seq;
+    uint64_t cursor = newest;
     if (before >= 0) {
         uint64_t b = (uint64_t)before;
-        cursor = b < (uint64_t)total ? (size_t)b : total;
+        cursor = b < newest ? b : newest;
     }
-    size_t take = cursor < limit ? cursor : limit;
+    size_t take = total < (size_t)limit ? total : (size_t)limit;
     mem_recent_item_t *items =
         take ? (mem_recent_item_t *)AIRY_CALLOC(take, sizeof(mem_recent_item_t)) : NULL;
     if (take && !items) {
@@ -100,13 +101,15 @@ int mem_recent_page(mem_service_t *svc, uint32_t limit, const mem_scope_t *scope
 
     /* 扫描全量而不是只扫最新 limit 条：否则范围外记录会占满窗口，
      * 使更早的匹配记录被静默丢弃（见 mem_service.h 的约定）。
-     * 未命中的下标也计入游标推进：下一页从本次最后检查处继续，
+     * 未命中的序号也计入游标推进：下一页从本次最后检查处继续，
      * 因此范围过滤不会造成翻页漏段。 */
     size_t n = 0;
-    size_t i = cursor;
+    size_t i = total;
     while (i > 0 && n < limit) {
         i--;
         const mem_record_entry_t *rec = &svc->records[i];
+        if (rec->seq >= cursor)
+            continue; /* 已交付过的写入序号：跳过，不重复返回 */
         if (!rec->record_id || !rec->data)
             continue;
         if (kb_id && !mem_rec_in_kb(rec, kb_id))
@@ -129,7 +132,7 @@ int mem_recent_page(mem_service_t *svc, uint32_t limit, const mem_scope_t *scope
     airy_mtx_unlock(&svc->lock);
 
     if (out_next)
-        *out_next = (int64_t)i;
+        *out_next = i > 0 ? (int64_t)svc->records[i].seq : 0;
     if (out_has_more)
         *out_has_more = i > 0;
 
