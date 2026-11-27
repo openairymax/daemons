@@ -393,9 +393,9 @@ static airy_err_t exec_gate_check(tool_executor_t *exec, const tool_metadata_t *
     return verdict == APPROVAL_GATE_ALLOWED ? AIRY_OK : AIRY_ERR_PERMISSION_DENIED;
 }
 
-int tool_exec_gate_probe(tool_executor_t *exec, const tool_metadata_t *meta,
-                             const char *params_json, const char *agent_id, int allow_dangerous,
-                             uint64_t *out_timeout_ms)
+approval_gate_verdict_t tool_exec_gate_probe(tool_executor_t *exec, const tool_metadata_t *meta,
+                                             const char *params_json, const char *agent_id,
+                                             int allow_dangerous, uint64_t *out_timeout_ms)
 {
     return gate_probe(exec ? exec->gate : NULL, exec_caller(agent_id), meta, params_json,
                       allow_dangerous, out_timeout_ms);
