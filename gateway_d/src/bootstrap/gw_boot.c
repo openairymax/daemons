@@ -200,6 +200,10 @@ int gw_proto_wire(gw_proto_router_t *router, gateway_business_ctx_t *biz)
             gw_llm_set_call(llm_api, gw_biz_llm_complete, biz);
             /* LLM API: embeddings → llm_d.embeddings（RAG/知识库生态接入点） */
             gw_llm_set_embed(llm_api, gw_biz_llm_embeddings, biz);
+            /* GET /v1/models 与 chat/embeddings 共用同一默认模型解析结果，
+             * 避免模型清单与请求期 fallback 各写一份而漂移。 */
+            if (biz && biz->default_model[0])
+                gw_llm_set_model(llm_api, biz->default_model);
             SVC_LOG_INFO("Phase 2: LLM API adapter wired — chat/completions + embeddings → llm_d");
         }
 

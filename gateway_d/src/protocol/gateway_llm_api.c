@@ -104,6 +104,16 @@ int gw_llm_set_embed(gw_llm_api_t *api, gw_llm_embed_fn fn, void *user_data)
     return 0;
 }
 
+int gw_llm_set_model(gw_llm_api_t *api, const char *model)
+{
+    if (!api || !model)
+        return AIRY_ERR_INVALID_PARAM;
+    if (strlen(model) >= sizeof(api->config.default_model))
+        return AIRY_ERR_INVALID_PARAM;
+    snprintf(api->config.default_model, sizeof(api->config.default_model), "%s", model);
+    return 0;
+}
+
 static bool check_rate_limit(gw_llm_api_t *api)
 {
     bool allowed = false;

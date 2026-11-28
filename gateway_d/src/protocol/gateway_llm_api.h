@@ -49,6 +49,10 @@ int gw_llm_set_call(gw_llm_api_t *api, gw_llm_call_fn fn, void *user_data);
 
 int gw_llm_set_embed(gw_llm_api_t *api, gw_llm_embed_fn fn, void *user_data);
 
+/* GET /v1/models 的数据面：默认模型由 gateway_biz 解析后经本接口注入，
+ * 与 chat/embeddings 的 model 解析同源（svc_model_defaults_resolve）。 */
+int gw_llm_set_model(gw_llm_api_t *api, const char *model);
+
 gw_proto_request_handler_t gw_llm_get_handler(gw_llm_api_t *api);
 void *gw_llm_get_hdata(gw_llm_api_t *api);
 

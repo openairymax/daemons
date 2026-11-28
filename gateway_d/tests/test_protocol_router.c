@@ -14,6 +14,7 @@
  */
 
 #include "gateway_protocol_router.h"
+#include "gateway_llm_api.h"
 #include "http_gateway.h"
 
 #include <assert.h>
@@ -289,6 +290,41 @@ static void test_http_request_magic(void)
     printf("  >>> PASSED\n");
 }
 
+/**
+ * @brief Test scenario G: GET /v1/models 数据面（OpenAI 形状）
+ *
+ * 模型清单必须来自与 chat/embeddings 同一默认模型解析结果：注入后
+ * GET /v1/models 返回 {"object":"list","data":[{"id":...}]}，空配置时
+ * 返回空列表而非 404/-32601。
+ */
+static void test_llm_models_list(void)
+{
+    printf("\n--- Scenario G: GET /v1/models list ---\n");
+
+    gw_llm_api_config_t cfg = GW_LLM_API_CONFIG_DEFAULTS;
+    gw_llm_api_t *api = gw_llm_api_create(&cfg);
+    assert(api && "llm api create");
+    assert(gw_llm_api_init(api) == 0);
+
+    gw_proto_request_handler_t handler = gw_llm_get_handler(api);
+    void *hdata = gw_llm_get_hdata(api);
+    char *resp = NULL;
+
+    assert(handler("GET", "/v1/models", "", &resp, hdata) == 0);
+    assert(resp && strstr(resp, "\"data\":[]") && "empty model must yield empty list");
+    free(resp);
+
+    assert(gw_llm_set_model(api, "test-default-model") == 0);
+    resp = NULL;
+    assert(handler("GET", "/v1/models", "", &resp, hdata) == 0);
+    assert(resp && strstr(resp, "\"object\":\"list\""));
+    assert(strstr(resp, "test-default-model") && "list must expose resolved default model");
+    free(resp);
+
+    gw_llm_api_destroy(api);
+    printf("  >>> PASSED\n");
+}
+
 int main(void)
 {
     printf("\n=== Gateway Protocol Router Stats Tests ===\n");
@@ -301,6 +337,7 @@ int main(void)
     test_stats_mixed();
     test_detect_llm_api_by_path();
     test_http_request_magic();
+    test_llm_models_list();
 
     printf("\n=== All tests passed ===\n\n");
     return 0;
